@@ -5,7 +5,7 @@ import Modal from '../components/Modal'
 import formStyles from '../components/Form.module.css'
 
 // Тип вкладки довідника
-type Tab = 'products' | 'clients' | 'routes' | 'prices'
+type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'units' | 'categories'
 
 // ─── Головний компонент ──────────────────────────────────────────────────────
 
@@ -25,16 +25,18 @@ export default function AdminPage() {
     api.get<Product[]>('/products/?active_only=false').then(setProducts)
   }, [])
 
-  const reloadProducts = () =>
-    api.get<Product[]>('/products/?active_only=false').then(setProducts)
-  const reloadRoutes   = () =>
-    api.get<Route[]>('/routes/?active_only=false').then(setRoutes)
+  const reloadProducts   = () => api.get<Product[]>('/products/?active_only=false').then(setProducts)
+  const reloadRoutes     = () => api.get<Route[]>('/routes/?active_only=false').then(setRoutes)
+  const reloadUnits      = () => api.get<Unit[]>('/units').then(setUnits)
+  const reloadCategories = () => api.get<Category[]>('/categories').then(setCategories)
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'products', label: 'Вироби' },
-    { key: 'clients',  label: 'Клієнти' },
-    { key: 'routes',   label: 'Маршрути' },
-    { key: 'prices',   label: 'Ціни' },
+    { key: 'products',   label: 'Вироби' },
+    { key: 'clients',    label: 'Клієнти' },
+    { key: 'routes',     label: 'Маршрути' },
+    { key: 'prices',     label: 'Ціни' },
+    { key: 'units',      label: 'Одиниці виміру' },
+    { key: 'categories', label: 'Категорії' },
   ]
 
   return (
@@ -78,6 +80,26 @@ export default function AdminPage() {
       )}
       {tab === 'prices' && (
         <PricesTab products={products} categories={categories} />
+      )}
+      {tab === 'units' && (
+        <SimpleListTab
+          title="Одиниці виміру"
+          items={units}
+          addLabel="+ Додати одиницю"
+          placeholder="напр. буханка, шт, кг"
+          onAdd={(name) => api.post('/units', null, `name=${encodeURIComponent(name)}`).then(reloadUnits)}
+          onDelete={(id) => api.delete(`/units/${id}`).then(reloadUnits)}
+        />
+      )}
+      {tab === 'categories' && (
+        <SimpleListTab
+          title="Категорії"
+          items={categories}
+          addLabel="+ Додати категорію"
+          placeholder="напр. Хліб, Булки, Магазин"
+          onAdd={(name) => api.post('/categories', null, `name=${encodeURIComponent(name)}`).then(reloadCategories)}
+          onDelete={(id) => api.delete(`/categories/${id}`).then(reloadCategories)}
+        />
       )}
     </div>
   )
@@ -619,6 +641,83 @@ function PricesTab({ products, categories }: { products: Product[]; categories: 
           </form>
         </Modal>
       )}
+    </section>
+  )
+}
+
+// ─── Універсальна вкладка для простих довідників (одиниці, категорії) ────────
+
+interface SimpleItem { id: number; name: string }
+
+function SimpleListTab({
+  title, items, addLabel, placeholder, onAdd, onDelete,
+}: {
+  title: string
+  items: SimpleItem[]
+  addLabel: string
+  placeholder: string
+  onAdd: (name: string) => Promise<unknown>
+  onDelete: (id: number) => Promise<unknown>
+}) {
+  const [newName, setNewName] = useState('')
+  const [saving,  setSaving]  = useState(false)
+
+  const handleAdd = async () => {
+    const name = newName.trim()
+    if (!name) return
+    setSaving(true)
+    try { await onAdd(name); setNewName('') }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async (item: SimpleItem) => {
+    if (!confirm(`Видалити "${item.name}"?`)) return
+    await onDelete(item.id)
+  }
+
+  return (
+    <section>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+        <strong>{title} ({items.length})</strong>
+      </div>
+
+      {/* Форма додавання */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          placeholder={placeholder}
+          style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1, maxWidth: '260px' }}
+        />
+        <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>
+          {addLabel}
+        </button>
+      </div>
+
+      <table style={tableStyle}>
+        <thead>
+          <tr style={{ background: '#e8eef5' }}>
+            <Th>ID</Th><Th>Назва</Th><Th>Дії</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <Td>{item.id}</Td>
+              <Td>{item.name}</Td>
+              <Td>
+                <button onClick={() => handleDelete(item)} style={delBtnStyle}>Видалити</button>
+              </Td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr><td colSpan={3} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
+              Список порожній
+            </td></tr>
+          )}
+        </tbody>
+      </table>
     </section>
   )
 }

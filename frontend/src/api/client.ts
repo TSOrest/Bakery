@@ -21,8 +21,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body: unknown) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  // queryString — опціональні query-параметри вже у вигляді "key=val&..."
+  post: <T>(path: string, body: unknown, queryString?: string) =>
+    request<T>(queryString ? `${path}?${queryString}` : path, {
+      method: 'POST',
+      body: body !== null ? JSON.stringify(body) : undefined,
+    }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (path: string) => request<void>(path, { method: 'DELETE' }),
