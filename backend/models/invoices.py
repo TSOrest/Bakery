@@ -1,6 +1,6 @@
 """Моделі накладних."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -14,7 +14,7 @@ class Invoice(Base):
     route_id       = Column(Integer, ForeignKey("routes.id"))
     client_id      = Column(Integer, ForeignKey("clients.id"), nullable=False)
     status         = Column(Text, default="draft")
-    total_sum      = Column(Real, default=0)
+    total_sum      = Column(Float, default=0)
     notes          = Column(Text)
     created_at     = Column(Text)
 
@@ -29,12 +29,12 @@ class InvoiceLine(Base):
     id             = Column(Integer, primary_key=True, autoincrement=True)
     invoice_id     = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
     product_id     = Column(Integer, ForeignKey("products.id"), nullable=False)
-    qty            = Column(Real, nullable=False)
-    price          = Column(Real, nullable=False)
-    price_override = Column(Real)
+    qty            = Column(Float, nullable=False)
+    price          = Column(Float, nullable=False)
+    price_override = Column(Float)
     is_exchange    = Column(Integer, default=0)
     is_stale       = Column(Integer, default=0)
-    sum            = Column(Real, nullable=False)
+    sum            = Column(Float, nullable=False)
 
     invoice = relationship("Invoice", back_populates="lines")
     product = relationship("Product")

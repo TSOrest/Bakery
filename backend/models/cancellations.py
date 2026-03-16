@@ -1,6 +1,6 @@
 """Моделі скасування рейсів."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -25,9 +25,9 @@ class CancellationLine(Base):
     id                      = Column(Integer, primary_key=True, autoincrement=True)
     cancellation_id         = Column(Integer, ForeignKey("route_cancellations.id"), nullable=False)
     product_id              = Column(Integer, ForeignKey("products.id"), nullable=False)
-    qty                     = Column(Real, nullable=False)
+    qty                     = Column(Float, nullable=False)
     disposition             = Column(Text, nullable=False)  # to_shop | to_next_day | writeoff
-    next_day_price_override = Column(Real)
+    next_day_price_override = Column(Float)
 
     cancellation = relationship("RouteCancellation", back_populates="lines")
     product      = relationship("Product")

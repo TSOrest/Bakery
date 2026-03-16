@@ -1,6 +1,6 @@
 """Модель фінансових операцій."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -12,7 +12,7 @@ class Finance(Base):
     finance_date = Column(Text, nullable=False)
     client_id    = Column(Integer, ForeignKey("clients.id"))
     finance_type = Column(Text, nullable=False)
-    amount       = Column(Real, nullable=False)
+    amount       = Column(Float, nullable=False)
     sign         = Column(Integer, nullable=False)  # +1 або -1
     notes        = Column(Text)
     created_at   = Column(Text)

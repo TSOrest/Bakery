@@ -1,6 +1,6 @@
 """Моделі цін: базові ціни та індивідуальні ціни клієнтів."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -11,7 +11,7 @@ class Price(Base):
     id          = Column(Integer, primary_key=True, autoincrement=True)
     product_id  = Column(Integer, ForeignKey("products.id"), nullable=False)
     category_id = Column(Integer, ForeignKey("categories.id"))
-    price       = Column(Real, nullable=False)
+    price       = Column(Float, nullable=False)
     valid_from  = Column(Text, nullable=False)
     valid_to    = Column(Text)
     is_active   = Column(Integer, default=1)
@@ -29,7 +29,7 @@ class ClientPriceOverride(Base):
     id         = Column(Integer, primary_key=True, autoincrement=True)
     client_id  = Column(Integer, ForeignKey("clients.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
-    price      = Column(Real, nullable=False)
+    price      = Column(Float, nullable=False)
     valid_from = Column(Text, nullable=False)
     valid_to   = Column(Text)
 

@@ -1,6 +1,6 @@
 """Моделі магазину: щоденна звірка та надходження товарів групи ІНШЕ."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -13,12 +13,12 @@ class ShopCount(Base):
     count_date          = Column(Text, nullable=False)
     product_id          = Column(Integer, ForeignKey("products.id"), nullable=False)
     product_type        = Column(Text, default="bread")  # bread | stale | other
-    yesterday_balance   = Column(Real, default=0)
-    received_today      = Column(Real, default=0)
-    entered_balance     = Column(Real)
-    written_off_entered = Column(Real, default=0)
-    calculated_sold     = Column(Real)
-    price               = Column(Real)
+    yesterday_balance   = Column(Float, default=0)
+    received_today      = Column(Float, default=0)
+    entered_balance     = Column(Float)
+    written_off_entered = Column(Float, default=0)
+    calculated_sold     = Column(Float)
+    price               = Column(Float)
     saved               = Column(Integer, default=0)
 
     product = relationship("Product")
@@ -30,8 +30,8 @@ class OtherStockIn(Base):
     id               = Column(Integer, primary_key=True, autoincrement=True)
     stock_date       = Column(Text, nullable=False)
     other_product_id = Column(Integer, ForeignKey("other_products.id"), nullable=False)
-    qty              = Column(Real, nullable=False)
-    purchase_price   = Column(Real)
+    qty              = Column(Float, nullable=False)
+    purchase_price   = Column(Float)
     notes            = Column(Text)
     created_at       = Column(Text)
 

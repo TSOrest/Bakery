@@ -1,6 +1,6 @@
 """Моделі довідників: одиниці, категорії, вироби, інгредієнти, маршрути, клієнти."""
 
-from sqlalchemy import Column, Integer, Text, Real, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Text, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.database import Base
 
@@ -26,10 +26,10 @@ class Product(Base):
     name          = Column(Text, nullable=False)
     short_name    = Column(Text)
     type          = Column(Text, nullable=False)   # bread | bun | other
-    weight        = Column(Real)
+    weight        = Column(Float)
     unit_id       = Column(Integer, ForeignKey("units.id"))
     category_id   = Column(Integer, ForeignKey("categories.id"))
-    cost_per_unit = Column(Real, default=0)
+    cost_per_unit = Column(Float, default=0)
     is_active     = Column(Integer, default=1)
     created_at    = Column(Text)
 
@@ -44,7 +44,7 @@ class Ingredient(Base):
     id               = Column(Integer, primary_key=True, autoincrement=True)
     name             = Column(Text, nullable=False)
     unit_id          = Column(Integer, ForeignKey("units.id"))
-    price_per_unit   = Column(Real, default=0)
+    price_per_unit   = Column(Float, default=0)
     price_updated_at = Column(Text)
 
     unit = relationship("Unit")
@@ -57,7 +57,7 @@ class ProductIngredient(Base):
     id            = Column(Integer, primary_key=True, autoincrement=True)
     product_id    = Column(Integer, ForeignKey("products.id"), nullable=False)
     ingredient_id = Column(Integer, ForeignKey("ingredients.id"), nullable=False)
-    qty_per_unit  = Column(Real, nullable=False)
+    qty_per_unit  = Column(Float, nullable=False)
 
     product    = relationship("Product", back_populates="ingredients")
     ingredient = relationship("Ingredient")
@@ -69,8 +69,8 @@ class OtherProduct(Base):
     id             = Column(Integer, primary_key=True, autoincrement=True)
     name           = Column(Text, nullable=False)
     unit_id        = Column(Integer, ForeignKey("units.id"))
-    purchase_price = Column(Real, default=0)
-    sell_price     = Column(Real, default=0)
+    purchase_price = Column(Float, default=0)
+    sell_price     = Column(Float, default=0)
     is_active      = Column(Integer, default=1)
 
     unit = relationship("Unit")
@@ -98,7 +98,7 @@ class Client(Base):
     director     = Column(Text)
     accountant   = Column(Text)
     route_id     = Column(Integer, ForeignKey("routes.id"))
-    discount_pct = Column(Real, default=0)
+    discount_pct = Column(Float, default=0)
     is_active    = Column(Integer, default=1)
     created_at   = Column(Text)
 
