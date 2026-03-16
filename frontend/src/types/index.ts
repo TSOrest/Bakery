@@ -68,6 +68,17 @@ export interface BakingTask {
   baked_qty: number
 }
 
+export interface SurplusAllocation {
+  id: number
+  alloc_date: string
+  product_id: number
+  to_shop: number
+  to_route: number
+  ration_qty: number
+  written_off: number
+  notes: string | null
+}
+
 export interface InvoiceLine {
   id: number
   product_id: number
