@@ -4,13 +4,19 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from backend.database import Base, get_db
 from backend.main import app
 
-# Окрема in-memory БД для тестів
-TEST_DB = "sqlite:///:memory:"
-engine = create_engine(TEST_DB, connect_args={"check_same_thread": False})
+# Окрема in-memory БД для тестів.
+# StaticPool — всі підключення використовують ОДНЕ фізичне з'єднання,
+# тому таблиці створені через create_all() видні тестовому клієнту.
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base.metadata.create_all(bind=engine)
