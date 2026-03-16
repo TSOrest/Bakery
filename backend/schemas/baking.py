@@ -40,3 +40,23 @@ class SurplusAllocationOut(BaseModel):
     ration_qty: float
     written_off: float
     notes: Optional[str]
+
+
+class SurplusLineCreate(BaseModel):
+    alloc_date: str
+    product_id: int
+    recipient_type: str  # 'ration' | 'writeoff' | 'route' | 'client'
+    client_id: Optional[int] = None
+    qty: float
+    notes: Optional[str] = None
+
+
+class SurplusLineOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    alloc_date: str
+    product_id: int
+    recipient_type: str
+    client_id: Optional[int]
+    qty: float
+    notes: Optional[str]

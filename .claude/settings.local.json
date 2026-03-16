@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv venv)",
+      "Bash(source venv/Scripts/activate)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(source backend/venv/Scripts/activate)",
+      "Bash(python -c \":*)",
+      "Bash(curl -s http://127.0.0.1:8000/api/health)",
+      "Bash(python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s http://127.0.0.1:8000/api/v1/routes/)",
+      "Bash(curl -s http://127.0.0.1:8000/api/v1/products/)",
+      "Bash(curl -s \"http://127.0.0.1:8000/api/docs\" -o /dev/null -w \"docs status: %{http_code}\")",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(node -e \"require\\(''z:/Пекарня 2/frontend/node_modules/react''\\)\")",
+      "Bash(node -e \"const p = require\\(''z:/Пекарня 2/frontend/node_modules/react/package.json''\\); console.log\\(p.name, p.version, ''main:'', p.main, ''exports:'', !!p.exports\\)\")",
+      "Bash(node -p \"JSON.stringify\\(Object.keys\\(require\\(''''//localhost/Пекарня/Пекарня 2/frontend/node_modules/react/package.json''''\\)\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5173/)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/api/v1/routes/ -H \"Content-Type: application/json\" -d '{\"\"name\"\":\"\"Маршрут 1\"\",\"\"sort_order\"\":1}')",
+      "Bash(curl -sv -X POST \"http://127.0.0.1:8000/api/v1/routes/\" -H \"Content-Type: application/json\" -d \"{\"\"name\"\":\"\"Маршрут 1\"\",\"\"sort_order\"\":1}\")",
+      "Bash(curl -s -X POST \"http://127.0.0.1:8000/api/v1/routes/\" -H \"Content-Type: application/json\" --data-raw '{\"\"name\"\": \"\"test\"\", \"\"sort_order\"\": 0}')",
+      "Bash(python3 -c \":*)",
+      "Bash(pkill -f \"uvicorn backend.main\")",
+      "Bash(python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 32876 /F)",
+      "Bash(bash scripts/run_tests.sh)",
+      "Bash(python -m pytest tests/ -v)"
+    ]
+  }
+}

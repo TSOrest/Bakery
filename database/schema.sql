@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS surplus_allocations (
     UNIQUE(alloc_date, product_id)
 );
 
+CREATE TABLE IF NOT EXISTS surplus_allocation_lines (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    alloc_date     TEXT    NOT NULL,
+    product_id     INTEGER NOT NULL REFERENCES products(id),
+    recipient_type TEXT    NOT NULL CHECK(recipient_type IN ('ration','writeoff','route','client')),
+    client_id      INTEGER REFERENCES clients(id),
+    qty            REAL    NOT NULL,
+    notes          TEXT,
+    created_at     TEXT    DEFAULT (datetime('now'))
+);
+
 -- -------------------------------------------------------------
 -- НАКЛАДНІ
 -- -------------------------------------------------------------

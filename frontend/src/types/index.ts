@@ -79,6 +79,24 @@ export interface SurplusAllocation {
   notes: string | null
 }
 
+export interface SurplusAllocationLine {
+  id: number
+  alloc_date: string
+  product_id: number
+  recipient_type: 'ration' | 'writeoff' | 'route' | 'client'
+  client_id: number | null
+  qty: number
+  notes: string | null
+}
+
+export interface ShortageClientInfo {
+  order_id: number
+  client_id: number
+  client_name: string
+  route_name: string
+  ordered_qty: number
+}
+
 export interface InvoiceLine {
   id: number
   product_id: number

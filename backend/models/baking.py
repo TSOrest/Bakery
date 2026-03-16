@@ -20,6 +20,24 @@ class BakingTask(Base):
     product = relationship("Product")
 
 
+class SurplusAllocationLine(Base):
+    """Рядок розподілу надлишку: кому і скільки."""
+    __tablename__ = "surplus_allocation_lines"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    alloc_date     = Column(Text, nullable=False)
+    product_id     = Column(Integer, ForeignKey("products.id"), nullable=False)
+    # 'ration' | 'writeoff' | 'route' | 'client'
+    recipient_type = Column(Text, nullable=False)
+    client_id      = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    qty            = Column(Float, nullable=False)
+    notes          = Column(Text)
+    created_at     = Column(Text)
+
+    product = relationship("Product")
+    client  = relationship("Client")
+
+
 class SurplusAllocation(Base):
     __tablename__ = "surplus_allocations"
     __table_args__ = (UniqueConstraint("alloc_date", "product_id"),)
