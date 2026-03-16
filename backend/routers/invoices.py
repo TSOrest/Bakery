@@ -30,54 +30,6 @@ def list_invoices(
     return q.order_by(Invoice.invoice_number.desc()).all()
 
 
-@router.get("/{invoice_id}", response_model=InvoiceOut)
-def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    inv = db.get(Invoice, invoice_id)
-    if not inv:
-        raise HTTPException(status_code=404, detail="Накладну не знайдено")
-    return inv
-
-
-@router.post("/", response_model=InvoiceOut, status_code=201)
-def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
-    number = generate_invoice_number(db, data.invoice_date)
-
-    inv = Invoice(
-        invoice_number=number,
-        invoice_date=data.invoice_date,
-        client_id=data.client_id,
-        route_id=data.route_id,
-        notes=data.notes,
-        created_at=datetime.now().isoformat(),
-    )
-    db.add(inv)
-    db.flush()  # щоб отримати inv.id
-
-    total = 0.0
-    for line_data in data.lines:
-        # Ціна: override або автоматична
-        unit_price = line_data.price_override if line_data.price_override else line_data.price
-        line_sum = round(line_data.qty * unit_price, 2)
-        total += line_sum
-
-        line = InvoiceLine(
-            invoice_id=inv.id,
-            product_id=line_data.product_id,
-            qty=line_data.qty,
-            price=line_data.price,
-            price_override=line_data.price_override,
-            is_exchange=line_data.is_exchange,
-            is_stale=line_data.is_stale,
-            sum=line_sum,
-        )
-        db.add(line)
-
-    inv.total_sum = round(total, 2)
-    db.commit()
-    db.refresh(inv)
-    return inv
-
-
 @router.post("/generate-from-orders")
 def generate_from_orders(
     invoice_date: str,
@@ -102,7 +54,6 @@ def generate_from_orders(
     invoice_ids: list[int] = []
 
     for client in clients:
-        # Замовлення клієнта на дату
         orders = (
             db.query(Order)
             .filter(Order.client_id == client.id, Order.order_date == invoice_date)
@@ -112,7 +63,6 @@ def generate_from_orders(
             no_orders_count += 1
             continue
 
-        # Вже є накладна?
         existing = (
             db.query(Invoice)
             .filter(Invoice.client_id == client.id, Invoice.invoice_date == invoice_date)
@@ -159,6 +109,54 @@ def generate_from_orders(
         "no_orders": no_orders_count,
         "invoice_ids": invoice_ids,
     }
+
+
+@router.get("/{invoice_id}", response_model=InvoiceOut)
+def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    inv = db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+    return inv
+
+
+@router.post("/", response_model=InvoiceOut, status_code=201)
+def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
+    number = generate_invoice_number(db, data.invoice_date)
+
+    inv = Invoice(
+        invoice_number=number,
+        invoice_date=data.invoice_date,
+        client_id=data.client_id,
+        route_id=data.route_id,
+        notes=data.notes,
+        created_at=datetime.now().isoformat(),
+    )
+    db.add(inv)
+    db.flush()  # щоб отримати inv.id
+
+    total = 0.0
+    for line_data in data.lines:
+        # Ціна: override або автоматична
+        unit_price = line_data.price_override if line_data.price_override else line_data.price
+        line_sum = round(line_data.qty * unit_price, 2)
+        total += line_sum
+
+        line = InvoiceLine(
+            invoice_id=inv.id,
+            product_id=line_data.product_id,
+            qty=line_data.qty,
+            price=line_data.price,
+            price_override=line_data.price_override,
+            is_exchange=line_data.is_exchange,
+            is_stale=line_data.is_stale,
+            sum=line_sum,
+        )
+        db.add(line)
+
+    inv.total_sum = round(total, 2)
+    db.commit()
+    db.refresh(inv)
+    return inv
 
 
 @router.put("/{invoice_id}/status")
