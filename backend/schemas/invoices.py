@@ -1,8 +1,16 @@
 """Pydantic-схеми для накладних."""
 
 from __future__ import annotations
+from enum import Enum
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
+
+
+class InvoiceStatus(str, Enum):
+    draft     = "draft"
+    printed   = "printed"
+    delivered = "delivered"
+    cancelled = "cancelled"
 
 
 class InvoiceLineCreate(BaseModel):

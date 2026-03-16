@@ -1,8 +1,15 @@
 """Pydantic-схеми для довідників."""
 
 from __future__ import annotations
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, ConfigDict
+
+
+class ProductType(str, Enum):
+    bread = "bread"
+    bun   = "bun"
+    other = "other"
 
 
 # --- Units ---
@@ -24,9 +31,10 @@ class CategoryOut(BaseModel):
 # --- Products ---
 
 class ProductCreate(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     name: str
     short_name: Optional[str] = None
-    type: str                       # bread | bun | other
+    type: ProductType
     weight: Optional[float] = None
     unit_id: Optional[int] = None
     category_id: Optional[int] = None
@@ -34,9 +42,10 @@ class ProductCreate(BaseModel):
 
 
 class ProductUpdate(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     name: Optional[str] = None
     short_name: Optional[str] = None
-    type: Optional[str] = None
+    type: Optional[ProductType] = None
     weight: Optional[float] = None
     unit_id: Optional[int] = None
     category_id: Optional[int] = None

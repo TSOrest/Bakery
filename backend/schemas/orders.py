@@ -1,17 +1,36 @@
 """Pydantic-схеми для замовлень."""
 
 from __future__ import annotations
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
+class OrderSource(str, Enum):
+    phone = "phone"
+    paper = "paper"
+
+
+class ExchangeType(str, Enum):
+    none          = "none"
+    pre_order     = "pre_order"
+    post_delivery = "post_delivery"
+
+
+class OrderStatus(str, Enum):
+    draft     = "draft"
+    confirmed = "confirmed"
+    closed    = "closed"
+
+
 class OrderCreate(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     client_id: int
     product_id: int
     qty: float
-    order_date: str                     # YYYY-MM-DD
-    source: str = "phone"
-    exchange_type: str = "none"
+    order_date: str                         # YYYY-MM-DD
+    source: OrderSource = OrderSource.phone
+    exchange_type: ExchangeType = ExchangeType.none
     exchange_qty: float = 0
     exchange_price: Optional[float] = None
     exchange_notes: Optional[str] = None
@@ -20,9 +39,10 @@ class OrderCreate(BaseModel):
 
 
 class OrderUpdate(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     qty: Optional[float] = None
-    status: Optional[str] = None
-    exchange_type: Optional[str] = None
+    status: Optional[OrderStatus] = None
+    exchange_type: Optional[ExchangeType] = None
     exchange_qty: Optional[float] = None
     exchange_price: Optional[float] = None
     exchange_notes: Optional[str] = None
