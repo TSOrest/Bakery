@@ -494,3 +494,9 @@ INSERT INTO settings VALUES
 - React: TypeScript, функціональні компоненти, hooks
 - SQL: явні назви полів, без `SELECT *`
 - Коментарі: українською де пояснюється бізнес-логіка
+
+## Git workflow
+- Після кожної завершеної функції: commit + push на main
+- Commit message формат: `feat: назва функції` / `fix: опис`  
+- Перед push — запустити pytest (backend) і npm run build (frontend)
+- Гілки: main (стабільний), dev (розробка), feature/* (фічі)
