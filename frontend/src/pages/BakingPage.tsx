@@ -300,7 +300,9 @@ export default function BakingPage() {
   const [showRec,      setShowRec]      = useState(false)  // показувати "Рекомендовано"
 
   const bakedTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
-  const [bakedMap, setBakedMap] = useState<Record<number, number>>({})
+  const [bakedMap,  setBakedMap]  = useState<Record<number, number>>({})
+  // Множина task.id де оператор явно ввів значення (навіть 0)
+  const [enteredIds, setEnteredIds] = useState<Set<number>>(new Set())
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -337,6 +339,7 @@ export default function BakingPage() {
 
   const handleBakedChange = (task: BakingTask, value: number) => {
     setBakedMap((prev) => ({ ...prev, [task.id]: value }))
+    setEnteredIds((prev) => new Set(prev).add(task.id))
     if (bakedTimers.current[task.id]) clearTimeout(bakedTimers.current[task.id])
     bakedTimers.current[task.id] = setTimeout(async () => {
       const updated = await api.put<BakingTask>(`/baking/tasks/${task.id}`, { baked_qty: value })
@@ -367,9 +370,10 @@ export default function BakingPage() {
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
   const withSurplus  = tasks.filter((t) => (bakedMap[t.id] ?? t.baked_qty) > t.ordered_qty)
+  // Нестача: оператор явно ввів значення (enteredIds) І спечено < замовлено
   const withShortage = tasks.filter((t) => {
-    const b = bakedMap[t.id] ?? t.baked_qty
-    return b > 0 && b < t.ordered_qty
+    if (!enteredIds.has(t.id)) return false
+    return (bakedMap[t.id] ?? t.baked_qty) < t.ordered_qty
   })
 
   const groups = [
