@@ -1,0 +1,64 @@
+"""Сервіс замовлень: копіювання, агрегація для випічки."""
+
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from backend.models.orders import Order
+
+
+def copy_orders(
+    db: Session,
+    source_date: str,
+    target_date: str,
+    client_ids: Optional[List[int]] = None,
+) -> int:
+    """
+    Копіює замовлення з source_date на target_date.
+    Якщо client_ids=None — копіює всіх клієнтів.
+    Повертає кількість створених замовлень.
+    """
+    query = db.query(Order).filter(Order.order_date == source_date)
+    if client_ids:
+        query = query.filter(Order.client_id.in_(client_ids))
+
+    source_orders = query.all()
+    created = 0
+
+    for src in source_orders:
+        # Перевіряємо чи вже є замовлення на цю дату
+        exists = db.query(Order).filter(
+            Order.client_id == src.client_id,
+            Order.product_id == src.product_id,
+            Order.order_date == target_date,
+        ).first()
+
+        if exists:
+            continue
+
+        new_order = Order(
+            client_id=src.client_id,
+            product_id=src.product_id,
+            qty=src.qty,
+            order_date=target_date,
+            status="draft",
+            source=src.source,
+            # Обмін не копіюємо — це одноразова операція
+        )
+        db.add(new_order)
+        created += 1
+
+    db.commit()
+    return created
+
+
+def aggregate_for_baking(db: Session, date: str) -> List[dict]:
+    """
+    Агрегує підтверджені замовлення по продуктах для завдання пекарям.
+    """
+    from sqlalchemy import func
+    rows = (
+        db.query(Order.product_id, func.sum(Order.qty).label("total_qty"))
+        .filter(Order.order_date == date, Order.status.in_(["confirmed", "draft"]))
+        .group_by(Order.product_id)
+        .all()
+    )
+    return [{"product_id": r.product_id, "ordered_qty": r.total_qty} for r in rows]
