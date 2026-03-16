@@ -1,0 +1,218 @@
+/* Вкладка Замовлення */
+
+.page {
+  padding: 1rem 1.5rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #1a3a5c;
+}
+
+/* ─── Панель копіювання ──────────────────────────────────────── */
+
+.copyPanel {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #f0f5fa;
+  border: 1px solid #c5d8ed;
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+.dateInput {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.copyResult {
+  color: #1a5c3a;
+  font-weight: 600;
+}
+
+/* ─── Маршрут ────────────────────────────────────────────────── */
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.routeTitle {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #1a3a5c;
+  border-bottom: 2px solid #1a3a5c;
+  padding-bottom: 0.25rem;
+}
+
+/* ─── Таблиця ────────────────────────────────────────────────── */
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 0.9rem;
+}
+
+.table thead tr {
+  background: #e8eef5;
+}
+
+.thClient {
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 140px;
+  border-bottom: 2px solid #c5d8ed;
+}
+
+.thProduct {
+  padding: 0.4rem 0.5rem;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 72px;
+  border-bottom: 2px solid #c5d8ed;
+}
+
+.thSum {
+  padding: 0.4rem 0.6rem;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 60px;
+  border-bottom: 2px solid #c5d8ed;
+  color: #555;
+}
+
+.row:hover {
+  background: #fafcff;
+}
+
+.tdClient {
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid #e8e8e8;
+  white-space: nowrap;
+}
+
+.tdQty {
+  padding: 0.2rem 0.3rem;
+  border-bottom: 1px solid #e8e8e8;
+  text-align: center;
+}
+
+.tdSum {
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid #e8e8e8;
+  text-align: center;
+  color: #555;
+  font-size: 0.85rem;
+}
+
+/* ─── Поле введення кількості ────────────────────────────────── */
+
+.qtyInput {
+  width: 60px;
+  text-align: center;
+  padding: 0.25rem 0.2rem;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.qtyInput:focus {
+  border-color: #1a3a5c;
+  background: #f0f5ff;
+}
+
+/* Стан збереження */
+.saving {
+  border-color: #f5a623;
+  background: #fff9f0;
+}
+.saved {
+  border-color: #27ae60;
+  background: #f0fff5;
+}
+.error {
+  border-color: #e74c3c;
+  background: #fff5f5;
+}
+
+/* ─── Підсумки ───────────────────────────────────────────────── */
+
+.footerRow {
+  background: #f5f8fb;
+}
+
+.footerRow td {
+  padding: 0.35rem 0.3rem;
+  border-top: 2px solid #c5d8ed;
+  font-size: 0.88rem;
+}
+
+.grandTotal {
+  margin-top: 0.5rem;
+}
+
+.grandRow td {
+  padding: 0.4rem 0.3rem;
+  background: #e8eef5;
+  border-top: 2px solid #1a3a5c;
+}
+
+/* ─── Кнопки ─────────────────────────────────────────────────── */
+
+.btnCopy {
+  padding: 0.4rem 1rem;
+  background: #fff;
+  color: #1a3a5c;
+  border: 1px solid #1a3a5c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.btnCopy:hover { background: #e8eef5; }
+
+.btnPrimary {
+  padding: 0.35rem 0.9rem;
+  background: #1a3a5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.btnPrimary:hover { background: #142d48; }
+.btnPrimary:disabled { opacity: 0.5; cursor: default; }
+
+.btnSecondary {
+  padding: 0.35rem 0.8rem;
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.btnSecondary:hover { background: #f5f5f5; }
