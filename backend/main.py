@@ -8,33 +8,78 @@ import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
-    auth, cancellations,
+    auth, cancellations, settings,
 )
 
 # Ініціалізуємо таблиці (якщо не існують)
 Base.metadata.create_all(bind=engine)
 
 
-def _seed_default_admin() -> None:
-    """Створює дефолтного адміна admin/admin якщо користувачів ще немає."""
-    import hashlib, secrets
+DEFAULT_ROLE_PERMISSIONS = {
+    "operator":   ["orders", "baking", "routes", "shop"],
+    "accountant": ["orders", "finances"],
+    "admin":      ["orders", "baking", "routes", "shop", "finances", "admin"],
+    "owner":      ["orders"],
+}
+
+DEFAULT_USERS = [
+    ("admin",       "admin",       "Адміністратор", "admin"),
+    ("operator",    "operator",    "Оператор",      "operator"),
+    ("accountant",  "accountant",  "Бухгалтер",     "accountant"),
+    ("owner",       "owner",       "Власник",       "owner"),
+]
+
+DEFAULT_SETTINGS = {
+    "bakery_name":           ("Пекарня",        "Назва пекарні"),
+    "director":              ("",               "ПІБ директора"),
+    "accountant_name":       ("",               "ПІБ бухгалтера"),
+    "address":               ("",               "Адреса пекарні"),
+    "city":                  ("",               "Місто"),
+    "phone":                 ("",               "Телефон"),
+    "edrpou":                ("",               "Код ЄДРПОУ"),
+    "iban":                  ("",               "IBAN рахунок"),
+    "bank":                  ("",               "Банк"),
+    "bun_reserve_pct":       ("5",              "Резерв для булок, %"),
+    "bread_reserve_pct":     ("5",              "Резерв для хліба, %"),
+    "order_lock_time":       ("22:00",          "Час блокування замовлень"),
+    "role_permissions":      ("",               "Права ролей (JSON)"),
+}
+
+
+def _seed_initial_data() -> None:
+    """Заповнює початкові дані якщо БД порожня."""
+    import hashlib, secrets, json
+    from datetime import datetime as dt
     from sqlalchemy.orm import Session as OrmSession
     from backend.models.auth import User
+    from backend.models.settings import Setting
+
     with OrmSession(engine) as db:
+        # Налаштування
+        for key, (value, desc) in DEFAULT_SETTINGS.items():
+            if not db.get(Setting, key):
+                db.add(Setting(key=key, value=value, description=desc,
+                               updated_at=dt.now().isoformat()))
+        # Права ролей
+        perm_row = db.get(Setting, "role_permissions")
+        if perm_row and not perm_row.value:
+            perm_row.value = json.dumps(DEFAULT_ROLE_PERMISSIONS, ensure_ascii=False)
+
+        # Користувачі
         if db.query(User).count() == 0:
-            salt = secrets.token_hex(16)
-            password_hash = hashlib.sha256(f"{salt}admin".encode()).hexdigest()
-            db.add(User(
-                username="admin",
-                password_hash=password_hash,
-                salt=salt,
-                full_name="Адміністратор",
-                role="admin",
-            ))
-            db.commit()
+            for username, password, full_name, role in DEFAULT_USERS:
+                salt = secrets.token_hex(16)
+                db.add(User(
+                    username=username,
+                    password_hash=hashlib.sha256(f"{salt}{password}".encode()).hexdigest(),
+                    salt=salt,
+                    full_name=full_name,
+                    role=role,
+                ))
+        db.commit()
 
 
-_seed_default_admin()
+_seed_initial_data()
 
 app = FastAPI(
     title="Пекарня API",
@@ -67,6 +112,7 @@ app.include_router(shop.router,          prefix=PREFIX)
 app.include_router(print_views.router,   prefix=PREFIX)
 app.include_router(auth.router,          prefix=PREFIX)
 app.include_router(cancellations.router, prefix=PREFIX)
+app.include_router(settings.router,      prefix=PREFIX)
 
 
 @app.get("/api/health")

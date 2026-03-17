@@ -5,20 +5,28 @@ import styles from './Layout.module.css'
 
 export default function Layout() {
   const { workDate, setWorkDate } = useWorkDate()
-  const { user, logout } = useAuth()
-
+  const { user, logout, permissions } = useAuth()
   const role = user?.role ?? 'operator'
 
-  const TABS = [
-    { path: '/orders',   label: 'Замовлення', roles: ['operator', 'accountant', 'admin', 'owner'] },
-    { path: '/baking',   label: 'Випічка',    roles: ['operator', 'admin'] },
-    { path: '/routes',   label: 'Маршрути',   roles: ['operator', 'admin'] },
-    { path: '/shop',     label: 'Магазин',    roles: ['operator', 'admin'] },
-    { path: '/finances', label: 'Фінанси',    roles: ['accountant', 'admin'] },
-    { path: '/admin',    label: 'Довідники',  roles: ['admin'] },
+  // Усі вкладки з ключем що відповідає role_permissions
+  const ALL_TABS = [
+    { path: '/orders',   label: 'Замовлення', key: 'orders'   },
+    { path: '/baking',   label: 'Випічка',    key: 'baking'   },
+    { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
+    { path: '/shop',     label: 'Магазин',    key: 'shop'     },
+    { path: '/finances', label: 'Фінанси',    key: 'finances' },
+    { path: '/admin',    label: 'Довідники',  key: 'admin'    },
   ]
 
-  const visibleTabs = TABS.filter((t) => t.roles.includes(role))
+  // Якщо дозволи завантажені — фільтруємо за ними, інакше fallback
+  const FALLBACK: Record<string, string[]> = {
+    operator:   ['orders', 'baking', 'routes', 'shop'],
+    accountant: ['orders', 'finances'],
+    admin:      ['orders', 'baking', 'routes', 'shop', 'finances', 'admin'],
+    owner:      ['orders'],
+  }
+  const allowed = (permissions[role] ?? FALLBACK[role] ?? []) as string[]
+  const visibleTabs = ALL_TABS.filter((t) => allowed.includes(t.key))
 
   return (
     <div className={styles.root}>

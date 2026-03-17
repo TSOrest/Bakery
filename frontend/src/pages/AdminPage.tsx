@@ -4,13 +4,15 @@ import type { Client, Product, Route, Unit, Category, Price } from '../types'
 import Modal from '../components/Modal'
 import formStyles from '../components/Form.module.css'
 import UsersTab from './UsersTab'
+import { useAuth } from '../context/AuthContext'
 
 // Тип вкладки довідника
-type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'units' | 'categories' | 'users'
+type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'units' | 'categories' | 'users' | 'settings' | 'permissions'
 
 // ─── Головний компонент ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
+  const { reloadPermissions } = useAuth()
   const [tab, setTab] = useState<Tab>('products')
 
   // Спільні довідники, потрібні у кількох формах
@@ -38,7 +40,9 @@ export default function AdminPage() {
     { key: 'prices',     label: 'Ціни' },
     { key: 'units',      label: 'Одиниці виміру' },
     { key: 'categories', label: 'Категорії' },
-    { key: 'users',      label: 'Користувачі' },
+    { key: 'users',       label: 'Користувачі' },
+    { key: 'settings',    label: 'Налаштування' },
+    { key: 'permissions', label: 'Права ролей' },
   ]
 
   return (
@@ -103,7 +107,9 @@ export default function AdminPage() {
           onUpdate={(id, patch) => api.put(`/categories/${id}`, patch).then(reloadCategories)}
         />
       )}
-      {tab === 'users' && <UsersTab />}
+      {tab === 'users'       && <UsersTab />}
+      {tab === 'settings'    && <SettingsTab />}
+      {tab === 'permissions' && <RolePermissionsTab onSaved={reloadPermissions} />}
     </div>
   )
 }
@@ -821,4 +827,211 @@ const delBtnStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: '0.8rem',
   color: '#c00',
+}
+
+// ─── Налаштування ─────────────────────────────────────────────────────────────
+
+interface SettingEntry { value: string; description: string }
+type SettingsMap = Record<string, SettingEntry>
+
+const SETTINGS_LABELS: Record<string, string> = {
+  bakery_name:       'Назва пекарні',
+  director:          'ПІБ директора',
+  accountant_name:   'ПІБ бухгалтера',
+  address:           'Адреса',
+  city:              'Місто',
+  phone:             'Телефон',
+  edrpou:            'Код ЄДРПОУ',
+  iban:              'IBAN рахунок',
+  bank:              'Банк',
+  bun_reserve_pct:   'Резерв булок, %',
+  bread_reserve_pct: 'Резерв хліба, %',
+  order_lock_time:   'Час блокування замовлень',
+}
+
+function SettingsTab() {
+  const [settings, setSettings] = useState<SettingsMap>({})
+  const [form,     setForm]     = useState<Record<string, string>>({})
+  const [saving,   setSaving]   = useState(false)
+  const [saved,    setSaved]    = useState(false)
+
+  const load = () =>
+    api.get<SettingsMap>('/settings/').then((data) => {
+      setSettings(data)
+      const vals: Record<string, string> = {}
+      Object.entries(SETTINGS_LABELS).forEach(([k]) => {
+        vals[k] = data[k]?.value ?? ''
+      })
+      setForm(vals)
+    })
+
+  useEffect(() => { load() }, [])
+
+  const handleSave = async (e: FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setSaved(false)
+    try {
+      // Зберігаємо кожне поле окремо (PUT /settings/{key})
+      await Promise.all(
+        Object.entries(form).map(([key, value]) =>
+          api.put(`/settings/${key}`, { value, description: settings[key]?.description ?? '' })
+        )
+      )
+      setSaved(true)
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fieldStyle: React.CSSProperties = {
+    display: 'flex', flexDirection: 'column', gap: '0.25rem', marginBottom: '0.85rem',
+  }
+  const labelStyle: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 500, color: '#444' }
+  const inputStyle: React.CSSProperties = {
+    padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px',
+    fontSize: '0.9rem', maxWidth: '420px',
+  }
+
+  return (
+    <section>
+      <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Параметри пекарні</h3>
+      <form onSubmit={handleSave}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 2rem', maxWidth: '860px' }}>
+          {Object.entries(SETTINGS_LABELS).map(([key, label]) => (
+            <div key={key} style={fieldStyle}>
+              <label style={labelStyle}>{label}</label>
+              <input
+                style={inputStyle}
+                value={form[key] ?? ''}
+                onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
+          <button type="submit" disabled={saving} style={addBtnStyle}>
+            {saving ? 'Збереження...' : 'Зберегти'}
+          </button>
+          {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
+        </div>
+      </form>
+    </section>
+  )
+}
+
+// ─── Права ролей ──────────────────────────────────────────────────────────────
+
+const PERMISSION_TABS = [
+  { key: 'orders',   label: 'Замовлення' },
+  { key: 'baking',   label: 'Випічка' },
+  { key: 'routes',   label: 'Маршрути' },
+  { key: 'shop',     label: 'Магазин' },
+  { key: 'finances', label: 'Фінанси' },
+  { key: 'admin',    label: 'Довідники' },
+]
+
+const ALL_ROLES = ['operator', 'accountant', 'admin', 'owner'] as const
+const ROLE_LABELS_MAP: Record<string, string> = {
+  operator:   'Оператор',
+  accountant: 'Бухгалтер',
+  admin:      'Адміністратор',
+  owner:      'Власник',
+}
+
+function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
+  // perms[role] = Set<tabKey>
+  const [perms,  setPerms]  = useState<Record<string, Set<string>>>({})
+  const [saving, setSaving] = useState(false)
+  const [saved,  setSaved]  = useState(false)
+
+  const load = () =>
+    api.get<Record<string, { value: string }>>('/settings/').then((data) => {
+      try {
+        const raw: Record<string, string[]> = JSON.parse(data.role_permissions?.value ?? '{}')
+        const map: Record<string, Set<string>> = {}
+        ALL_ROLES.forEach((r) => { map[r] = new Set(raw[r] ?? []) })
+        setPerms(map)
+      } catch { /* ignore */ }
+    })
+
+  useEffect(() => { load() }, [])
+
+  const toggle = (role: string, key: string) => {
+    setPerms((prev) => {
+      const next = { ...prev, [role]: new Set(prev[role]) }
+      if (next[role].has(key)) next[role].delete(key)
+      else next[role].add(key)
+      return next
+    })
+    setSaved(false)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const json: Record<string, string[]> = {}
+      ALL_ROLES.forEach((r) => { json[r] = Array.from(perms[r] ?? []) })
+      await api.put('/settings/role_permissions', { value: JSON.stringify(json) })
+      setSaved(true)
+      await onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const thStyle: React.CSSProperties = {
+    padding: '0.5rem 0.85rem', textAlign: 'center', fontWeight: 600,
+    fontSize: '0.875rem', background: '#e8eef5',
+  }
+  const tdStyle: React.CSSProperties = {
+    padding: '0.45rem 0.85rem', textAlign: 'center',
+    borderBottom: '1px solid #f0f0f0',
+  }
+
+  return (
+    <section>
+      <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Доступ ролей до вкладок</h3>
+      <table style={{ ...tableStyle, maxWidth: '640px' }}>
+        <thead>
+          <tr>
+            <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
+            {PERMISSION_TABS.map((t) => (
+              <th key={t.key} style={thStyle}>{t.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {ALL_ROLES.map((role) => (
+            <tr key={role}>
+              <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500 }}>
+                {ROLE_LABELS_MAP[role]}
+              </td>
+              {PERMISSION_TABS.map((t) => (
+                <td key={t.key} style={tdStyle}>
+                  <input
+                    type="checkbox"
+                    checked={perms[role]?.has(t.key) ?? false}
+                    onChange={() => toggle(role, t.key)}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1rem' }}>
+        <button onClick={handleSave} disabled={saving} style={addBtnStyle}>
+          {saving ? 'Збереження...' : 'Зберегти права'}
+        </button>
+        {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
+      </div>
+      <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.75rem' }}>
+        Зміни набудуть чинності після наступного входу в систему.
+      </p>
+    </section>
+  )
 }

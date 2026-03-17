@@ -8,12 +8,17 @@ export interface AuthUser {
   role_label: string
 }
 
+// key = role, value = list of page keys (orders, baking, routes, shop, finances, admin)
+export type RolePermissions = Record<string, string[]>
+
 interface AuthContextValue {
-  user:    AuthUser | null
-  token:   string | null
-  login:   (username: string, password: string) => Promise<void>
-  logout:  () => Promise<void>
-  loading: boolean
+  user:        AuthUser | null
+  token:       string | null
+  permissions: RolePermissions
+  login:       (username: string, password: string) => Promise<void>
+  logout:      () => Promise<void>
+  reloadPermissions: () => Promise<void>
+  loading:     boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -22,9 +27,20 @@ const TOKEN_KEY = 'bakery_token'
 const BASE = '/api/v1'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user,    setUser]    = useState<AuthUser | null>(null)
-  const [token,   setToken]   = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
-  const [loading, setLoading] = useState(true)
+  const [user,        setUser]        = useState<AuthUser | null>(null)
+  const [token,       setToken]       = useState<string | null>(() => localStorage.getItem(TOKEN_KEY))
+  const [permissions, setPermissions] = useState<RolePermissions>({})
+  const [loading,     setLoading]     = useState(true)
+
+  const fetchPermissions = async (t: string) => {
+    try {
+      const res = await fetch(`${BASE}/settings/`, { headers: { Authorization: `Bearer ${t}` } })
+      if (!res.ok) return
+      const data = await res.json()
+      const raw = data.role_permissions?.value
+      if (raw) setPermissions(JSON.parse(raw))
+    } catch { /* ігноруємо */ }
+  }
 
   // Відновлення сесії при завантаженні
   useEffect(() => {
@@ -40,9 +56,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error('invalid token')
         return res.json()
       })
-      .then((u: AuthUser) => {
+      .then(async (u: AuthUser) => {
         setUser(u)
         setToken(savedToken)
+        await fetchPermissions(savedToken)
       })
       .catch(() => {
         localStorage.removeItem(TOKEN_KEY)
@@ -65,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(TOKEN_KEY, data.token)
     setToken(data.token)
     setUser(data.user)
+    await fetchPermissions(data.token)
   }
 
   const logout = async () => {
@@ -78,10 +96,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setUser(null)
+    setPermissions({})
+  }
+
+  const reloadPermissions = async () => {
+    const t = localStorage.getItem(TOKEN_KEY)
+    if (t) await fetchPermissions(t)
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, permissions, login, logout, reloadPermissions, loading }}>
       {children}
     </AuthContext.Provider>
   )

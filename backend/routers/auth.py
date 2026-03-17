@@ -98,6 +98,21 @@ class UserUpdate(BaseModel):
 
 # ─── Ендпоінти ───────────────────────────────────────────────────────────────
 
+@router.get("/users/public")
+def list_users_public(db: Session = Depends(get_db)):
+    """Публічний список активних користувачів для екрану входу (без паролів)."""
+    return [
+        {
+            "id":         u.id,
+            "username":   u.username,
+            "full_name":  u.full_name,
+            "role":       u.role,
+            "role_label": ROLE_LABELS.get(u.role, u.role),
+        }
+        for u in db.query(User).filter(User.is_active == 1).order_by(User.id).all()
+    ]
+
+
 @router.post("/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
     user = (
