@@ -166,6 +166,34 @@ export interface Price {
   is_active: number
 }
 
+export interface Ingredient {
+  id: number
+  name: string
+  unit_id: number | null
+  price_per_unit: number
+  price_updated_at: string | null
+}
+
+export interface ProductIngredient {
+  id: number
+  product_id: number
+  ingredient_id: number
+  qty_per_unit: number
+  ingredient_name: string
+  unit_name: string
+  price_per_unit: number
+  line_cost: number
+}
+
+export interface MarginRow {
+  product_id: number
+  product_name: string
+  cost_per_unit: number
+  price: number
+  margin_grn: number
+  margin_pct: number
+}
+
 export interface ClientPriceOverride {
   id: number
   client_id: number
