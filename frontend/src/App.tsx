@@ -24,7 +24,7 @@ function AppRoutes() {
 
   if (!user) return <LoginPage />
 
-  // Власник бачить тільки свій дашборд (без основного лейауту)
+  // Власник бачить тільки дашборд (без основного лейауту і меню)
   if (user.role === 'owner') {
     return (
       <BrowserRouter>
@@ -40,7 +40,9 @@ function AppRoutes() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/orders" replace />} />
+            {/* Дашборд — головна сторінка для всіх ролей */}
+            <Route index element={<OwnerDashboard />} />
+            <Route path="dashboard" element={<OwnerDashboard />} />
             <Route path="orders"   element={<OrdersPage />} />
             <Route path="baking"   element={<BakingPage />} />
             <Route path="routes"   element={<RoutesPage />} />
@@ -51,7 +53,7 @@ function AppRoutes() {
             {user.role === 'admin' && (
               <Route path="admin" element={<AdminPage />} />
             )}
-            <Route path="*" element={<Navigate to="/orders" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>

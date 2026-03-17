@@ -10,6 +10,7 @@ export default function Layout() {
 
   // Усі вкладки з ключем що відповідає role_permissions
   const ALL_TABS = [
+    { path: '/',         label: 'Дашборд',    key: 'dashboard', exact: true },
     { path: '/orders',   label: 'Замовлення', key: 'orders'   },
     { path: '/baking',   label: 'Випічка',    key: 'baking'   },
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
@@ -18,14 +19,17 @@ export default function Layout() {
     { path: '/admin',    label: 'Довідники',  key: 'admin'    },
   ]
 
-  // Якщо дозволи завантажені — фільтруємо за ними, інакше fallback
+  // Адмін завжди має всі права — ігноруємо permissions для нього
+  const ADMIN_KEYS = ALL_TABS.map(t => t.key)
   const FALLBACK: Record<string, string[]> = {
-    operator:   ['orders', 'baking', 'routes', 'shop'],
-    accountant: ['orders', 'finances'],
-    admin:      ['orders', 'baking', 'routes', 'shop', 'finances', 'admin'],
-    owner:      ['orders'],
+    operator:   ['dashboard', 'orders', 'baking', 'routes', 'shop'],
+    accountant: ['dashboard', 'orders', 'finances'],
+    admin:      ADMIN_KEYS,
+    owner:      ['dashboard'],
   }
-  const allowed = (permissions[role] ?? FALLBACK[role] ?? []) as string[]
+  const allowed = role === 'admin'
+    ? ADMIN_KEYS
+    : (permissions[role] ?? FALLBACK[role] ?? []) as string[]
   const visibleTabs = ALL_TABS.filter((t) => allowed.includes(t.key))
 
   return (

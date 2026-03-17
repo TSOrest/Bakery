@@ -5,6 +5,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import styles from './OwnerDashboard.module.css'
 
 interface DashboardData {
@@ -69,6 +70,7 @@ function StatRow({ label, value, sub, color }: { label: string; value: string; s
 }
 
 export default function OwnerDashboard() {
+  const { user, logout } = useAuth()
   const [data, setData]       = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -112,6 +114,11 @@ export default function OwnerDashboard() {
           <span>{data.date}</span>
           <span>↻ {lastUpdate}</span>
           <button onClick={load} className={styles.refreshBtn}>Оновити</button>
+          {user && (
+            <button onClick={logout} className={styles.refreshBtn} style={{ opacity: 0.7 }}>
+              Вийти
+            </button>
+          )}
         </div>
       </div>
 

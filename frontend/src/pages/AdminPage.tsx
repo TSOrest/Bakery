@@ -1346,23 +1346,31 @@ function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
           </tr>
         </thead>
         <tbody>
-          {ALL_ROLES.map((role) => (
-            <tr key={role}>
-              <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500 }}>
-                {ROLE_LABELS_MAP[role]}
-              </td>
-              {PERMISSION_TABS.map((t) => (
-                <td key={t.key} style={tdStyle}>
-                  <input
-                    type="checkbox"
-                    checked={perms[role]?.has(t.key) ?? false}
-                    onChange={() => toggle(role, t.key)}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                  />
+          {ALL_ROLES.map((role) => {
+            const isAdmin = role === 'admin'
+            return (
+              <tr key={role} style={isAdmin ? { background: '#f0f4f8' } : undefined}>
+                <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500 }}>
+                  {ROLE_LABELS_MAP[role]}
+                  {isAdmin && <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>(завжди всі)</span>}
                 </td>
-              ))}
-            </tr>
-          ))}
+                {PERMISSION_TABS.map((t) => (
+                  <td key={t.key} style={tdStyle}>
+                    {isAdmin ? (
+                      <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={perms[role]?.has(t.key) ?? false}
+                        onChange={() => toggle(role, t.key)}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      />
+                    )}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1rem' }}>
