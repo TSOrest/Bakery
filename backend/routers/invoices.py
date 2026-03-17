@@ -213,6 +213,12 @@ def process_return(
             db.add(stale)
 
     inv.status = "delivered"
+    db.flush()
+
+    # Автоматично створюємо фінансовий запис
+    from backend.services.finance import create_invoice_finance_entry
+    create_invoice_finance_entry(db, inv)
+
     db.commit()
     return {"id": invoice_id, "status": "delivered", "stale_added": len(body.get("returns", []))}
 
@@ -230,5 +236,11 @@ def update_invoice_status(
     if status not in allowed:
         raise HTTPException(status_code=400, detail=f"Статус має бути один з: {allowed}")
     inv.status = status
+    db.flush()
+
+    if status == "delivered":
+        from backend.services.finance import create_invoice_finance_entry
+        create_invoice_finance_entry(db, inv)
+
     db.commit()
     return {"id": invoice_id, "status": status}

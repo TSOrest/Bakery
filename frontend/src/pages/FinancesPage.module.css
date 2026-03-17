@@ -1,0 +1,406 @@
+.page {
+  padding: 16px;
+  max-width: 1400px;
+}
+
+/* ── Шапка ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.header h2 {
+  margin: 0;
+  flex: 1;
+}
+
+/* ── Зведення ── */
+.summaryBar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.summaryCard {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+}
+.summaryLabel {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.summaryValue {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.summaryHint {
+  font-size: 12px;
+  color: #999;
+}
+
+/* ── Кольори балансу ── */
+.debtColor   { color: #c0392b; }
+.creditColor { color: #27ae60; }
+.neutralColor { color: #555; }
+
+/* ── Вкладки ── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid #e0e0e0;
+  margin-bottom: 14px;
+}
+.tab, .tabActive {
+  padding: 8px 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  color: #555;
+  border-radius: 4px 4px 0 0;
+}
+.tabActive {
+  color: #1565c0;
+  border-bottom-color: #1565c0;
+  font-weight: 600;
+}
+.tab:hover { background: #f0f0f0; }
+
+/* ── Фільтри ── */
+.filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+}
+.filters input[type="date"],
+.filters select {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.searchInput {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 200px;
+}
+
+/* ── Баланси ── */
+.balancesTab { }
+
+.balancesLayout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.balancesTableWrap {
+  flex: 1;
+  overflow-x: auto;
+}
+
+.balancesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.balancesTable th {
+  background: #f0f4f8;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+}
+.balancesTable td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #eee;
+}
+.balanceRow {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.balanceRow:hover { background: #f5f8ff; }
+.activeRow { background: #e8f0fe !important; }
+.clientName { font-weight: 500; }
+.right { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Панель клієнта ── */
+.clientPanel {
+  width: 360px;
+  flex-shrink: 0;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  overflow: hidden;
+  position: sticky;
+  top: 8px;
+}
+.clientPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #f0f4f8;
+  border-bottom: 1px solid #ddd;
+  gap: 8px;
+}
+.clientPanelHeader h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+.clientPanelActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.routeTag {
+  display: inline-block;
+  background: #e3eaff;
+  color: #1565c0;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+.balanceBig {
+  padding: 14px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid #eee;
+}
+.balanceBig > span:first-child {
+  font-size: 26px;
+  font-weight: 700;
+}
+.balanceLabel {
+  font-size: 13px;
+  color: #888;
+}
+
+/* ── Список операцій клієнта ── */
+.historyList {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.historyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  gap: 8px;
+}
+.historyRow:last-child { border-bottom: none; }
+.historyLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.historyRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+}
+.historyDate {
+  font-size: 12px;
+  color: #888;
+}
+.historyNotes {
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+/* ── Тег типу ── */
+.typeTag {
+  display: inline-block;
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* ── Журнал ── */
+.journalTab { }
+.journalTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.journalTable th {
+  background: #f0f4f8;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #ddd;
+}
+.journalTable td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #eee;
+}
+.notesCell {
+  color: #666;
+  font-size: 12px;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Кнопки ── */
+.btnPrimary {
+  background: #1565c0;
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.btnPrimary:hover   { background: #0d47a1; }
+.btnPrimary:disabled { opacity: 0.6; cursor: default; }
+
+.btnSecondary {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ccc;
+  padding: 7px 16px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.btnSecondary:hover { background: #e0e0e0; }
+
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #888;
+  padding: 2px 6px;
+  line-height: 1;
+}
+.closeBtn:hover { color: #333; }
+
+.delBtn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.delBtn:hover { color: #e74c3c; }
+.delBtn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Модальне вікно ── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px;
+  width: 380px;
+  max-width: 95vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.modalHeader h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* ── Форма ── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: #444;
+  font-weight: 500;
+}
+.form input,
+.form select {
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 14px;
+}
+.form input:focus,
+.form select:focus {
+  outline: none;
+  border-color: #1565c0;
+}
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+.error {
+  color: #c0392b;
+  font-size: 13px;
+  margin: 0;
+}
+.hint {
+  text-align: center;
+  color: #999;
+  padding: 20px;
+  font-size: 13px;
+}

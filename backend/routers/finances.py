@@ -1,0 +1,143 @@
+"""Ендпоінти фінансового модуля."""
+
+from typing import List, Optional
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend.models.finances import Finance
+from backend.models.references import Client
+from backend.schemas.finance import (
+    FinanceCreate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
+)
+from backend.services.finance import (
+    get_all_balances, get_client_balance, get_summary,
+)
+
+router = APIRouter(prefix="/finances", tags=["Фінанси"])
+
+
+def _enrich(entry: Finance, db: Session) -> FinanceOut:
+    """Додає client_name, type_label, signed_amount до запису."""
+    client_name = None
+    if entry.client_id:
+        c = db.get(Client, entry.client_id)
+        client_name = c.short_name or c.full_name if c else None
+
+    return FinanceOut(
+        id            = entry.id,
+        finance_date  = entry.finance_date,
+        client_id     = entry.client_id,
+        client_name   = client_name,
+        finance_type  = entry.finance_type,
+        type_label    = FINANCE_LABELS.get(entry.finance_type, entry.finance_type),
+        amount        = entry.amount,
+        sign          = entry.sign,
+        signed_amount = round(entry.amount * entry.sign, 2),
+        notes         = entry.notes,
+        created_at    = entry.created_at,
+        created_by    = entry.created_by,
+    )
+
+
+# ── Список операцій ────────────────────────────────────────────────────────────
+
+@router.get("/", response_model=List[FinanceOut])
+def list_finances(
+    client_id:   Optional[int] = None,
+    date_from:   Optional[str] = None,
+    date_to:     Optional[str] = None,
+    finance_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(Finance)
+    if client_id:
+        q = q.filter(Finance.client_id == client_id)
+    if date_from:
+        q = q.filter(Finance.finance_date >= date_from)
+    if date_to:
+        q = q.filter(Finance.finance_date <= date_to)
+    if finance_type:
+        q = q.filter(Finance.finance_type == finance_type)
+    entries = q.order_by(Finance.finance_date.desc(), Finance.id.desc()).all()
+    return [_enrich(e, db) for e in entries]
+
+
+# ── Баланси клієнтів ──────────────────────────────────────────────────────────
+
+@router.get("/balances", response_model=List[ClientBalance])
+def balances(db: Session = Depends(get_db)):
+    return get_all_balances(db)
+
+
+@router.get("/summary", response_model=FinanceSummary)
+def summary(db: Session = Depends(get_db)):
+    return get_summary(db)
+
+
+@router.get("/client/{client_id}", response_model=List[FinanceOut])
+def client_history(
+    client_id: int,
+    date_from: Optional[str] = None,
+    date_to:   Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if not db.get(Client, client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+
+    q = db.query(Finance).filter(Finance.client_id == client_id)
+    if date_from:
+        q = q.filter(Finance.finance_date >= date_from)
+    if date_to:
+        q = q.filter(Finance.finance_date <= date_to)
+
+    entries = q.order_by(Finance.finance_date.desc(), Finance.id.desc()).all()
+    return [_enrich(e, db) for e in entries]
+
+
+# ── Додавання операцій ─────────────────────────────────────────────────────────
+
+@router.post("/", response_model=FinanceOut, status_code=201)
+def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
+    # Клієнт-залежні типи потребують client_id
+    client_required = {"invoice", "payment", "writeoff", "exchange_credit"}
+    if data.finance_type in client_required and not data.client_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Тип '{data.finance_type}' потребує client_id",
+        )
+    if data.client_id and not db.get(Client, data.client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+
+    entry = Finance(
+        finance_date = data.finance_date,
+        client_id    = data.client_id,
+        finance_type = data.finance_type,
+        amount       = data.amount,
+        sign         = data.sign,
+        notes        = data.notes,
+        created_at   = datetime.now().isoformat(),
+        created_by   = data.created_by,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return _enrich(entry, db)
+
+
+# ── Видалення ─────────────────────────────────────────────────────────────────
+
+@router.delete("/{finance_id}", status_code=204)
+def delete_finance(finance_id: int, db: Session = Depends(get_db)):
+    entry = db.get(Finance, finance_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Запис не знайдено")
+    # Забороняємо видаляти автоматичні записи від накладних
+    if entry.finance_type == "invoice" and entry.created_by == "system":
+        raise HTTPException(
+            status_code=400,
+            detail="Автоматичний запис накладної не можна видалити вручну",
+        )
+    db.delete(entry)
+    db.commit()

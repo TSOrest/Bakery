@@ -122,6 +122,40 @@ export interface Invoice {
   lines: InvoiceLine[]
 }
 
+export interface Finance {
+  id: number
+  finance_date: string
+  client_id: number | null
+  client_name: string | null
+  finance_type: string
+  type_label: string | null
+  amount: number
+  sign: number
+  signed_amount: number | null
+  notes: string | null
+  created_at: string | null
+  created_by: string | null
+}
+
+export interface ClientBalance {
+  client_id: number
+  client_name: string
+  short_name: string | null
+  route_id: number | null
+  route_name: string | null
+  balance: number
+  last_payment_date: string | null
+  last_invoice_date: string | null
+}
+
+export interface FinanceSummary {
+  total_debt: number
+  total_credit: number
+  net_balance: number
+  clients_in_debt: number
+  clients_with_credit: number
+}
+
 export interface Price {
   id: number
   product_id: number

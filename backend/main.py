@@ -13,7 +13,7 @@ import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
-    auth, cancellations, settings,
+    auth, cancellations, settings, finances,
 )
 
 # Ініціалізуємо таблиці (якщо не існують)
@@ -118,6 +118,7 @@ app.include_router(print_views.router,   prefix=PREFIX)
 app.include_router(auth.router,          prefix=PREFIX)
 app.include_router(cancellations.router, prefix=PREFIX)
 app.include_router(settings.router,      prefix=PREFIX)
+app.include_router(finances.router,      prefix=PREFIX)
 
 
 @app.get("/api/health")
