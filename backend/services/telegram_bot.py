@@ -129,6 +129,19 @@ def _request_contact_keyboard() -> dict:
     }
 
 
+def _main_keyboard() -> dict:
+    """Постійне меню кнопок після авторизації."""
+    return {
+        "keyboard": [
+            ["💰 Звіт",      "📉 Борги"],
+            ["📋 Замовлення", "🍞 Випічка"],
+            ["❓ Допомога"],
+        ],
+        "resize_keyboard": True,
+        "persistent": True,
+    }
+
+
 def _remove_keyboard() -> dict:
     return {"remove_keyboard": True}
 
@@ -274,8 +287,8 @@ def _handle_update(token: str, update: dict) -> None:
         if phone in allowed:
             _authorize_chat(chat_id, phone)
             _send(token, chat_id,
-                  "✅ Доступ дозволено! Тепер можете використовувати команди.",
-                  _remove_keyboard())
+                  "✅ Доступ дозволено! Оберіть дію:",
+                  _main_keyboard())
         else:
             _send(token, chat_id,
                   "⛔ Ваш номер не у списку дозволених. Зверніться до адміністратора.",
@@ -283,12 +296,13 @@ def _handle_update(token: str, update: dict) -> None:
         return
 
     # ── /start ──
-    if text in ("/start", "/start@" + token.split(":")[1] if ":" in token else ""):
+    cmd_base = (text.lower().split()[0] if text else "").split("@")[0]
+    if cmd_base == "/start":
         if _is_authorized(chat_id):
-            _send(token, chat_id, "Ви вже авторизовані.\n\n" + HELP_TEXT)
+            _send(token, chat_id, "Оберіть дію:", _main_keyboard())
         else:
             _send(token, chat_id,
-                  "👋 Вітаю! Для доступу до даних пекарні, будь ласка, підтвердіть номер телефону.",
+                  "👋 Вітаю! Для доступу до даних пекарні підтвердіть номер телефону.",
                   _request_contact_keyboard())
         return
 
@@ -299,21 +313,20 @@ def _handle_update(token: str, update: dict) -> None:
               _request_contact_keyboard())
         return
 
-    # Беремо першу частину тексту і прибираємо @botname суфікс якщо є
-    cmd = (text.lower().split()[0] if text else "").split("@")[0]
+    kb = _main_keyboard()
 
-    if cmd in ("/report", "/звіт"):
-        _send(token, chat_id, _report_finance())
-    elif cmd in ("/debts", "/борги"):
-        _send(token, chat_id, _report_debts())
-    elif cmd in ("/orders", "/замовлення"):
-        _send(token, chat_id, _report_orders())
-    elif cmd in ("/baking", "/випічка"):
-        _send(token, chat_id, _report_baking())
-    elif cmd in ("/help", "/допомога"):
-        _send(token, chat_id, HELP_TEXT)
+    if cmd_base in ("/report", "/звіт") or text == "💰 Звіт":
+        _send(token, chat_id, _report_finance(), kb)
+    elif cmd_base in ("/debts", "/борги") or text == "📉 Борги":
+        _send(token, chat_id, _report_debts(), kb)
+    elif cmd_base in ("/orders", "/замовлення") or text == "📋 Замовлення":
+        _send(token, chat_id, _report_orders(), kb)
+    elif cmd_base in ("/baking", "/випічка") or text == "🍞 Випічка":
+        _send(token, chat_id, _report_baking(), kb)
+    elif cmd_base in ("/help", "/допомога") or text == "❓ Допомога":
+        _send(token, chat_id, HELP_TEXT, kb)
     elif text:
-        _send(token, chat_id, f"Невідома команда: {text}\n\n" + HELP_TEXT)
+        _send(token, chat_id, f"Невідома команда.\n\n" + HELP_TEXT, kb)
 
 
 # ── Polling loop ──────────────────────────────────────────────────────────────
