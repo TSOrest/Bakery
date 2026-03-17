@@ -1,0 +1,112 @@
+param(
+    [string]$TargetTag = ""
+)
+
+$ROOT = Split-Path -Parent $PSScriptRoot
+$TASK = 'BakeryApp'
+$python = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
+$pip    = Join-Path $ROOT 'backend\venv\Scripts\pip.exe'
+$npm    = (Get-Command npm -ErrorAction SilentlyContinue).Source
+if (-not $npm) { $npm = 'C:\Program Files\nodejs\npm.cmd' }
+
+function Write-Log($msg, $color = 'White') {
+    $ts = Get-Date -Format 'HH:mm:ss'
+    Write-Host "[$ts] $msg" -ForegroundColor $color
+}
+
+Write-Host '=== Bakery - Update ===' -ForegroundColor Cyan
+
+# Resolve target tag
+if (-not $TargetTag) {
+    Write-Log 'Fetching latest tag from GitHub...'
+    try {
+        $tags = Invoke-RestMethod 'https://api.github.com/repos/TSOrest/Bakery/tags' -TimeoutSec 10
+        $TargetTag = $tags[0].name
+    } catch {
+        Write-Log "ERROR: Cannot reach GitHub: $_" Red
+        Read-Host 'Press Enter'; exit 1
+    }
+}
+
+$currentVersion = (Get-Content (Join-Path $ROOT 'VERSION') -ErrorAction SilentlyContinue).Trim()
+Write-Log "Current: $currentVersion  ->  Target: $TargetTag"
+
+if ($currentVersion -eq $TargetTag) {
+    Write-Log 'Already up to date.' Green
+    Read-Host 'Press Enter'; exit 0
+}
+
+# Save current version for rollback
+Set-Content -Path (Join-Path $ROOT 'PREVIOUS_VERSION') -Value $currentVersion -Encoding UTF8
+
+# Stop server
+Write-Log 'Stopping server...' Yellow
+Stop-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*uvicorn*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
+# Git fetch and checkout
+Write-Log 'Fetching from GitHub...'
+$gitResult = & git -C $ROOT fetch origin --tags 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Log "ERROR: git fetch failed: $gitResult" Red
+    Read-Host 'Press Enter'; exit 1
+}
+
+Write-Log "Checking out $TargetTag..."
+$gitResult = & git -C $ROOT checkout $TargetTag 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Log "ERROR: git checkout failed: $gitResult" Red
+    Read-Host 'Press Enter'; exit 1
+}
+
+# Update VERSION file (checkout may have overwritten it)
+Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $TargetTag -Encoding UTF8
+
+# Install new Python dependencies
+Write-Log 'Installing Python dependencies...'
+& $pip install -r (Join-Path $ROOT 'backend\requirements.txt') --quiet
+if ($LASTEXITCODE -ne 0) {
+    Write-Log 'WARNING: pip install had errors (continuing)' Yellow
+}
+
+# Build frontend
+Write-Log 'Building frontend...' Yellow
+$build = Start-Process -FilePath $npm `
+    -ArgumentList 'run build' `
+    -WorkingDirectory (Join-Path $ROOT 'frontend') `
+    -WindowStyle Hidden -Wait -PassThru
+
+if ($build.ExitCode -ne 0) {
+    Write-Log 'ERROR: Frontend build failed.' Red
+    # Rollback
+    & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
+    Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
+    Read-Host 'Press Enter'; exit 1
+}
+
+# Restart server
+Write-Log 'Starting server...' Yellow
+if (Get-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue) {
+    Start-ScheduledTask -TaskName $TASK
+} else {
+    Start-Process -FilePath $python `
+        -ArgumentList '-m uvicorn backend.main:app --host 0.0.0.0 --port 8000' `
+        -WorkingDirectory $ROOT -WindowStyle Hidden
+}
+
+# Relaunch tray
+$pythonw = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
+$trayScript = Join-Path $ROOT 'tray.py'
+Get-Process -Name pythonw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 500
+Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
+
+Write-Log "Update complete: $TargetTag" Green
+Write-Host ''
+Write-Host "  Version: $TargetTag"
+Write-Host "  Rollback: run rollback.bat to revert to $currentVersion"
+Write-Host ''
+Start-Sleep -Seconds 2
