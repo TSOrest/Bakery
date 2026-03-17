@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
-import type { Client, Product, Route, Unit, Category, Price } from '../types'
+import type { Client, Product, Route, Unit, Category, Price, ClientPriceOverride } from '../types'
 import Modal from '../components/Modal'
 import formStyles from '../components/Form.module.css'
 import UsersTab from './UsersTab'
@@ -20,12 +20,14 @@ export default function AdminPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [routes, setRoutes]         = useState<Route[]>([])
   const [products, setProducts]     = useState<Product[]>([])
+  const [clients,  setClients]      = useState<Client[]>([])
 
   useEffect(() => {
     api.get<Unit[]>('/units?active_only=false').then(setUnits)
     api.get<Category[]>('/categories?active_only=false').then(setCategories)
     api.get<Route[]>('/routes/?active_only=false').then(setRoutes)
     api.get<Product[]>('/products/?active_only=false').then(setProducts)
+    api.get<Client[]>('/clients/?active_only=false').then(setClients)
   }, [])
 
   const reloadProducts   = () => api.get<Product[]>('/products/?active_only=false').then(setProducts)
@@ -85,7 +87,7 @@ export default function AdminPage() {
         <RoutesTab routes={routes} onReload={reloadRoutes} />
       )}
       {tab === 'prices' && (
-        <PricesTab products={products} categories={categories} />
+        <PricesTab products={products} clients={clients} />
       )}
       {tab === 'units' && (
         <SimpleListTab
@@ -530,129 +532,439 @@ function RoutesTab({ routes, onReload }: { routes: Route[]; onReload: () => void
 
 // ─── Ціни ────────────────────────────────────────────────────────────────────
 
-interface PriceFormState {
-  product_id: string; category_id: string
-  price: string; valid_from: string; valid_to: string
-}
-
-function PricesTab({ products, categories }: { products: Product[]; categories: Category[] }) {
-  const [prices, setPrices]   = useState<Price[]>([])
-  const [modal, setModal]     = useState(false)
-  const [form, setForm]       = useState<PriceFormState>({
-    product_id: '', category_id: '', price: '', valid_from: '', valid_to: '',
-  })
-  const [saving, setSaving]   = useState(false)
-
+function PricesTab({ products, clients }: {
+  products: Product[]
+  clients: Client[]
+}) {
   const today = new Date().toISOString().slice(0, 10)
+  type InnerTab = 'base' | 'overrides'
+  const [innerTab, setInnerTab] = useState<InnerTab>('base')
 
-  const load = () => api.get<Price[]>('/prices/').then(setPrices)
-  useEffect(() => { load() }, [])
+  // ── Базові ціни ──
+  const [prices,    setPrices]    = useState<Price[]>([])
+  const [editPrice, setEditPrice] = useState<Price | null>(null)
+  const [newModal,  setNewModal]  = useState(false)
+  const [bulkModal, setBulkModal] = useState(false)
+  const [newForm, setNewForm]     = useState({ product_id: '', price: '', valid_from: today })
+  const [editForm, setEditForm]   = useState({ price: '', effective_date: today })
+  const [bulkForm, setBulkForm]   = useState({ pct: '', effective_date: today })
+  const [bulkPreview, setBulkPreview] = useState<{ product_name: string; old_price: number; new_price: number }[]>([])
+  const [saving, setSaving] = useState(false)
 
-  const openNew = () => {
-    setForm({ product_id: '', category_id: '', price: '', valid_from: today, valid_to: '' })
-    setModal(true)
+  // ── Індивідуальні ──
+  const [overrides,       setOverrides]       = useState<ClientPriceOverride[]>([])
+  const [filterClientId,  setFilterClientId]  = useState('')
+  const [overrideModal,   setOverrideModal]   = useState(false)
+  const [overrideForm,    setOverrideForm]    = useState({
+    client_id: '', product_id: '', price: '', valid_from: today, valid_to: '',
+  })
+
+  const loadPrices    = () => api.get<Price[]>('/prices/').then(setPrices)
+  const loadOverrides = () => api.get<ClientPriceOverride[]>(
+    `/prices/overrides${filterClientId ? `?client_id=${filterClientId}` : ''}`
+  ).then(setOverrides)
+
+  useEffect(() => { loadPrices() }, [])
+  useEffect(() => { if (innerTab === 'overrides') loadOverrides() }, [innerTab, filterClientId]) // eslint-disable-line
+
+  const pName = (id: number) => products.find(p => p.id === id)?.name ?? `#${id}`
+  const cName = (id: number) => {
+    const c = clients.find(c => c.id === id)
+    return c ? (c.short_name ?? c.full_name) : `#${id}`
   }
-  const closeModal = () => setModal(false)
 
-  const handleSubmit = async (e: FormEvent) => {
+  // Поточна ціна для кожного продукту (найновіша active)
+  const currentPriceMap = new Map<number, Price>()
+  for (const p of prices) {
+    if (!currentPriceMap.has(p.product_id)) currentPriceMap.set(p.product_id, p)
+  }
+  const currentPrices = Array.from(currentPriceMap.values())
+    .sort((a, b) => pName(a.product_id).localeCompare(pName(b.product_id), 'uk'))
+
+  // Редагування — замінює ціну
+  const openEdit = (p: Price) => {
+    setEditPrice(p)
+    setEditForm({ price: String(p.price), effective_date: today })
+  }
+  const submitEdit = async (e: FormEvent) => {
     e.preventDefault()
+    if (!editPrice) return
     setSaving(true)
-    const body = {
-      product_id:  Number(form.product_id),
-      category_id: form.category_id ? Number(form.category_id) : null,
-      price:       Number(form.price),
-      valid_from:  form.valid_from,
-      valid_to:    form.valid_to || null,
-    }
     try {
-      await api.post('/prices/', body)
-      load(); closeModal()
+      await api.post('/prices/replace', {
+        old_price_id:   editPrice.id,
+        price:          Number(editForm.price),
+        effective_date: editForm.effective_date,
+      })
+      setEditPrice(null)
+      loadPrices()
     } finally { setSaving(false) }
   }
 
-  const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
-  const categoryName = (id: number | null) =>
-    id ? (categories.find((c) => c.id === id)?.name ?? `#${id}`) : 'Усі категорії'
+  // Нова ціна (для продукту без ціни)
+  const submitNew = async (e: FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await api.post('/prices/', {
+        product_id: Number(newForm.product_id),
+        price:      Number(newForm.price),
+        valid_from: newForm.valid_from,
+      })
+      setNewModal(false)
+      loadPrices()
+    } finally { setSaving(false) }
+  }
+
+  // Деактивувати ціну
+  const deactivate = async (id: number) => {
+    if (!confirm('Деактивувати цю ціну?')) return
+    await api.delete(`/prices/${id}`)
+    loadPrices()
+  }
+
+  // Масова зміна — превью
+  const loadBulkPreview = async () => {
+    if (!bulkForm.pct || !bulkForm.effective_date) return
+    const data = await api.get<{ items: typeof bulkPreview }>(
+      `/prices/bulk-preview?pct=${bulkForm.pct}&effective_date=${bulkForm.effective_date}`
+    )
+    setBulkPreview(data.items)
+  }
+  useEffect(() => { if (bulkModal) loadBulkPreview() }, [bulkForm.pct, bulkForm.effective_date, bulkModal]) // eslint-disable-line
+
+  const submitBulk = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!confirm(`Змінити всі ціни на ${bulkForm.pct}% з ${bulkForm.effective_date}?`)) return
+    setSaving(true)
+    try {
+      await api.post('/prices/bulk-change', { pct: Number(bulkForm.pct), effective_date: bulkForm.effective_date })
+      setBulkModal(false)
+      loadPrices()
+    } finally { setSaving(false) }
+  }
+
+  // Нова індивідуальна ціна
+  const submitOverride = async (e: FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await api.post('/prices/overrides', {
+        client_id:  Number(overrideForm.client_id),
+        product_id: Number(overrideForm.product_id),
+        price:      Number(overrideForm.price),
+        valid_from: overrideForm.valid_from,
+        valid_to:   overrideForm.valid_to || null,
+      })
+      setOverrideModal(false)
+      loadOverrides()
+    } finally { setSaving(false) }
+  }
+
+  const deleteOverride = async (id: number) => {
+    if (!confirm('Видалити індивідуальну ціну?')) return
+    await api.delete(`/prices/overrides/${id}`)
+    loadOverrides()
+  }
+
+  const tabBtn = (t: InnerTab, label: string) => (
+    <button
+      onClick={() => setInnerTab(t)}
+      style={{
+        padding: '6px 16px', border: 'none', cursor: 'pointer', fontSize: 13,
+        background: innerTab === t ? '#1565c0' : '#e8eef5',
+        color: innerTab === t ? '#fff' : '#333',
+        borderRadius: 4, fontWeight: innerTab === t ? 600 : 400,
+      }}
+    >{label}</button>
+  )
+
+  // Продукти без поточної ціни
+  const productsWithoutPrice = products.filter(
+    p => p.is_active && !currentPriceMap.has(p.id)
+  )
 
   return (
     <section>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Ціни ({prices.length})</strong>
-        <button onClick={openNew} style={addBtnStyle}>+ Додати ціну</button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {tabBtn('base', 'Базові ціни')}
+        {tabBtn('overrides', 'Індивідуальні ціни клієнтів')}
       </div>
 
-      <table style={tableStyle}>
-        <thead>
-          <tr style={{ background: '#e8eef5' }}>
-            <Th>Виріб</Th><Th>Категорія</Th><Th>Ціна, грн</Th>
-            <Th>Діє з</Th><Th>Діє до</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {prices.map((p) => (
-            <tr key={p.id}>
-              <Td>{productName(p.product_id)}</Td>
-              <Td>{categoryName(p.category_id)}</Td>
-              <Td><strong>{p.price.toFixed(2)}</strong></Td>
-              <Td>{p.valid_from}</Td>
-              <Td>{p.valid_to ?? '∞'}</Td>
-            </tr>
-          ))}
-          {prices.length === 0 && (
-            <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
-              Ціни не задані
-            </td></tr>
-          )}
-        </tbody>
-      </table>
-
-      {modal && (
-        <Modal title="Нова ціна" onClose={closeModal}>
-          <form onSubmit={handleSubmit} className={formStyles.form}>
-            <div className={formStyles.field}>
-              <label>Виріб *</label>
-              <select required value={form.product_id}
-                onChange={(e) => setForm({ ...form, product_id: e.target.value })}>
-                <option value="">— оберіть виріб —</option>
-                {products.filter((p) => p.is_active).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className={formStyles.field}>
-              <label>Категорія клієнта</label>
-              <select value={form.category_id}
-                onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
-                <option value="">Для всіх категорій</option>
-                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <span className={formStyles.hint}>Залиште порожнім якщо ціна єдина для всіх</span>
-            </div>
-            <div className={formStyles.field}>
-              <label>Ціна, грн *</label>
-              <input required type="number" min="0" step="0.01" value={form.price}
-                onChange={(e) => setForm({ ...form, price: e.target.value })}
-                placeholder="0.00" />
-            </div>
-            <div className={formStyles.field}>
-              <label>Діє з *</label>
-              <input required type="date" value={form.valid_from}
-                onChange={(e) => setForm({ ...form, valid_from: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Діє до</label>
-              <input type="date" value={form.valid_to}
-                onChange={(e) => setForm({ ...form, valid_to: e.target.value })} />
-              <span className={formStyles.hint}>Залиште порожнім — ціна безстрокова</span>
-            </div>
-            <div className={formStyles.actions}>
-              <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
-              <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
-                {saving ? 'Збереження...' : 'Зберегти'}
+      {/* ── Базові ціни ── */}
+      {innerTab === 'base' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <strong>Поточні ціни ({currentPrices.length} виробів)</strong>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setBulkModal(true)} style={{ ...addBtnStyle, background: '#e67e22' }}>
+                % Масова зміна
               </button>
+              {productsWithoutPrice.length > 0 && (
+                <button onClick={() => setNewModal(true)} style={addBtnStyle}>
+                  + Нова ціна
+                </button>
+              )}
             </div>
-          </form>
-        </Modal>
+          </div>
+
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ background: '#e8eef5' }}>
+                <Th>Виріб</Th><Th>Ціна, грн</Th><Th>Діє з</Th><Th>Діє до</Th><th style={{width:120}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentPrices.map(p => (
+                <tr key={p.id}>
+                  <Td>{pName(p.product_id)}</Td>
+                  <Td><strong>{p.price.toFixed(2)}</strong></Td>
+                  <Td>{p.valid_from}</Td>
+                  <Td>{p.valid_to ? <span style={{ color: '#e67e22' }}>{p.valid_to}</span> : '∞'}</Td>
+                  <Td>
+                    <button onClick={() => openEdit(p)} style={{ ...editBtnStyle, marginRight: 4 }}>
+                      Редагувати
+                    </button>
+                    <button onClick={() => deactivate(p.id)} style={delBtnStyle}>✕</button>
+                  </Td>
+                </tr>
+              ))}
+              {currentPrices.length === 0 && (
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
+                  Ціни не задані
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Модал редагування */}
+          {editPrice && (
+            <Modal title={`Змінити ціну: ${pName(editPrice.product_id)}`} onClose={() => setEditPrice(null)}>
+              <form onSubmit={submitEdit} className={formStyles.form}>
+                <div className={formStyles.field}>
+                  <label>Поточна ціна</label>
+                  <input type="text" readOnly value={`${editPrice.price.toFixed(2)} грн`}
+                    style={{ background: '#f0f0f0' }} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Нова ціна, грн *</label>
+                  <input required type="number" min="0.01" step="0.01" autoFocus
+                    value={editForm.price}
+                    onChange={e => setEditForm({ ...editForm, price: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Діє з (дата набуття чинності) *</label>
+                  <input required type="date" value={editForm.effective_date}
+                    onChange={e => setEditForm({ ...editForm, effective_date: e.target.value })} />
+                  <span className={formStyles.hint}>
+                    Стара ціна діятиме до {editForm.effective_date
+                      ? new Date(new Date(editForm.effective_date).getTime() - 86400000)
+                          .toISOString().slice(0, 10)
+                      : '…'}
+                  </span>
+                </div>
+                <div className={formStyles.actions}>
+                  <button type="button" onClick={() => setEditPrice(null)} className={formStyles.btnSecondary}>
+                    Скасувати
+                  </button>
+                  <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
+                    {saving ? 'Збереження...' : 'Зберегти'}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {/* Модал нової ціни */}
+          {newModal && (
+            <Modal title="Нова ціна" onClose={() => setNewModal(false)}>
+              <form onSubmit={submitNew} className={formStyles.form}>
+                <div className={formStyles.field}>
+                  <label>Виріб *</label>
+                  <select required value={newForm.product_id}
+                    onChange={e => setNewForm({ ...newForm, product_id: e.target.value })}>
+                    <option value="">— оберіть виріб —</option>
+                    {productsWithoutPrice.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Ціна, грн *</label>
+                  <input required type="number" min="0.01" step="0.01"
+                    value={newForm.price}
+                    onChange={e => setNewForm({ ...newForm, price: e.target.value })}
+                    placeholder="0.00" />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Діє з *</label>
+                  <input required type="date" value={newForm.valid_from}
+                    onChange={e => setNewForm({ ...newForm, valid_from: e.target.value })} />
+                </div>
+                <div className={formStyles.actions}>
+                  <button type="button" onClick={() => setNewModal(false)} className={formStyles.btnSecondary}>
+                    Скасувати
+                  </button>
+                  <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
+                    {saving ? 'Збереження...' : 'Зберегти'}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {/* Модал масової зміни */}
+          {bulkModal && (
+            <Modal title="Масова зміна цін" onClose={() => setBulkModal(false)}>
+              <form onSubmit={submitBulk} className={formStyles.form}>
+                <div className={formStyles.field}>
+                  <label>Зміна, % (+ збільшення, − зменшення) *</label>
+                  <input required type="number" step="0.1" autoFocus
+                    value={bulkForm.pct}
+                    onChange={e => setBulkForm({ ...bulkForm, pct: e.target.value })}
+                    placeholder="+5 або -10" />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Діє з *</label>
+                  <input required type="date" value={bulkForm.effective_date}
+                    onChange={e => setBulkForm({ ...bulkForm, effective_date: e.target.value })} />
+                </div>
+
+                {bulkPreview.length > 0 && (
+                  <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
+                    <table style={{ ...tableStyle, margin: 0 }}>
+                      <thead>
+                        <tr style={{ background: '#f0f4f8' }}>
+                          <Th>Виріб</Th>
+                          <Th>Стара ціна</Th>
+                          <Th>Нова ціна</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkPreview.map((item, i) => (
+                          <tr key={i}>
+                            <Td>{item.product_name}</Td>
+                            <Td>{item.old_price.toFixed(2)}</Td>
+                            <Td><strong style={{ color: Number(bulkForm.pct) > 0 ? '#27ae60' : '#e74c3c' }}>
+                              {item.new_price.toFixed(2)}
+                            </strong></Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className={formStyles.actions}>
+                  <button type="button" onClick={() => setBulkModal(false)} className={formStyles.btnSecondary}>
+                    Скасувати
+                  </button>
+                  <button type="submit" disabled={saving || bulkPreview.length === 0} className={formStyles.btnPrimary}>
+                    {saving ? 'Збереження...' : `Застосувати (${bulkPreview.length} цін)`}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+        </>
+      )}
+
+      {/* ── Індивідуальні ціни ── */}
+      {innerTab === 'overrides' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
+            <select value={filterClientId} onChange={e => setFilterClientId(e.target.value)}
+              style={{ padding: '5px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13 }}>
+              <option value="">Всі клієнти</option>
+              {clients.filter(c => c.is_active).map(c => (
+                <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
+              ))}
+            </select>
+            <button onClick={() => setOverrideModal(true)} style={addBtnStyle}>
+              + Додати індивідуальну ціну
+            </button>
+          </div>
+
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ background: '#e8eef5' }}>
+                <Th>Клієнт</Th><Th>Виріб</Th><Th>Ціна, грн</Th><Th>Діє з</Th><Th>Діє до</Th><th style={{width:60}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {overrides.map(o => (
+                <tr key={o.id}>
+                  <Td>{cName(o.client_id)}</Td>
+                  <Td>{pName(o.product_id)}</Td>
+                  <Td><strong>{o.price.toFixed(2)}</strong></Td>
+                  <Td>{o.valid_from}</Td>
+                  <Td>{o.valid_to ?? '∞'}</Td>
+                  <Td>
+                    <button onClick={() => deleteOverride(o.id)} style={delBtnStyle}>✕</button>
+                  </Td>
+                </tr>
+              ))}
+              {overrides.length === 0 && (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
+                  Немає індивідуальних цін
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+
+          {overrideModal && (
+            <Modal title="Нова індивідуальна ціна" onClose={() => setOverrideModal(false)}>
+              <form onSubmit={submitOverride} className={formStyles.form}>
+                <div className={formStyles.field}>
+                  <label>Клієнт *</label>
+                  <select required value={overrideForm.client_id}
+                    onChange={e => setOverrideForm({ ...overrideForm, client_id: e.target.value })}>
+                    <option value="">— оберіть клієнта —</option>
+                    {clients.filter(c => c.is_active).map(c => (
+                      <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Виріб *</label>
+                  <select required value={overrideForm.product_id}
+                    onChange={e => setOverrideForm({ ...overrideForm, product_id: e.target.value })}>
+                    <option value="">— оберіть виріб —</option>
+                    {products.filter(p => p.is_active).map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Ціна, грн *</label>
+                  <input required type="number" min="0.01" step="0.01"
+                    value={overrideForm.price}
+                    onChange={e => setOverrideForm({ ...overrideForm, price: e.target.value })}
+                    placeholder="0.00" />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Діє з *</label>
+                  <input required type="date" value={overrideForm.valid_from}
+                    onChange={e => setOverrideForm({ ...overrideForm, valid_from: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Діє до</label>
+                  <input type="date" value={overrideForm.valid_to}
+                    onChange={e => setOverrideForm({ ...overrideForm, valid_to: e.target.value })} />
+                  <span className={formStyles.hint}>Порожньо — безстроково</span>
+                </div>
+                <div className={formStyles.actions}>
+                  <button type="button" onClick={() => setOverrideModal(false)} className={formStyles.btnSecondary}>
+                    Скасувати
+                  </button>
+                  <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
+                    {saving ? 'Збереження...' : 'Зберегти'}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+        </>
       )}
     </section>
   )

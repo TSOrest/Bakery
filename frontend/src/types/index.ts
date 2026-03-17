@@ -165,3 +165,12 @@ export interface Price {
   valid_to: string | null
   is_active: number
 }
+
+export interface ClientPriceOverride {
+  id: number
+  client_id: number
+  product_id: number
+  price: number
+  valid_from: string
+  valid_to: string | null
+}
