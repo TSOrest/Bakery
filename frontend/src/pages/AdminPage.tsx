@@ -550,6 +550,7 @@ function PricesTab({ products, clients }: {
   const [bulkForm, setBulkForm]   = useState({ pct: '', effective_date: today })
   const [bulkPreview, setBulkPreview] = useState<{ product_name: string; old_price: number; new_price: number }[]>([])
   const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState('')
 
   // ── Індивідуальні ──
   const [overrides,       setOverrides]       = useState<ClientPriceOverride[]>([])
@@ -589,7 +590,7 @@ function PricesTab({ products, clients }: {
   const submitEdit = async (e: FormEvent) => {
     e.preventDefault()
     if (!editPrice) return
-    setSaving(true)
+    setSaving(true); setError('')
     try {
       await api.post('/prices/replace', {
         old_price_id:   editPrice.id,
@@ -597,14 +598,16 @@ function PricesTab({ products, clients }: {
         effective_date: editForm.effective_date,
       })
       setEditPrice(null)
-      loadPrices()
+      await loadPrices()
+    } catch (err) {
+      setError(String(err))
     } finally { setSaving(false) }
   }
 
   // Нова ціна (для продукту без ціни)
   const submitNew = async (e: FormEvent) => {
     e.preventDefault()
-    setSaving(true)
+    setSaving(true); setError('')
     try {
       await api.post('/prices/', {
         product_id: Number(newForm.product_id),
@@ -612,42 +615,54 @@ function PricesTab({ products, clients }: {
         valid_from: newForm.valid_from,
       })
       setNewModal(false)
-      loadPrices()
+      await loadPrices()
+    } catch (err) {
+      setError(String(err))
     } finally { setSaving(false) }
   }
 
   // Деактивувати ціну
   const deactivate = async (id: number) => {
     if (!confirm('Деактивувати цю ціну?')) return
-    await api.delete(`/prices/${id}`)
-    loadPrices()
+    try {
+      await api.delete(`/prices/${id}`)
+      await loadPrices()
+    } catch (err) {
+      alert(String(err))
+    }
   }
 
   // Масова зміна — превью
   const loadBulkPreview = async () => {
     if (!bulkForm.pct || !bulkForm.effective_date) return
-    const data = await api.get<{ items: typeof bulkPreview }>(
-      `/prices/bulk-preview?pct=${bulkForm.pct}&effective_date=${bulkForm.effective_date}`
-    )
-    setBulkPreview(data.items)
+    try {
+      const data = await api.get<{ items: typeof bulkPreview }>(
+        `/prices/bulk-preview?pct=${bulkForm.pct}&effective_date=${bulkForm.effective_date}`
+      )
+      setBulkPreview(data.items)
+    } catch (err) {
+      setError(String(err))
+    }
   }
   useEffect(() => { if (bulkModal) loadBulkPreview() }, [bulkForm.pct, bulkForm.effective_date, bulkModal]) // eslint-disable-line
 
   const submitBulk = async (e: FormEvent) => {
     e.preventDefault()
     if (!confirm(`Змінити всі ціни на ${bulkForm.pct}% з ${bulkForm.effective_date}?`)) return
-    setSaving(true)
+    setSaving(true); setError('')
     try {
       await api.post('/prices/bulk-change', { pct: Number(bulkForm.pct), effective_date: bulkForm.effective_date })
       setBulkModal(false)
-      loadPrices()
+      await loadPrices()
+    } catch (err) {
+      setError(String(err))
     } finally { setSaving(false) }
   }
 
   // Нова індивідуальна ціна
   const submitOverride = async (e: FormEvent) => {
     e.preventDefault()
-    setSaving(true)
+    setSaving(true); setError('')
     try {
       await api.post('/prices/overrides', {
         client_id:  Number(overrideForm.client_id),
@@ -657,7 +672,9 @@ function PricesTab({ products, clients }: {
         valid_to:   overrideForm.valid_to || null,
       })
       setOverrideModal(false)
-      loadOverrides()
+      await loadOverrides()
+    } catch (err) {
+      setError(String(err))
     } finally { setSaving(false) }
   }
 
@@ -763,8 +780,9 @@ function PricesTab({ products, clients }: {
                       : '…'}
                   </span>
                 </div>
+                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
                 <div className={formStyles.actions}>
-                  <button type="button" onClick={() => setEditPrice(null)} className={formStyles.btnSecondary}>
+                  <button type="button" onClick={() => { setEditPrice(null); setError('') }} className={formStyles.btnSecondary}>
                     Скасувати
                   </button>
                   <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
@@ -777,8 +795,9 @@ function PricesTab({ products, clients }: {
 
           {/* Модал нової ціни */}
           {newModal && (
-            <Modal title="Нова ціна" onClose={() => setNewModal(false)}>
+            <Modal title="Нова ціна" onClose={() => { setNewModal(false); setError('') }}>
               <form onSubmit={submitNew} className={formStyles.form}>
+                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
                 <div className={formStyles.field}>
                   <label>Виріб *</label>
                   <select required value={newForm.product_id}
@@ -815,7 +834,7 @@ function PricesTab({ products, clients }: {
 
           {/* Модал масової зміни */}
           {bulkModal && (
-            <Modal title="Масова зміна цін" onClose={() => setBulkModal(false)}>
+            <Modal title="Масова зміна цін" onClose={() => { setBulkModal(false); setError(''); setBulkPreview([]) }}>
               <form onSubmit={submitBulk} className={formStyles.form}>
                 <div className={formStyles.field}>
                   <label>Зміна, % (+ збільшення, − зменшення) *</label>
@@ -830,6 +849,7 @@ function PricesTab({ products, clients }: {
                     onChange={e => setBulkForm({ ...bulkForm, effective_date: e.target.value })} />
                 </div>
 
+                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
                 {bulkPreview.length > 0 && (
                   <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
                     <table style={{ ...tableStyle, margin: 0 }}>
@@ -913,8 +933,9 @@ function PricesTab({ products, clients }: {
           </table>
 
           {overrideModal && (
-            <Modal title="Нова індивідуальна ціна" onClose={() => setOverrideModal(false)}>
+            <Modal title="Нова індивідуальна ціна" onClose={() => { setOverrideModal(false); setError('') }}>
               <form onSubmit={submitOverride} className={formStyles.form}>
+                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
                 <div className={formStyles.field}>
                   <label>Клієнт *</label>
                   <select required value={overrideForm.client_id}
