@@ -18,11 +18,33 @@ FINANCE_LABELS = {
     "exchange_credit": "Кредит обміну",
 }
 
+# ── Статті фінансів ────────────────────────────────────────────────────────────
+
+class FinanceArticleCreate(BaseModel):
+    name: str
+    direction: Literal["income", "expense"]
+
+
+class FinanceArticleUpdate(BaseModel):
+    name: Optional[str] = None
+    direction: Optional[Literal["income", "expense"]] = None
+
+
+class FinanceArticleOut(BaseModel):
+    model_config = {"from_attributes": True}
+    id: int
+    name: str
+    direction: str
+    is_system: int
+
+
+# ── Фінансові операції ─────────────────────────────────────────────────────────
 
 class FinanceCreate(BaseModel):
     finance_date: str
     client_id:    Optional[int] = None
     finance_type: FINANCE_TYPES
+    article_id:   Optional[int] = None   # якщо задано — перекриває finance_type у відображенні
     amount:       float
     sign:         Literal[1, -1]
     notes:        Optional[str] = None
@@ -43,6 +65,8 @@ class FinanceOut(BaseModel):
     client_name:  Optional[str] = None
     finance_type: str
     type_label:   Optional[str] = None
+    article_id:   Optional[int] = None
+    article_name: Optional[str] = None
     amount:       float
     sign:         int
     signed_amount: Optional[float] = None   # amount * sign

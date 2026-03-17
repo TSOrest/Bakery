@@ -24,6 +24,7 @@ export interface Product {
   category_id: number | null
   cost_per_unit: number
   is_active: number
+  initial_stock: number
 }
 
 export interface Route {
@@ -42,6 +43,13 @@ export interface Client {
   route_id: number | null
   discount_pct: number
   is_active: number
+  is_own_shop: number
+  print_invoice: number
+  receiver_name: string | null
+  delivery_agent: string | null
+  delivery_note_number: string | null
+  delivery_note_date: string | null
+  client_group: string | null
 }
 
 export interface Order {
@@ -59,6 +67,8 @@ export interface Order {
   price_override: number | null
   notes: string | null
   created_at: string | null
+  parent_order_id: number | null
+  delivered_qty: number | null
 }
 
 export interface BakingTask {
@@ -122,6 +132,13 @@ export interface Invoice {
   lines: InvoiceLine[]
 }
 
+export interface FinanceArticle {
+  id: number
+  name: string
+  direction: 'income' | 'expense'
+  is_system: number
+}
+
 export interface Finance {
   id: number
   finance_date: string
@@ -129,6 +146,8 @@ export interface Finance {
   client_name: string | null
   finance_type: string
   type_label: string | null
+  article_id: number | null
+  article_name: string | null
   amount: number
   sign: number
   signed_amount: number | null

@@ -36,6 +36,8 @@ class OrderCreate(BaseModel):
     exchange_notes: Optional[str] = None
     price_override: Optional[float] = None
     notes: Optional[str] = None
+    parent_order_id: Optional[int] = None
+    delivered_qty: Optional[float] = None
 
 
 class OrderUpdate(BaseModel):
@@ -48,6 +50,7 @@ class OrderUpdate(BaseModel):
     exchange_notes: Optional[str] = None
     price_override: Optional[float] = None
     notes: Optional[str] = None
+    delivered_qty: Optional[float] = None
 
 
 class OrderOut(BaseModel):
@@ -66,3 +69,5 @@ class OrderOut(BaseModel):
     price_override: Optional[float]
     notes: Optional[str]
     created_at: Optional[str]
+    parent_order_id: Optional[int]
+    delivered_qty: Optional[float]

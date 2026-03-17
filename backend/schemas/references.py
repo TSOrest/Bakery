@@ -51,6 +51,7 @@ class ProductCreate(BaseModel):
     unit_id: Optional[int] = None
     category_id: Optional[int] = None
     is_active: int = 1
+    initial_stock: float = 0
 
 
 class ProductUpdate(BaseModel):
@@ -63,6 +64,7 @@ class ProductUpdate(BaseModel):
     category_id: Optional[int] = None
     cost_per_unit: Optional[float] = None
     is_active: Optional[int] = None
+    initial_stock: Optional[float] = None
 
 
 class ProductOut(BaseModel):
@@ -76,6 +78,7 @@ class ProductOut(BaseModel):
     category_id: Optional[int]
     cost_per_unit: float
     is_active: int
+    initial_stock: float
 
 
 # --- Ingredients ---
@@ -140,6 +143,13 @@ class ClientCreate(BaseModel):
     accountant: Optional[str] = None
     route_id: Optional[int] = None
     discount_pct: float = 0
+    is_own_shop: int = 0
+    print_invoice: int = 1
+    receiver_name: Optional[str] = None
+    delivery_agent: Optional[str] = None
+    delivery_note_number: Optional[str] = None
+    delivery_note_date: Optional[str] = None
+    client_group: Optional[str] = None
 
 
 class ClientUpdate(BaseModel):
@@ -152,6 +162,13 @@ class ClientUpdate(BaseModel):
     route_id: Optional[int] = None
     discount_pct: Optional[float] = None
     is_active: Optional[int] = None
+    is_own_shop: Optional[int] = None
+    print_invoice: Optional[int] = None
+    receiver_name: Optional[str] = None
+    delivery_agent: Optional[str] = None
+    delivery_note_number: Optional[str] = None
+    delivery_note_date: Optional[str] = None
+    client_group: Optional[str] = None
 
 
 class ClientOut(BaseModel):
@@ -164,3 +181,10 @@ class ClientOut(BaseModel):
     route_id: Optional[int]
     discount_pct: float
     is_active: int
+    is_own_shop: int
+    print_invoice: int
+    receiver_name: Optional[str]
+    delivery_agent: Optional[str]
+    delivery_note_number: Optional[str]
+    delivery_note_date: Optional[str]
+    client_group: Optional[str]

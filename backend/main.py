@@ -13,7 +13,7 @@ import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
-    auth, cancellations, settings, finances, ingredients, dashboard,
+    auth, cancellations, settings, finances, finances_articles, ingredients, dashboard,
 )
 
 # Ініціалізуємо таблиці (якщо не існують)
@@ -51,6 +51,16 @@ DEFAULT_SETTINGS = {
 }
 
 
+DEFAULT_FINANCE_ARTICLES = [
+    ("Накладна",        "expense", 1),
+    ("Оплата",          "income",  1),
+    ("Списання",        "income",  1),
+    ("Внесення в касу", "income",  1),
+    ("Готівка водія",   "income",  1),
+    ("Кредит обміну",   "expense", 1),
+]
+
+
 def _seed_initial_data() -> None:
     """Заповнює початкові дані якщо БД порожня."""
     import hashlib, secrets, json
@@ -58,6 +68,7 @@ def _seed_initial_data() -> None:
     from sqlalchemy.orm import Session as OrmSession
     from backend.models.auth import User
     from backend.models.settings import Setting
+    from backend.models.finances import FinanceArticle
 
     with OrmSession(engine) as db:
         # Налаштування
@@ -69,6 +80,11 @@ def _seed_initial_data() -> None:
         perm_row = db.get(Setting, "role_permissions")
         if perm_row and not perm_row.value:
             perm_row.value = json.dumps(DEFAULT_ROLE_PERMISSIONS, ensure_ascii=False)
+
+        # Статті фінансів
+        if db.query(FinanceArticle).count() == 0:
+            for name, direction, is_system in DEFAULT_FINANCE_ARTICLES:
+                db.add(FinanceArticle(name=name, direction=direction, is_system=is_system))
 
         # Користувачі
         if db.query(User).count() == 0:
@@ -122,8 +138,9 @@ app.include_router(print_views.router,   prefix=PREFIX)
 app.include_router(auth.router,          prefix=PREFIX)
 app.include_router(cancellations.router, prefix=PREFIX)
 app.include_router(settings.router,      prefix=PREFIX)
-app.include_router(finances.router,      prefix=PREFIX)
-app.include_router(ingredients.router,   prefix=PREFIX)
+app.include_router(finances.router,          prefix=PREFIX)
+app.include_router(finances_articles.router, prefix=PREFIX)
+app.include_router(ingredients.router,       prefix=PREFIX)
 app.include_router(dashboard.router,     prefix=PREFIX)
 
 

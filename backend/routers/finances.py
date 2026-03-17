@@ -8,22 +8,28 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.finances import Finance
 from backend.models.references import Client
+from backend.models.finances import FinanceArticle
 from backend.schemas.finance import (
     FinanceCreate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
 )
-from backend.services.finance import (
-    get_all_balances, get_client_balance, get_summary,
-)
+from backend.services.finance import get_all_balances, get_summary
 
 router = APIRouter(prefix="/finances", tags=["Фінанси"])
 
 
 def _enrich(entry: Finance, db: Session) -> FinanceOut:
-    """Додає client_name, type_label, signed_amount до запису."""
+    """Додає client_name, type_label, article_name, signed_amount до запису."""
     client_name = None
     if entry.client_id:
         c = db.get(Client, entry.client_id)
         client_name = c.short_name or c.full_name if c else None
+
+    article_name = None
+    if entry.article_id:
+        a = db.get(FinanceArticle, entry.article_id)
+        article_name = a.name if a else None
+
+    type_label = article_name or FINANCE_LABELS.get(entry.finance_type, entry.finance_type)
 
     return FinanceOut(
         id            = entry.id,
@@ -31,7 +37,9 @@ def _enrich(entry: Finance, db: Session) -> FinanceOut:
         client_id     = entry.client_id,
         client_name   = client_name,
         finance_type  = entry.finance_type,
-        type_label    = FINANCE_LABELS.get(entry.finance_type, entry.finance_type),
+        type_label    = type_label,
+        article_id    = entry.article_id,
+        article_name  = article_name,
         amount        = entry.amount,
         sign          = entry.sign,
         signed_amount = round(entry.amount * entry.sign, 2),
@@ -114,6 +122,7 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
         finance_date = data.finance_date,
         client_id    = data.client_id,
         finance_type = data.finance_type,
+        article_id   = data.article_id,
         amount       = data.amount,
         sign         = data.sign,
         notes        = data.notes,

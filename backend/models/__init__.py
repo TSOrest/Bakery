@@ -10,7 +10,7 @@ from backend.models.baking import BakingTask, SurplusAllocation, SurplusAllocati
 from backend.models.invoices import Invoice, InvoiceLine
 from backend.models.movements import Movement, DailyBalance
 from backend.models.shop import ShopCount, OtherStockIn
-from backend.models.finances import Finance
+from backend.models.finances import Finance, FinanceArticle
 from backend.models.settings import Setting
 from backend.models.cancellations import RouteCancellation, CancellationLine
 from backend.models.auth import User, UserSession
@@ -24,7 +24,7 @@ __all__ = [
     "Invoice", "InvoiceLine",
     "Movement", "DailyBalance",
     "ShopCount", "OtherStockIn",
-    "Finance",
+    "Finance", "FinanceArticle",
     "Setting",
     "RouteCancellation", "CancellationLine",
     "User", "UserSession",

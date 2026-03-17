@@ -34,6 +34,7 @@ class Product(Base):
     cost_per_unit = Column(Float, default=0)
     is_active     = Column(Integer, default=1)
     created_at    = Column(Text)
+    initial_stock = Column(Float, default=0)       # початковий залишок для першої звірки
 
     unit     = relationship("Unit")
     category = relationship("Category")
@@ -92,16 +93,24 @@ class Route(Base):
 class Client(Base):
     __tablename__ = "clients"
 
-    id           = Column(Integer, primary_key=True, autoincrement=True)
-    full_name    = Column(Text, nullable=False)
-    short_name   = Column(Text)
-    address      = Column(Text)
-    phone        = Column(Text)
-    director     = Column(Text)
-    accountant   = Column(Text)
-    route_id     = Column(Integer, ForeignKey("routes.id"))
-    discount_pct = Column(Float, default=0)
-    is_active    = Column(Integer, default=1)
-    created_at   = Column(Text)
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    full_name            = Column(Text, nullable=False)
+    short_name           = Column(Text)
+    address              = Column(Text)
+    phone                = Column(Text)
+    director             = Column(Text)
+    accountant           = Column(Text)
+    route_id             = Column(Integer, ForeignKey("routes.id"))
+    discount_pct         = Column(Float, default=0)
+    is_active            = Column(Integer, default=1)
+    created_at           = Column(Text)
+    # Нові поля фази 3.5
+    is_own_shop          = Column(Integer, default=0)   # 1 = власний магазин пекарні
+    print_invoice        = Column(Integer, default=1)   # 1 = друкувати накладну
+    receiver_name        = Column(Text)                 # ПІБ того хто приймає товар
+    delivery_agent       = Column(Text)                 # через кого відправляється
+    delivery_note_number = Column(Text)                 # номер доручення
+    delivery_note_date   = Column(Text)                 # дата доручення
+    client_group         = Column(Text)                 # підгрупа в маршруті
 
     route = relationship("Route", back_populates="clients")

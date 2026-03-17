@@ -1,15 +1,43 @@
 """Ендпоінти для замовлень."""
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from backend.database import get_db
 from backend.models.orders import Order
 from backend.schemas.orders import OrderCreate, OrderUpdate, OrderOut
 from backend.services.orders import copy_orders
 
 router = APIRouter(prefix="/orders", tags=["Замовлення"])
+
+
+# ── Середні замовлення (фіксований маршрут перед /{order_id}) ─────────────────
+
+@router.get("/averages", response_model=Dict[int, float])
+def order_averages(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Середня кількість по кожному виробу за період (за замовчуванням — останні 30 днів)."""
+    if not date_to:
+        date_to = date.today().isoformat()
+    if not date_from:
+        date_from = (date.today() - timedelta(days=30)).isoformat()
+
+    rows = (
+        db.query(Order.product_id, func.avg(Order.qty).label("avg_qty"))
+        .filter(
+            Order.order_date >= date_from,
+            Order.order_date <= date_to,
+            Order.parent_order_id.is_(None),   # тільки основні рядки
+        )
+        .group_by(Order.product_id)
+        .all()
+    )
+    return {row.product_id: round(row.avg_qty, 1) for row in rows}
 
 
 @router.get("/", response_model=List[OrderOut])
