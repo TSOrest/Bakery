@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { Client, Order, Product, Route } from '../types'
+import OrderModal from '../components/OrderModal'
 import styles from './OrdersPage.module.css'
 
-type CellKey = `${number}-${number}` // `${clientId}-${productId}`
+type CellKey = `${number}-${number}`
 type SavingMap = Record<CellKey, 'saving' | 'saved' | 'error'>
 
 export default function OrdersPage() {
@@ -14,13 +15,12 @@ export default function OrdersPage() {
   const [clients,  setClients]  = useState<Client[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [orders,   setOrders]   = useState<Order[]>([])
-  const [averages, setAverages] = useState<Record<number, number>>({})
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState<SavingMap>({})
 
-  // Навігація
+  const [selectedRouteId,  setSelectedRouteId]  = useState<number | null>(null)
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null)
-  const [expandedRoutes,   setExpandedRoutes]   = useState<Set<number>>(new Set())
+  const [modalClientId,    setModalClientId]    = useState<number | null>(null)
 
   // Копіювання
   const [showCopy,     setShowCopy]     = useState(false)
@@ -29,8 +29,6 @@ export default function OrdersPage() {
   const [copyResult,   setCopyResult]   = useState<string | null>(null)
 
   const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
-  const inputRefs = useRef<Record<number, HTMLInputElement | null>>({})
-  const selectedClientRef = useRef<HTMLButtonElement | null>(null)
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -41,49 +39,16 @@ export default function OrdersPage() {
       api.get<Client[]>('/clients/'),
       api.get<Product[]>('/products/'),
       api.get<Order[]>(`/orders/?order_date=${date}`),
-      api.get<Record<number, number>>('/orders/averages'),
-    ]).then(([r, c, p, o, avg]) => {
+    ]).then(([r, c, p, o]) => {
       setRoutes(r.filter(rt => rt.is_active).sort((a, b) => a.sort_order - b.sort_order))
       setClients(c)
       setProducts(p)
       setOrders(o)
-      setAverages(avg)
-      // Розкриваємо перший маршрут з клієнтами
-      const firstActive = r.find(rt => rt.is_active && c.some(cl => cl.route_id === rt.id && cl.is_active))
-      if (firstActive) setExpandedRoutes(new Set([firstActive.id]))
       setLoading(false)
     })
   }
 
   useEffect(() => { loadAll(workDate) }, [workDate])
-
-  // Прокручуємо сайдбар до вибраного клієнта при переходах
-  useEffect(() => {
-    selectedClientRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selectedClientId])
-
-  // Скидаємо refs на інпути при зміні клієнта
-  useEffect(() => { inputRefs.current = {} }, [selectedClientId])
-
-  // ─── Допоміжні ─────────────────────────────────────────────────────────────
-
-  const getOrder = (clientId: number, productId: number): Order | undefined =>
-    orders.find(o => o.client_id === clientId && o.product_id === productId && o.parent_order_id == null)
-
-  const getQty = (clientId: number, productId: number): number =>
-    getOrder(clientId, productId)?.qty ?? 0
-
-  // Дочірні рядки для даного parent order id
-  const getChildren = (parentId: number): Order[] =>
-    orders.filter(o => o.parent_order_id === parentId)
-
-  // Перевірка на потенційний дублікат
-  const isDuplicate = (clientId: number, productId: number): boolean => {
-    const matches = orders.filter(o =>
-      o.client_id === clientId && o.product_id === productId && o.parent_order_id == null
-    )
-    return matches.length > 1
-  }
 
   // ─── Збереження з дебаунсом ────────────────────────────────────────────────
 
@@ -150,83 +115,87 @@ export default function OrdersPage() {
     finally { setCopyLoading(false) }
   }
 
-  // ─── Підсумки ──────────────────────────────────────────────────────────────
+  // ─── Індекси для швидкого пошуку ──────────────────────────────────────────
 
-  const clientTotal = (clientId: number): number =>
-    orders.filter(o => o.client_id === clientId && o.parent_order_id == null).reduce((s, o) => s + o.qty, 0)
+  const clientMap  = useMemo(() => new Map(clients.map(c => [c.id, c])),   [clients])
+  const routeMap   = useMemo(() => new Map(routes.map(r => [r.id, r])),    [routes])
+  const productMap = useMemo(() => new Map(products.map(p => [p.id, p])),  [products])
 
-  const hasOrders = (clientId: number): boolean =>
-    orders.some(o => o.client_id === clientId && o.qty > 0 && o.parent_order_id == null)
+  // ─── Підрахунки по клієнту ────────────────────────────────────────────────
+
+  const clientBread = (id: number) =>
+    orders.filter(o => o.client_id === id && o.parent_order_id == null)
+      .reduce((s, o) => s + (productMap.get(o.product_id)?.type === 'bread' ? o.qty : 0), 0)
+
+  const clientBun = (id: number) =>
+    orders.filter(o => o.client_id === id && o.parent_order_id == null)
+      .reduce((s, o) => s + (productMap.get(o.product_id)?.type === 'bun' ? o.qty : 0), 0)
 
   // ─── Рендер ────────────────────────────────────────────────────────────────
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  const activeProducts = products.filter(p => p.is_active)
-  const selectedClient = clients.find(c => c.id === selectedClientId)
-  const selId = selectedClientId ?? 0  // non-null alias for use inside JSX
+  // Клієнти в сайдбарі (відфільтровані за маршрутом)
+  const sidebarClients = clients.filter(c =>
+    c.is_active && (selectedRouteId == null || c.route_id === selectedRouteId)
+  )
 
-  // Вироби впорядковані: з замовленнями → решта, в межах кожної групи за назвою
-  const sortedProducts = selectedClientId
-    ? [...activeProducts].sort((a, b) => {
-        const aHas = getQty(selId, a.id) > 0 ? 0 : 1
-        const bHas = getQty(selId, b.id) > 0 ? 0 : 1
-        if (aHas !== bHas) return aHas - bHas
-        return a.name.localeCompare(b.name, 'uk')
-      })
-    : activeProducts
-
-  // Плоский список клієнтів у порядку сайдбару — для Enter-навігації
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const orderedClients = useMemo(() => {
-    const result: number[] = []
-    for (const route of routes) {
-      const routeClients = clients.filter(c => c.route_id === route.id && c.is_active)
-      const grouped: Record<string, Client[]> = {}
-      for (const c of routeClients) {
-        const g = c.client_group ?? ''
-        if (!grouped[g]) grouped[g] = []
-        grouped[g].push(c)
+  // Замовлення для таблиці (без дочірніх, з кількістю > 0)
+  const ordersToShow = orders
+    .filter(o => {
+      if (o.parent_order_id != null || o.qty <= 0) return false
+      if (selectedRouteId != null) {
+        const c = clientMap.get(o.client_id)
+        if (c?.route_id !== selectedRouteId) return false
       }
-      for (const gClients of Object.values(grouped)) {
-        result.push(...gClients.map(c => c.id))
-      }
-    }
-    return result
-  }, [routes, clients])
+      if (selectedClientId != null && o.client_id !== selectedClientId) return false
+      return true
+    })
+    .sort((a, b) => {
+      const ca = clientMap.get(a.client_id); const cb = clientMap.get(b.client_id)
+      const ra = routeMap.get(ca?.route_id ?? 0); const rb = routeMap.get(cb?.route_id ?? 0)
+      const rOrd = (ra?.sort_order ?? 0) - (rb?.sort_order ?? 0)
+      if (rOrd !== 0) return rOrd
+      const cName = (ca?.short_name ?? ca?.full_name ?? '').localeCompare(cb?.short_name ?? cb?.full_name ?? '', 'uk')
+      if (cName !== 0) return cName
+      return (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
+    })
 
-  const currentPos = selectedClientId != null ? orderedClients.indexOf(selectedClientId) : -1
-
-  // Перейти до наступного клієнта в сайдбарі
-  const goToNextClient = () => {
-    if (currentPos < 0 || currentPos >= orderedClients.length - 1) return
-    const nextId = orderedClients[currentPos + 1]
-    const client = clients.find(c => c.id === nextId)
-    if (client?.route_id) setExpandedRoutes(prev => new Set([...prev, client.route_id!]))
-    setSelectedClientId(nextId)
+  // Badge маршруту: кількість клієнтів з замовленнями / всього
+  const routeBadge = (routeId: number | null) => {
+    const rc = routeId == null
+      ? clients.filter(c => c.is_active)
+      : clients.filter(c => c.is_active && c.route_id === routeId)
+    const withOrders = rc.filter(c => orders.some(o => o.client_id === c.id && o.qty > 0 && o.parent_order_id == null))
+    return `${withOrders.length}/${rc.length}`
   }
 
-  // Enter у полі qty → наступне поле; Enter в останньому → наступний клієнт
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, productId: number) => {
-    if (e.key !== 'Enter') return
-    e.preventDefault()
-    const idx = sortedProducts.findIndex(p => p.id === productId)
-    if (idx >= 0 && idx < sortedProducts.length - 1) {
-      inputRefs.current[sortedProducts[idx + 1].id]?.focus()
-    } else {
-      goToNextClient()
-    }
-  }
+  const modalClient = modalClientId != null ? clientMap.get(modalClientId) : undefined
+
+  const showRouteCol  = selectedRouteId == null
+  const showClientCol = selectedClientId == null
+  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 2
+
+  const openBakingPrint = (type: 'bread' | 'bun') =>
+    window.open(`/api/v1/print/baking?task_date=${workDate}&product_type=${type}`, '_blank')
 
   return (
     <div className={styles.page}>
 
-      {/* Toolbar */}
+      {/* ── Toolbar ── */}
       <div className={styles.toolbar}>
         <h2 className={styles.title}>Замовлення — {workDate}</h2>
         <button className={styles.btnCopy} onClick={() => { setShowCopy(v => !v); setCopyResult(null) }}>
           Скопіювати з дати
         </button>
+        <div className={styles.bakingBtns}>
+          <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>
+            Завдання Хліб
+          </button>
+          <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>
+            Завдання Булки
+          </button>
+        </div>
       </div>
 
       {showCopy && (
@@ -243,180 +212,125 @@ export default function OrdersPage() {
 
       <div className={styles.layout}>
 
-        {/* ── Ліва панель: маршрути → клієнти ── */}
+        {/* ── Ліва панель ── */}
         <aside className={styles.sidebar}>
-          {routes.map(route => {
-            const routeClients = clients.filter(c => c.route_id === route.id && c.is_active)
-            if (routeClients.length === 0) return null
-            const isExpanded = expandedRoutes.has(route.id)
 
-            // Групуємо клієнтів по client_group
-            const grouped: Record<string, Client[]> = {}
-            for (const c of routeClients) {
-              const g = c.client_group ?? ''
-              if (!grouped[g]) grouped[g] = []
-              grouped[g].push(c)
-            }
+          {/* Фільтр маршрутів */}
+          <div className={styles.routeFilter}>
+            <button
+              className={`${styles.routeBtn} ${selectedRouteId == null ? styles.routeBtnActive : ''}`}
+              onClick={() => { setSelectedRouteId(null); setSelectedClientId(null) }}
+            >
+              <span className={styles.routeBtnName}>Всі маршрути</span>
+              <span className={styles.routeBtnBadge}>{routeBadge(null)}</span>
+            </button>
+            {routes.map(route => (
+              <button
+                key={route.id}
+                className={`${styles.routeBtn} ${selectedRouteId === route.id ? styles.routeBtnActive : ''}`}
+                onClick={() => { setSelectedRouteId(route.id); setSelectedClientId(null) }}
+              >
+                <span className={styles.routeBtnName}>{route.name}</span>
+                <span className={styles.routeBtnBadge}>{routeBadge(route.id)}</span>
+              </button>
+            ))}
+          </div>
 
-            return (
-              <div key={route.id} className={styles.routeGroup}>
-                <button
-                  className={styles.routeHeader}
-                  onClick={() => setExpandedRoutes(prev => {
-                    const n = new Set(prev)
-                    n.has(route.id) ? n.delete(route.id) : n.add(route.id)
-                    return n
-                  })}
-                >
-                  <span className={styles.routeArrow}>{isExpanded ? '▾' : '▸'}</span>
-                  <span className={styles.routeName}>{route.name}</span>
-                  <span className={styles.routeBadge}>
-                    {routeClients.filter(c => hasOrders(c.id)).length}/{routeClients.length}
-                  </span>
-                </button>
-
-                {isExpanded && Object.entries(grouped).map(([group, gClients]) => (
-                  <div key={group}>
-                    {group && <div className={styles.groupLabel}>{group}</div>}
-                    {gClients.map(client => {
-                      const total = clientTotal(client.id)
-                      const isSelected = client.id === selectedClientId
-                      return (
-                        <button
-                          key={client.id}
-                          ref={isSelected ? selectedClientRef : undefined}
-                          className={`${styles.clientRow} ${isSelected ? styles.clientSelected : ''} ${total > 0 ? styles.clientHasOrders : ''}`}
-                          onClick={() => setSelectedClientId(client.id)}
-                        >
-                          <span className={styles.clientName}>
-                            {client.short_name ?? client.full_name}
-                          </span>
-                          {total > 0 && <span className={styles.clientTotal}>{total}</span>}
-                        </button>
-                      )
-                    })}
+          {/* Список клієнтів */}
+          <div className={styles.clientListWrap}>
+            <div className={styles.clientListHeader}>
+              <span className={styles.chName}>Клієнт</span>
+              <span className={styles.chNum} title="Хліб">Хл</span>
+              <span className={styles.chNum} title="Булки">Бул</span>
+              <span className={styles.chBtn}></span>
+            </div>
+            <div className={styles.clientList}>
+              {sidebarClients.map(client => {
+                const bread = clientBread(client.id)
+                const bun   = clientBun(client.id)
+                const hasAny = bread > 0 || bun > 0
+                const isSel  = client.id === selectedClientId
+                return (
+                  <div
+                    key={client.id}
+                    className={`${styles.clientItem} ${isSel ? styles.clientSel : ''} ${hasAny ? styles.clientHas : ''}`}
+                    onClick={() => setSelectedClientId(isSel ? null : client.id)}
+                  >
+                    <span className={styles.ciName}>{client.short_name ?? client.full_name}</span>
+                    <span className={`${styles.ciNum} ${bread > 0 ? styles.ciNumActive : ''}`}>{bread || ''}</span>
+                    <span className={`${styles.ciNum} ${bun  > 0 ? styles.ciNumActive : ''}`}>{bun  || ''}</span>
+                    <button
+                      className={styles.ciAddBtn}
+                      title="Відкрити замовлення"
+                      onClick={e => { e.stopPropagation(); setModalClientId(client.id) }}
+                    >+</button>
                   </div>
-                ))}
-              </div>
-            )
-          })}
+                )
+              })}
+            </div>
+          </div>
         </aside>
 
-        {/* ── Права панель: замовлення клієнта ── */}
+        {/* ── Таблиця замовлень ── */}
         <main className={styles.main}>
-          {!selectedClient ? (
-            <div className={styles.placeholder}>← Оберіть клієнта зі списку</div>
-          ) : (
-            <>
-              <div className={styles.clientHeader}>
-                <div>
-                  <strong>{selectedClient.full_name}</strong>
-                  {selectedClient.short_name && <span className={styles.clientAlt}> ({selectedClient.short_name})</span>}
-                  {selectedClient.address && <span className={styles.clientAddr}> · {selectedClient.address}</span>}
-                </div>
-                <div className={styles.clientMeta}>
-                  {selectedClient.is_own_shop ? <span className={styles.ownShopBadge}>Власний магазин</span> : null}
-                  {selectedClient.phone && <span>{selectedClient.phone}</span>}
-                </div>
-              </div>
-
-              <table className={styles.productTable}>
-                <thead>
-                  <tr>
-                    <th className={styles.thProd}>Виріб</th>
-                    <th className={styles.thAvg} title="Середнє за 30 днів">~30д</th>
-                    <th className={styles.thQty}>Кількість</th>
+          <table className={styles.ordersTable}>
+            <thead>
+              <tr>
+                {showRouteCol  && <th className={styles.thRoute}>Маршрут</th>}
+                {showClientCol && <th className={styles.thClient}>Клієнт</th>}
+                <th className={styles.thProduct}>Виріб</th>
+                <th className={styles.thQty}>Кільк.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordersToShow.map(order => {
+                const client  = clientMap.get(order.client_id)
+                const route   = routeMap.get(client?.route_id ?? 0)
+                const product = productMap.get(order.product_id)
+                const isSel   = order.client_id === selectedClientId
+                return (
+                  <tr
+                    key={order.id}
+                    className={`${styles.orderRow} ${isSel ? styles.orderRowSel : ''}`}
+                    onClick={() => setSelectedClientId(
+                      selectedClientId === order.client_id ? null : order.client_id
+                    )}
+                  >
+                    {showRouteCol  && <td className={styles.tdRoute}>{route?.name ?? '—'}</td>}
+                    {showClientCol && (
+                      <td className={styles.tdClient}>
+                        {client?.short_name ?? client?.full_name ?? '—'}
+                      </td>
+                    )}
+                    <td className={styles.tdProduct}>{product?.name ?? '—'}</td>
+                    <td className={styles.tdQty}>{order.qty}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {sortedProducts.map(product => {
-                    const key: CellKey = `${selId}-${product.id}`
-                    const state = saving[key]
-                    const qty = getQty(selId, product.id)
-                    const avg = averages[product.id]
-                    const order = getOrder(selId, product.id)
-                    const children = order ? getChildren(order.id) : []
-                    const dup = isDuplicate(selId, product.id)
-
-                    return (
-                      <>
-                        <tr key={product.id} className={`${styles.productRow} ${qty > 0 ? styles.hasQty : ''}`}>
-                          <td className={styles.tdProd}>
-                            <span className={styles.prodName}>{product.name}</span>
-                            {product.weight ? <span className={styles.prodWeight}> {product.weight}кг</span> : null}
-                            {dup && <span className={styles.dupWarn} title="Можливий дублікат">!</span>}
-                          </td>
-                          <td className={styles.tdAvg}>
-                            {avg ? <span className={styles.avgHint}>{avg}</span> : null}
-                          </td>
-                          <td className={styles.tdQty}>
-                            <input
-                              ref={el => { inputRefs.current[product.id] = el }}
-                              type="number"
-                              min={0}
-                              step={1}
-                              value={qty || ''}
-                              placeholder="—"
-                              className={
-                                styles.qtyInput +
-                                (state === 'saving' ? ' ' + styles.saving : '') +
-                                (state === 'saved'  ? ' ' + styles.saved  : '') +
-                                (state === 'error'  ? ' ' + styles.error  : '')
-                              }
-                              onFocus={e => e.target.select()}
-                              onChange={e => handleQtyChange(selId, product.id, Number(e.target.value))}
-                              onKeyDown={e => handleInputKeyDown(e, product.id)}
-                            />
-                          </td>
-                        </tr>
-                        {/* Дочірні рядки (переміщення) */}
-                        {children.map(child => {
-                          const childClient = clients.find(c => c.id === child.client_id)
-                          return (
-                            <tr key={`child-${child.id}`} className={styles.childRow}>
-                              <td className={styles.tdProd} style={{ paddingLeft: '2rem' }}>
-                                <span className={styles.childArrow}>↳</span>
-                                {childClient ? (childClient.short_name ?? childClient.full_name) : `Клієнт #${child.client_id}`}
-                              </td>
-                              <td className={styles.tdAvg} />
-                              <td className={styles.tdQty}>
-                                <span className={styles.childQty}>{child.qty}</span>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className={styles.totalRow}>
-                    <td colSpan={2}><strong>Разом</strong></td>
-                    <td className={styles.tdQty}>
-                      <strong>{clientTotal(selId)}</strong>
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-
-              {/* Навігація між клієнтами */}
-              <div className={styles.navFooter}>
-                <span className={styles.navPos}>
-                  {currentPos + 1} / {orderedClients.length}
-                </span>
-                <button
-                  className={styles.btnNext}
-                  onClick={goToNextClient}
-                  disabled={currentPos >= orderedClients.length - 1}
-                >
-                  Наступний клієнт →
-                </button>
-              </div>
-            </>
-          )}
+                )
+              })}
+              {ordersToShow.length === 0 && (
+                <tr>
+                  <td colSpan={colCount} className={styles.emptyMsg}>— Замовлень немає —</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </main>
 
       </div>
+
+      {/* ── Модальне вікно ── */}
+      {modalClient && (
+        <OrderModal
+          client={modalClient}
+          workDate={workDate}
+          products={products}
+          orders={orders}
+          saving={saving}
+          onQtyChange={handleQtyChange}
+          onClose={() => setModalClientId(null)}
+        />
+      )}
+
     </div>
   )
 }

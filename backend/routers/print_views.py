@@ -1,5 +1,6 @@
 """Ендпоінти для друку: повертають готовий HTML для відкриття у браузері."""
 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -338,7 +339,7 @@ def print_invoices(
 # ─── Завдання пекарям ─────────────────────────────────────────────────────────
 
 @router.get("/baking", response_class=HTMLResponse)
-def print_baking(task_date: str, db: Session = Depends(get_db)):
+def print_baking(task_date: str, product_type: Optional[str] = None, db: Session = Depends(get_db)):
     tasks = (
         db.query(BakingTask)
         .filter(BakingTask.task_date == task_date)
@@ -357,8 +358,9 @@ def print_baking(task_date: str, db: Session = Depends(get_db)):
         ptype   = product.type if product else "other"
         groups.setdefault(ptype, []).append(task)
 
+    types_to_render = [product_type] if product_type in ("bread", "bun", "other") else ["bread", "bun", "other"]
     groups_html = ""
-    for ptype in ["bread", "bun", "other"]:
+    for ptype in types_to_render:
         group = groups.get(ptype, [])
         if not group:
             continue

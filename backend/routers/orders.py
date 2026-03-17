@@ -17,6 +17,7 @@ router = APIRouter(prefix="/orders", tags=["Замовлення"])
 
 @router.get("/averages", response_model=Dict[int, float])
 def order_averages(
+    client_id: Optional[int] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -27,16 +28,17 @@ def order_averages(
     if not date_from:
         date_from = (date.today() - timedelta(days=30)).isoformat()
 
-    rows = (
+    q = (
         db.query(Order.product_id, func.avg(Order.qty).label("avg_qty"))
         .filter(
             Order.order_date >= date_from,
             Order.order_date <= date_to,
-            Order.parent_order_id.is_(None),   # тільки основні рядки
+            Order.parent_order_id.is_(None),
         )
-        .group_by(Order.product_id)
-        .all()
     )
+    if client_id:
+        q = q.filter(Order.client_id == client_id)
+    rows = q.group_by(Order.product_id).all()
     return {row.product_id: round(row.avg_qty, 1) for row in rows}
 
 
