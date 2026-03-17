@@ -232,12 +232,26 @@ def _report_debts() -> str:
 HELP_TEXT = """\
 📌 <b>Команди бота Пекарня:</b>
 
-/звіт — фінансовий підсумок + топ боржники
-/борги — повний список боржників
-/замовлення — замовлення на сьогодні
-/випічка — стан випічки сьогодні
-/допомога — ця підказка
+/report — 💰 Фінансовий підсумок + топ боржники
+/debts — 📉 Повний список боржників
+/orders — 📋 Замовлення на сьогодні
+/baking — 🍞 Стан випічки сьогодні
+/help — ❓ Ця підказка
 """
+
+# Команди які реєструються в меню Telegram (тільки латиниця)
+BOT_COMMANDS = [
+    {"command": "report",  "description": "💰 Фінансовий підсумок + топ боржники"},
+    {"command": "debts",   "description": "📉 Повний список боржників"},
+    {"command": "orders",  "description": "📋 Замовлення на сьогодні"},
+    {"command": "baking",  "description": "🍞 Стан випічки сьогодні"},
+    {"command": "help",    "description": "❓ Список команд"},
+]
+
+
+def _set_my_commands(token: str) -> None:
+    """Реєструє команди в меню бота (кнопка '/' у чаті)."""
+    _api(token, "setMyCommands", commands=BOT_COMMANDS)
 
 
 # ── Обробка оновлень ─────────────────────────────────────────────────────────
@@ -285,17 +299,18 @@ def _handle_update(token: str, update: dict) -> None:
               _request_contact_keyboard())
         return
 
-    cmd = text.lower().split()[0] if text else ""
+    # Беремо першу частину тексту і прибираємо @botname суфікс якщо є
+    cmd = (text.lower().split()[0] if text else "").split("@")[0]
 
-    if cmd in ("/звіт", "/звіт"):
+    if cmd in ("/report", "/звіт"):
         _send(token, chat_id, _report_finance())
-    elif cmd == "/борги":
+    elif cmd in ("/debts", "/борги"):
         _send(token, chat_id, _report_debts())
-    elif cmd == "/замовлення":
+    elif cmd in ("/orders", "/замовлення"):
         _send(token, chat_id, _report_orders())
-    elif cmd == "/випічка":
+    elif cmd in ("/baking", "/випічка"):
         _send(token, chat_id, _report_baking())
-    elif cmd in ("/допомога", "/help"):
+    elif cmd in ("/help", "/допомога"):
         _send(token, chat_id, HELP_TEXT)
     elif text:
         _send(token, chat_id, f"Невідома команда: {text}\n\n" + HELP_TEXT)
@@ -305,6 +320,7 @@ def _handle_update(token: str, update: dict) -> None:
 
 def _polling_loop(token: str, stop: threading.Event) -> None:
     log.info("Telegram bot started (polling)")
+    _set_my_commands(token)
     offset = 0
     while not stop.is_set():
         try:
