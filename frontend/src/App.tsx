@@ -9,6 +9,7 @@ import RoutesPage from './pages/RoutesPage'
 import ShopPage from './pages/ShopPage'
 import FinancesPage from './pages/FinancesPage'
 import AdminPage from './pages/AdminPage'
+import OwnerDashboard from './pages/OwnerDashboard'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -22,6 +23,17 @@ function AppRoutes() {
   }
 
   if (!user) return <LoginPage />
+
+  // Власник бачить тільки свій дашборд (без основного лейауту)
+  if (user.role === 'owner') {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="*" element={<OwnerDashboard />} />
+        </Routes>
+      </BrowserRouter>
+    )
+  }
 
   return (
     <DateProvider>
