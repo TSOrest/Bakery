@@ -1,13 +1,13 @@
 $ROOT = Split-Path -Parent $PSScriptRoot
 
-Write-Host "Stopping old processes..."
+Write-Host '=== Bakery — Production Start ===' -ForegroundColor Cyan
 
-# Kill all Python processes running uvicorn
+# Kill old uvicorn processes
 Get-CimInstance Win32_Process |
-    Where-Object { $_.Name -like "python*" -and $_.CommandLine -like "*uvicorn*" } |
+    Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*uvicorn*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-# Kill node processes on Vite ports
+# Kill Vite node processes
 Get-Process -Name node -ErrorAction SilentlyContinue |
     Where-Object {
         $conns = Get-NetTCPConnection -OwningProcess $_.Id -ErrorAction SilentlyContinue
@@ -17,41 +17,53 @@ Get-Process -Name node -ErrorAction SilentlyContinue |
 
 Start-Sleep -Seconds 1
 
-# Backend
-$python = Join-Path $ROOT "backend\venv\Scripts\python.exe"
+# Check venv
+$python = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
 if (-not (Test-Path $python)) {
-    Write-Host "ERROR: venv not found. Run install.bat first." -ForegroundColor Red
-    Read-Host "Press Enter"
+    Write-Host 'ERROR: venv not found. Run install.bat first.' -ForegroundColor Red
+    Read-Host 'Press Enter'
     exit 1
 }
 
-Write-Host "Starting backend on port 8000..."
-Start-Process -FilePath $python `
-    -ArgumentList "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000" `
-    -WorkingDirectory $ROOT `
-    -WindowStyle Normal
-Start-Sleep -Seconds 2
-
-# Frontend
-Write-Host "Starting frontend on port 5173..."
+# Find npm
 $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source
-if (-not $npm) { $npm = "C:\Program Files\nodejs\npm.cmd" }
-$env:CHOKIDAR_USEPOLLING = "1"
-Start-Process -FilePath $npm `
-    -ArgumentList "run dev -- --host 0.0.0.0" `
-    -WorkingDirectory (Join-Path $ROOT "frontend") `
+if (-not $npm) { $npm = 'C:\Program Files\nodejs\npm.cmd' }
+
+# Build frontend
+Write-Host 'Building frontend...' -ForegroundColor Yellow
+$build = Start-Process -FilePath $npm `
+    -ArgumentList 'run build' `
+    -WorkingDirectory (Join-Path $ROOT 'frontend') `
+    -WindowStyle Hidden -Wait -PassThru
+
+if ($build.ExitCode -ne 0) {
+    Write-Host 'ERROR: Frontend build failed.' -ForegroundColor Red
+    Read-Host 'Press Enter'
+    exit 1
+}
+Write-Host 'Frontend built OK.' -ForegroundColor Green
+
+# Start backend (serves API + built frontend)
+Write-Host 'Starting server on port 8000...'
+Start-Process -FilePath $python `
+    -ArgumentList '-m uvicorn backend.main:app --host 0.0.0.0 --port 8000' `
+    -WorkingDirectory $ROOT `
     -WindowStyle Normal
 
 Start-Sleep -Seconds 4
 
-$backend = try { (Invoke-WebRequest http://localhost:8000/api/health -UseBasicParsing -TimeoutSec 3).StatusCode } catch { 0 }
-if ($backend -eq 200) {
-    Write-Host "Backend: OK" -ForegroundColor Green
+$status = try {
+    (Invoke-WebRequest 'http://localhost:8000/api/health' -UseBasicParsing -TimeoutSec 3).StatusCode
+} catch { 0 }
+
+if ($status -eq 200) {
+    Write-Host 'Server: OK' -ForegroundColor Green
+    Start-Process 'http://localhost:8000'
 } else {
-    Write-Host "Backend: starting..." -ForegroundColor Yellow
+    Write-Host 'Server: starting... open http://localhost:8000 in a moment' -ForegroundColor Yellow
 }
 
-Write-Host ""
-Write-Host "  Frontend:  http://localhost:5173"
-Write-Host "  Backend:   http://localhost:8000"
-Write-Host ""
+Write-Host ''
+Write-Host '  App:  http://localhost:8000'
+Write-Host '  API:  http://localhost:8000/api/docs'
+Write-Host ''

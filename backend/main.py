@@ -1,7 +1,12 @@
 """FastAPI — точка входу застосунку Пекарня."""
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.database import engine, Base
 import backend.models  # noqa: F401 — реєструємо всі моделі
@@ -118,3 +123,21 @@ app.include_router(settings.router,      prefix=PREFIX)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "Пекарня"}
+
+
+# ── Статичний фронтенд (production) ──────────────────────────────────────────
+# Якщо frontend/dist існує — роздаємо його. Vite dev server не потрібен.
+
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+
+if _DIST.exists():
+    # Статичні ресурси (js, css, assets)
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    # SPA fallback: будь-який невідомий шлях → index.html (React Router)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        file = _DIST / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_DIST / "index.html")
