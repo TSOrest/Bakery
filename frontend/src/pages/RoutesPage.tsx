@@ -14,18 +14,6 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Скасовано',
 }
 
-const STATUS_NEXT: Record<string, string | null> = {
-  draft:     'printed',
-  printed:   'delivered',
-  delivered: null,
-  cancelled: null,
-}
-
-const STATUS_NEXT_LABEL: Record<string, string> = {
-  draft:   '→ Надруковано',
-  printed: '→ Доставлено',
-}
-
 // ─── Модальне вікно деталей накладної ────────────────────────────────────────
 
 interface InvoiceModalProps {
@@ -89,6 +77,147 @@ function InvoiceModal({ invoice, products, clientName, onClose }: InvoiceModalPr
   )
 }
 
+// ─── Модальне вікно повернення (post-delivery) ────────────────────────────────
+
+interface ReturnModalProps {
+  invoice: Invoice
+  products: Product[]
+  clientName: string
+  onClose: () => void
+  onConfirm: (invoiceId: number, returns: ReturnLine[], cash: number, notes: string) => Promise<void>
+}
+
+interface ReturnLine {
+  lineId: number
+  productId: number
+  productName: string
+  delivered: number
+  returned: number
+}
+
+function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: ReturnModalProps) {
+  const productName = (id: number) => {
+    const p = products.find((p) => p.id === id)
+    return p?.short_name ?? p?.name ?? `#${id}`
+  }
+
+  const [lines, setLines] = useState<ReturnLine[]>(
+    invoice.lines.map((l: InvoiceLine) => ({
+      lineId: l.id,
+      productId: l.product_id,
+      productName: productName(l.product_id),
+      delivered: l.qty,
+      returned: 0,
+    }))
+  )
+  const [cash, setCash] = useState(0)
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const setReturned = (lineId: number, val: number) => {
+    setLines((prev) =>
+      prev.map((l) => l.lineId === lineId ? { ...l, returned: Math.max(0, Math.min(val, l.delivered)) } : l)
+    )
+  }
+
+  const totalReturned = lines.reduce((s, l) => s + l.returned, 0)
+
+  const handleConfirm = async () => {
+    setSaving(true)
+    await onConfirm(invoice.id, lines, cash, notes)
+    setSaving(false)
+  }
+
+  return (
+    <Modal title={`Повернення — ${invoice.invoice_number}`} onClose={onClose}>
+      <div className={styles.returnDetail}>
+        <div className={styles.invoiceMeta}>
+          <span><strong>Клієнт:</strong> {clientName}</span>
+          <span><strong>Сума накладної:</strong> {invoice.total_sum.toFixed(2)} ₴</span>
+        </div>
+
+        <p className={styles.returnHint}>
+          Вкажіть кількість поверненого товару (переходить на магазин).
+        </p>
+
+        <table className={styles.linesTable}>
+          <thead>
+            <tr>
+              <th>Виріб</th>
+              <th>Відвантажено</th>
+              <th>Повернуто</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.lineId}>
+                <td>{l.productName}</td>
+                <td className={styles.numCell}>{l.delivered}</td>
+                <td className={styles.numCell}>
+                  <input
+                    type="number"
+                    min={0}
+                    max={l.delivered}
+                    value={l.returned || ''}
+                    onChange={(e) => setReturned(l.lineId, Number(e.target.value))}
+                    className={styles.returnInput}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {totalReturned > 0 && (
+            <tfoot>
+              <tr>
+                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 600 }}>Всього повернуто:</td>
+                <td className={styles.numCell} style={{ fontWeight: 600 }}>{totalReturned}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+
+        <div className={styles.returnForm}>
+          <label className={styles.returnLabel}>
+            Готівка від водія (₴):
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={cash || ''}
+              onChange={(e) => setCash(Number(e.target.value))}
+              className={styles.cashInput}
+              placeholder="0.00"
+            />
+          </label>
+          <label className={styles.returnLabel}>
+            Нотатка:
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={styles.notesInput}
+              placeholder="необов'язково"
+            />
+          </label>
+        </div>
+
+        <div className={styles.returnActions}>
+          <button className={styles.btnCancel} onClick={onClose}>
+            Скасувати
+          </button>
+          <button
+            className={styles.btnConfirmReturn}
+            onClick={handleConfirm}
+            disabled={saving}
+          >
+            {saving ? 'Збереження...' : 'Підтвердити доставку'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Головна сторінка ─────────────────────────────────────────────────────────
 
 export default function RoutesPage() {
@@ -102,9 +231,16 @@ export default function RoutesPage() {
   const [loading,   setLoading]   = useState(true)
 
   const [activeRouteId,  setActiveRouteId]  = useState<number | null>(null)
+  const [activeClientId, setActiveClientId] = useState<number | null>(null)
+
   const [generating,     setGenerating]     = useState(false)
   const [genResult,      setGenResult]      = useState<string | null>(null)
+
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
+  const [returnInvoice,   setReturnInvoice]   = useState<Invoice | null>(null)
+
+  // Вибрані накладні для друку (id → boolean)
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set())
 
   // ─── Завантаження ───────────────────────────────────────────────────────────
 
@@ -128,6 +264,13 @@ export default function RoutesPage() {
 
   useEffect(() => { load(workDate) }, [workDate])
 
+  // При зміні маршруту — скидаємо вибраного клієнта
+  const selectRoute = (routeId: number) => {
+    setActiveRouteId(routeId)
+    setActiveClientId(null)
+    setGenResult(null)
+  }
+
   // ─── Генерація накладних ─────────────────────────────────────────────────────
 
   const handleGenerate = async () => {
@@ -138,7 +281,6 @@ export default function RoutesPage() {
       `/invoices/generate-from-orders?invoice_date=${workDate}&route_id=${activeRouteId}`, {}
     )
     setGenResult(`Створено: ${res.created}, вже існували: ${res.skipped}, без замовлень: ${res.no_orders}`)
-    // Перезавантажуємо накладні
     const inv = await api.get<Invoice[]>(`/invoices/?invoice_date=${workDate}`)
     setInvoices(inv)
     setGenerating(false)
@@ -147,15 +289,49 @@ export default function RoutesPage() {
   // ─── Зміна статусу ──────────────────────────────────────────────────────────
 
   const handleStatusAdvance = async (invoice: Invoice) => {
-    const next = STATUS_NEXT[invoice.status] as Invoice['status'] | null
+    const map: Partial<Record<Invoice['status'], Invoice['status']>> = { draft: 'printed', printed: 'delivered' }
+    const next = map[invoice.status]
     if (!next) return
     await api.put(`/invoices/${invoice.id}/status?status=${next}`, {})
     setInvoices((prev) =>
       prev.map((inv) => (inv.id === invoice.id ? { ...inv, status: next } : inv))
     )
-    if (selectedInvoice?.id === invoice.id) {
-      setSelectedInvoice((prev) => prev ? { ...prev, status: next } : null)
-    }
+  }
+
+  // ─── Друк вибраних ─────────────────────────────────────────────────────────
+
+  const printChecked = async () => {
+    if (checkedIds.size === 0) return
+    const ids = [...checkedIds].join(',')
+    window.open(`/api/v1/print/invoices?invoice_date=${workDate}&ids=${ids}`, '_blank')
+    // Переводимо в printed
+    await Promise.all(
+      [...checkedIds].map(async (id) => {
+        const inv = invoices.find((i) => i.id === id)
+        if (inv && inv.status === 'draft') {
+          await api.put(`/invoices/${id}/status?status=printed`, {})
+        }
+      })
+    )
+    const inv = await api.get<Invoice[]>(`/invoices/?invoice_date=${workDate}`)
+    setInvoices(inv)
+  }
+
+  // ─── Обробка повернення ──────────────────────────────────────────────────────
+
+  const handleConfirmReturn = async (
+    invoiceId: number,
+    _returns: ReturnLine[],
+    _cash: number,
+    _notes: string
+  ) => {
+    // Фаза 2: просто закриваємо накладну як delivered
+    // Фаза 3: обробка повернень → рухи товару, фінанси
+    await api.put(`/invoices/${invoiceId}/status?status=delivered`, {})
+    setInvoices((prev) =>
+      prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'delivered' } : inv))
+    )
+    setReturnInvoice(null)
   }
 
   // ─── Допоміжні ──────────────────────────────────────────────────────────────
@@ -178,49 +354,161 @@ export default function RoutesPage() {
 
   const activeRoute = routes.find((r) => r.id === activeRouteId)
   const activeClients = activeRouteId ? routeClients(activeRouteId) : []
-  const activeInvoices = invoices.filter((inv) => inv.route_id === activeRouteId)
 
-  const clientsWithOrders = activeClients.filter((c) => clientOrders(c.id).length > 0)
-  const clientsWithInvoices = activeClients.filter((c) => !!clientInvoice(c.id))
+  // Фільтрація по клієнту (якщо обраний)
+  const visibleClients = activeClientId
+    ? activeClients.filter((c) => c.id === activeClientId)
+    : activeClients
+
+  // Накладні маршруту
+  const routeInvoices = invoices.filter(
+    (inv) => inv.route_id === activeRouteId && inv.status !== 'cancelled'
+  )
+  const routeTotal = routeInvoices.reduce((s, i) => s + i.total_sum, 0)
+
+  // Накладні вибраних клієнтів
+  const visibleInvoices = visibleClients
+    .map((c) => clientInvoice(c.id))
+    .filter((inv): inv is Invoice => !!inv)
+
+  // Управління галочками
+  const allChecked = visibleInvoices.length > 0 &&
+    visibleInvoices.every((inv) => checkedIds.has(inv.id))
+  const someChecked = visibleInvoices.some((inv) => checkedIds.has(inv.id))
+
+  const toggleAll = () => {
+    if (allChecked) {
+      setCheckedIds((prev) => {
+        const next = new Set(prev)
+        visibleInvoices.forEach((inv) => next.delete(inv.id))
+        return next
+      })
+    } else {
+      setCheckedIds((prev) => {
+        const next = new Set(prev)
+        visibleInvoices.forEach((inv) => next.add(inv.id))
+        return next
+      })
+    }
+  }
+
+  const toggleOne = (id: number) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // При зміні маршруту або підвантаженні — вибрати всі накладні
+  useEffect(() => {
+    if (invoices.length > 0) {
+      const allInvIds = new Set(
+        invoices.filter((i) => i.status !== 'cancelled').map((i) => i.id)
+      )
+      setCheckedIds(allInvIds)
+    }
+  }, [invoices])
+
+  const checkedCount = visibleInvoices.filter((inv) => checkedIds.has(inv.id)).length
 
   return (
     <div className={styles.page}>
 
-      {/* ── Ліва панель: маршрути ─────────────────────────────────────────── */}
+      {/* ── Ліва панель ────────────────────────────────────────────────────── */}
       <aside className={styles.sidebar}>
-        <div className={styles.sidebarTitle}>Маршрути</div>
-        {routes.map((route) => {
-          const rc = routeClients(route.id)
-          const withInv = rc.filter((c) => !!clientInvoice(c.id)).length
-          const withOrd = rc.filter((c) => clientOrders(c.id).length > 0).length
-          return (
+
+        {/* Маршрути */}
+        <div className={styles.sidebarSection}>
+          <div className={styles.sidebarTitle}>Маршрути</div>
+          {routes.map((route) => {
+            const rc = routeClients(route.id)
+            const rInvoices = invoices.filter(
+              (inv) => inv.route_id === route.id && inv.status !== 'cancelled'
+            )
+            const rTotal = rInvoices.reduce((s, i) => s + i.total_sum, 0)
+            const withInv = rc.filter((c) => !!clientInvoice(c.id)).length
+            const withOrd = rc.filter((c) => clientOrders(c.id).length > 0).length
+
+            return (
+              <button
+                key={route.id}
+                className={`${styles.routeBtn} ${activeRouteId === route.id ? styles.routeBtnActive : ''}`}
+                onClick={() => selectRoute(route.id)}
+              >
+                <span className={styles.routeName}>{route.name}</span>
+                <span className={styles.routeStats}>
+                  <span title="Накладних / із замовленнями">{withInv}/{withOrd}</span>
+                  {rTotal > 0 && (
+                    <span className={styles.routeSum}>{rTotal.toFixed(0)} ₴</span>
+                  )}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Клієнти вибраного маршруту */}
+        {activeRouteId && activeClients.length > 0 && (
+          <div className={styles.sidebarSection}>
+            <div className={styles.sidebarTitle}>Клієнти</div>
             <button
-              key={route.id}
-              className={`${styles.routeBtn} ${activeRouteId === route.id ? styles.routeBtnActive : ''}`}
-              onClick={() => { setActiveRouteId(route.id); setGenResult(null) }}
+              className={`${styles.clientBtn} ${activeClientId === null ? styles.clientBtnActive : ''}`}
+              onClick={() => setActiveClientId(null)}
             >
-              <span className={styles.routeName}>{route.name}</span>
-              <span className={styles.routeStats}>
-                <span title="Накладних / із замовленнями">{withInv}/{withOrd}</span>
-              </span>
+              <span className={styles.clientName}>Всі</span>
+              <span className={styles.clientStats}>{routeInvoices.length} накл.</span>
             </button>
-          )
-        })}
+            {activeClients.map((client) => {
+              const inv = clientInvoice(client.id)
+              const ord = clientOrders(client.id)
+              return (
+                <button
+                  key={client.id}
+                  className={`${styles.clientBtn} ${activeClientId === client.id ? styles.clientBtnActive : ''} ${!ord.length ? styles.clientNoOrder : ''}`}
+                  onClick={() => setActiveClientId(client.id)}
+                >
+                  <span className={styles.clientName}>
+                    {client.short_name ?? client.full_name}
+                  </span>
+                  <span className={styles.clientStats}>
+                    {inv ? (
+                      <span className={`${styles.clientStatus} ${styles[`cs_${inv.status}`]}`}>
+                        {inv.total_sum.toFixed(0)} ₴
+                      </span>
+                    ) : ord.length > 0 ? (
+                      <span className={styles.clientNoInv}>—</span>
+                    ) : null}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </aside>
 
-      {/* ── Права панель: клієнти маршруту ────────────────────────────────── */}
+      {/* ── Права панель ───────────────────────────────────────────────────── */}
       <main className={styles.main}>
         {activeRoute ? (
           <>
-            {/* Заголовок */}
+            {/* Тулбар */}
             <div className={styles.toolbar}>
               <h2 className={styles.title}>
-                {activeRoute.name} — {workDate}
+                {activeRoute.name}
+                {activeClientId && (
+                  <span className={styles.titleClient}>
+                    {' / '}{clientName(activeClientId)}
+                  </span>
+                )}
               </h2>
+
               <div className={styles.toolbarRight}>
-                <span className={styles.stats}>
-                  Накладних: {clientsWithInvoices.length} / {clientsWithOrders.length}
-                </span>
+                {routeTotal > 0 && (
+                  <span className={styles.routeTotalLabel}>
+                    Сума: <strong>{routeTotal.toFixed(2)} ₴</strong>
+                  </span>
+                )}
                 <button
                   className={styles.btnGenerate}
                   onClick={handleGenerate}
@@ -228,6 +516,14 @@ export default function RoutesPage() {
                 >
                   {generating ? 'Генерую...' : '⟳ Генерувати накладні'}
                 </button>
+                {checkedCount > 0 && (
+                  <button
+                    className={styles.btnPrint}
+                    onClick={printChecked}
+                  >
+                    🖨 Друкувати вибрані ({checkedCount})
+                  </button>
+                )}
               </div>
             </div>
 
@@ -240,6 +536,14 @@ export default function RoutesPage() {
               <table className={styles.table}>
                 <thead>
                   <tr>
+                    <th className={styles.thCheck}>
+                      <input
+                        type="checkbox"
+                        checked={allChecked}
+                        ref={(el) => { if (el) el.indeterminate = !allChecked && someChecked }}
+                        onChange={toggleAll}
+                      />
+                    </th>
                     <th className={styles.thClient}>Клієнт</th>
                     <th className={styles.thNum}>Позицій</th>
                     <th className={styles.thNum}>Штук</th>
@@ -250,14 +554,27 @@ export default function RoutesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeClients.map((client) => {
+                  {visibleClients.map((client) => {
                     const ord = clientOrders(client.id)
                     const inv = clientInvoice(client.id)
                     const totalQty = ord.reduce((s, o) => s + o.qty, 0)
                     const hasOrders = ord.length > 0
+                    const isChecked = inv ? checkedIds.has(inv.id) : false
 
                     return (
-                      <tr key={client.id} className={`${styles.row} ${!hasOrders ? styles.rowNoOrder : ''}`}>
+                      <tr
+                        key={client.id}
+                        className={`${styles.row} ${!hasOrders ? styles.rowNoOrder : ''}`}
+                      >
+                        <td className={styles.tdCheck}>
+                          {inv && (
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleOne(inv.id)}
+                            />
+                          )}
+                        </td>
                         <td className={styles.tdClient}>
                           {client.short_name ?? client.full_name}
                         </td>
@@ -295,12 +612,28 @@ export default function RoutesPage() {
                               >
                                 Переглянути
                               </button>
-                              {STATUS_NEXT[inv.status] && (
+                              <button
+                                className={styles.btnPrintSingle}
+                                onClick={() => window.open(`/api/v1/print/invoice/${inv.id}`, '_blank')}
+                                title="Друкувати накладну"
+                              >
+                                🖨
+                              </button>
+                              {inv.status === 'printed' && (
+                                <button
+                                  className={styles.btnReturn}
+                                  onClick={() => setReturnInvoice(inv)}
+                                  title="Обробити повернення"
+                                >
+                                  Повернення
+                                </button>
+                              )}
+                              {inv.status === 'draft' && (
                                 <button
                                   className={styles.btnAdvance}
                                   onClick={() => handleStatusAdvance(inv)}
                                 >
-                                  {STATUS_NEXT_LABEL[inv.status]}
+                                  → Надруковано
                                 </button>
                               )}
                             </>
@@ -313,17 +646,8 @@ export default function RoutesPage() {
               </table>
             </div>
 
-            {/* Підсумок по маршруту */}
-            {activeInvoices.length > 0 && (
-              <div className={styles.routeSummary}>
-                <span>Всього по маршруту:</span>
-                <strong>
-                  {activeInvoices
-                    .filter((i) => i.status !== 'cancelled')
-                    .reduce((s, i) => s + i.total_sum, 0)
-                    .toFixed(2)} ₴
-                </strong>
-              </div>
+            {visibleClients.length === 0 && (
+              <p className={styles.empty}>Немає клієнтів у маршруті</p>
             )}
           </>
         ) : (
@@ -331,13 +655,24 @@ export default function RoutesPage() {
         )}
       </main>
 
-      {/* ── Модальне вікно накладної ────────────────────────────────────── */}
+      {/* ── Модальне вікно: деталі накладної ──────────────────────────────── */}
       {selectedInvoice && (
         <InvoiceModal
           invoice={selectedInvoice}
           products={products}
           clientName={clientName(selectedInvoice.client_id)}
           onClose={() => setSelectedInvoice(null)}
+        />
+      )}
+
+      {/* ── Модальне вікно: повернення ─────────────────────────────────────── */}
+      {returnInvoice && (
+        <ReturnModal
+          invoice={returnInvoice}
+          products={products}
+          clientName={clientName(returnInvoice.client_id)}
+          onClose={() => setReturnInvoice(null)}
+          onConfirm={handleConfirmReturn}
         />
       )}
     </div>
