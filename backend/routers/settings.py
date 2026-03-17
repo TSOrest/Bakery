@@ -1,5 +1,6 @@
 """Ендпоінти налаштувань системи."""
 
+import json
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.settings import Setting
+from backend.services import telegram_bot as tg
 
 router = APIRouter(prefix="/settings", tags=["Налаштування"])
 
@@ -50,3 +52,56 @@ def update_many_settings(body: dict[str, str], db: Session = Depends(get_db)):
             db.add(Setting(key=key, value=value, updated_at=datetime.now().isoformat()))
     db.commit()
     return {"updated": len(body)}
+
+
+# ── Telegram бот ──────────────────────────────────────────────────────────────
+
+@router.get("/telegram/status")
+def telegram_status():
+    """Стан бота: запущений чи ні."""
+    return {"running": tg.bot_is_running()}
+
+
+@router.post("/telegram/restart")
+def telegram_restart(db: Session = Depends(get_db)):
+    """Перезапускає бота з поточним токеном з БД."""
+    row = db.get(Setting, "telegram_bot_token")
+    token = row.value if row and row.value else ""
+    tg.restart_bot(token)
+    return {"running": tg.bot_is_running(), "has_token": bool(token)}
+
+
+@router.post("/telegram/stop")
+def telegram_stop():
+    """Зупиняє бота."""
+    tg.stop_bot()
+    return {"running": False}
+
+
+@router.get("/telegram/authorized")
+def telegram_authorized(db: Session = Depends(get_db)):
+    """Список авторизованих чатів."""
+    raw = db.get(Setting, "telegram_authorized_chats")
+    chats: dict[str, str] = {}
+    try:
+        chats = json.loads(raw.value) if raw and raw.value else {}
+    except Exception:
+        pass
+    return {"chats": [{"chat_id": k, "phone": v} for k, v in chats.items()]}
+
+
+@router.delete("/telegram/authorized/{chat_id}")
+def telegram_revoke(chat_id: str, db: Session = Depends(get_db)):
+    """Відкликає доступ у конкретного чату."""
+    row = db.get(Setting, "telegram_authorized_chats")
+    chats: dict[str, str] = {}
+    try:
+        chats = json.loads(row.value) if row and row.value else {}
+    except Exception:
+        pass
+    chats.pop(chat_id, None)
+    if row:
+        row.value = json.dumps(chats, ensure_ascii=False)
+        row.updated_at = datetime.now().isoformat()
+    db.commit()
+    return {"revoked": chat_id}

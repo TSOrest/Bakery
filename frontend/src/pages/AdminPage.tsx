@@ -1197,6 +1197,15 @@ function SettingsTab() {
   const [saving,   setSaving]   = useState(false)
   const [saved,    setSaved]    = useState(false)
 
+  // Telegram
+  const [tgToken,   setTgToken]   = useState('')
+  const [tgPhones,  setTgPhones]  = useState('')   // через кому
+  const [tgRunning, setTgRunning] = useState(false)
+  const [tgChats,   setTgChats]   = useState<{ chat_id: string; phone: string }[]>([])
+  const [tgSaving,  setTgSaving]  = useState(false)
+  const [tgMsg,     setTgMsg]     = useState('')
+  const [showToken, setShowToken] = useState(false)
+
   const load = () =>
     api.get<SettingsMap>('/settings/').then((data) => {
       setSettings(data)
@@ -1205,16 +1214,29 @@ function SettingsTab() {
         vals[k] = data[k]?.value ?? ''
       })
       setForm(vals)
+      setTgToken(data['telegram_bot_token']?.value ?? '')
+      setTgPhones(data['telegram_allowed_phones']?.value ?? '')
     })
 
-  useEffect(() => { load() }, [])
+  const loadTgStatus = () =>
+    api.get<{ running: boolean }>('/settings/telegram/status').then(d => setTgRunning(d.running))
+
+  const loadTgChats = () =>
+    api.get<{ chats: { chat_id: string; phone: string }[] }>('/settings/telegram/authorized')
+      .then(d => setTgChats(d.chats))
+
+  useEffect(() => {
+    load()
+    loadTgStatus()
+    loadTgChats()
+    const id = setInterval(loadTgStatus, 10000)
+    return () => clearInterval(id)
+  }, []) // eslint-disable-line
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault()
-    setSaving(true)
-    setSaved(false)
+    setSaving(true); setSaved(false)
     try {
-      // Зберігаємо кожне поле окремо (PUT /settings/{key})
       await Promise.all(
         Object.entries(form).map(([key, value]) =>
           api.put(`/settings/${key}`, { value, description: settings[key]?.description ?? '' })
@@ -1222,9 +1244,33 @@ function SettingsTab() {
       )
       setSaved(true)
       await load()
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
+  }
+
+  const saveTgSettings = async () => {
+    setTgSaving(true); setTgMsg('')
+    try {
+      await api.put('/settings/telegram_bot_token',    { value: tgToken })
+      await api.put('/settings/telegram_allowed_phones', { value: tgPhones })
+      // Перезапускаємо бота з новим токеном
+      const res = await api.post<{ running: boolean; has_token: boolean }>(
+        '/settings/telegram/restart', null
+      )
+      setTgRunning(res.running)
+      setTgMsg(res.running ? '✓ Бот запущено' : res.has_token ? '⚠ Не вдалось запустити — перевірте токен' : 'Токен не задано — бот не запущено')
+    } catch (err) {
+      setTgMsg(String(err))
+    } finally { setTgSaving(false) }
+  }
+
+  const stopBot = async () => {
+    await api.post('/settings/telegram/stop', null)
+    setTgRunning(false); setTgMsg('Бот зупинено')
+  }
+
+  const revokeChat = async (chatId: string) => {
+    await api.delete(`/settings/telegram/authorized/${chatId}`)
+    await loadTgChats()
   }
 
   const fieldStyle: React.CSSProperties = {
@@ -1236,8 +1282,14 @@ function SettingsTab() {
     fontSize: '0.9rem', maxWidth: '420px',
   }
 
+  const sectionHead: React.CSSProperties = {
+    fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.08em', color: '#7a8899', margin: '1.5rem 0 0.75rem',
+  }
+
   return (
     <section>
+      {/* ── Параметри пекарні ── */}
       <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Параметри пекарні</h3>
       <form onSubmit={handleSave}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 2rem', maxWidth: '860px' }}>
@@ -1259,6 +1311,106 @@ function SettingsTab() {
           {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
         </div>
       </form>
+
+      {/* ── Telegram-бот ── */}
+      <p style={sectionHead}>Telegram-бот</p>
+
+      <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
+
+        {/* Статус */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: tgRunning ? '#27ae60' : '#e74c3c', display: 'inline-block',
+          }} />
+          <span style={{ fontWeight: 600 }}>{tgRunning ? 'Бот запущено' : 'Бот зупинено'}</span>
+          {tgRunning && (
+            <button onClick={stopBot} style={{ ...delBtnStyle, marginLeft: 'auto' }}>Зупинити</button>
+          )}
+        </div>
+
+        {/* Токен */}
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Bot Token (від @BotFather)</label>
+          <div style={{ display: 'flex', gap: 6, maxWidth: 420 }}>
+            <input
+              type={showToken ? 'text' : 'password'}
+              style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
+              value={tgToken}
+              onChange={e => setTgToken(e.target.value)}
+              placeholder="1234567890:AAF..."
+            />
+            <button type="button" onClick={() => setShowToken(v => !v)}
+              style={{ ...editBtnStyle, whiteSpace: 'nowrap' }}>
+              {showToken ? 'Сховати' : 'Показати'}
+            </button>
+          </div>
+        </div>
+
+        {/* Дозволені телефони */}
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Дозволені номери телефонів</label>
+          <textarea
+            style={{ ...inputStyle, maxWidth: 'none', width: '100%', height: 70, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }}
+            value={tgPhones}
+            onChange={e => setTgPhones(e.target.value)}
+            placeholder="+380501234567, +380671234567"
+          />
+          <span style={{ fontSize: 12, color: '#888' }}>Через кому. Формат: +380XXXXXXXXX</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={saveTgSettings} disabled={tgSaving} style={addBtnStyle}>
+            {tgSaving ? 'Збереження...' : 'Зберегти і перезапустити'}
+          </button>
+          {tgMsg && (
+            <span style={{ fontSize: 13, color: tgMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
+              {tgMsg}
+            </span>
+          )}
+        </div>
+
+        {/* Авторизовані користувачі */}
+        {tgChats.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ ...sectionHead, margin: '0 0 8px' }}>Авторизовані користувачі</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#e8eef5' }}>
+                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Chat ID</th>
+                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Телефон</th>
+                  <th style={{ width: 60 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {tgChats.map(c => (
+                  <tr key={c.chat_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>{c.chat_id}</td>
+                    <td style={{ padding: '5px 8px' }}>{c.phone}</td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
+                        title="Відкликати доступ">✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Інструкція */}
+        <details style={{ marginTop: 14, fontSize: 13, color: '#555' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Як налаштувати бота</summary>
+          <ol style={{ marginTop: 8, paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Напишіть <code>@BotFather</code> в Telegram → <code>/newbot</code></li>
+            <li>Введіть назву та username бота (напр. <code>MyBakeryBot</code>)</li>
+            <li>Скопіюйте токен у поле вище</li>
+            <li>Додайте свій номер телефону в список дозволених</li>
+            <li>Натисніть "Зберегти і перезапустити"</li>
+            <li>Знайдіть бота в Telegram → <code>/start</code> → поділіться номером</li>
+          </ol>
+        </details>
+      </div>
     </section>
   )
 }

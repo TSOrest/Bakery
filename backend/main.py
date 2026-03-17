@@ -86,6 +86,10 @@ def _seed_initial_data() -> None:
 
 _seed_initial_data()
 
+# Запускаємо Telegram-бота якщо токен задано в налаштуваннях
+from backend.services.telegram_bot import init_bot_from_settings
+init_bot_from_settings()
+
 app = FastAPI(
     title="Пекарня API",
     version="1.0.0",
