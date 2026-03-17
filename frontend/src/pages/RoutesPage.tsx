@@ -93,6 +93,7 @@ interface ReturnLine {
   productName: string
   delivered: number
   returned: number
+  stalePrice: number | null
 }
 
 function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: ReturnModalProps) {
@@ -108,6 +109,7 @@ function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: Retu
       productName: productName(l.product_id),
       delivered: l.qty,
       returned: 0,
+      stalePrice: null,
     }))
   )
   const [cash, setCash] = useState(0)
@@ -120,6 +122,13 @@ function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: Retu
     )
   }
 
+  const setStalePrice = (lineId: number, val: string) => {
+    setLines((prev) =>
+      prev.map((l) => l.lineId === lineId ? { ...l, stalePrice: val === '' ? null : Number(val) } : l)
+    )
+  }
+
+  const hasReturns = lines.some((l) => l.returned > 0)
   const totalReturned = lines.reduce((s, l) => s + l.returned, 0)
 
   const handleConfirm = async () => {
@@ -137,15 +146,16 @@ function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: Retu
         </div>
 
         <p className={styles.returnHint}>
-          Вкажіть кількість поверненого товару (переходить на магазин).
+          Повернений товар перейде до магазину як несвіжий.
         </p>
 
         <table className={styles.linesTable}>
           <thead>
             <tr>
               <th>Виріб</th>
-              <th>Відвантажено</th>
+              <th>Відвант.</th>
               <th>Повернуто</th>
+              <th>Ціна несвіж., ₴</th>
             </tr>
           </thead>
           <tbody>
@@ -163,14 +173,28 @@ function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: Retu
                     className={styles.returnInput}
                   />
                 </td>
+                <td className={styles.numCell}>
+                  {l.returned > 0 && (
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={l.stalePrice ?? ''}
+                      onChange={(e) => setStalePrice(l.lineId, e.target.value)}
+                      className={styles.returnInput}
+                      placeholder="—"
+                    />
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
-          {totalReturned > 0 && (
+          {hasReturns && (
             <tfoot>
               <tr>
                 <td colSpan={2} style={{ textAlign: 'right', fontWeight: 600 }}>Всього повернуто:</td>
                 <td className={styles.numCell} style={{ fontWeight: 600 }}>{totalReturned}</td>
+                <td />
               </tr>
             </tfoot>
           )}
@@ -321,13 +345,12 @@ export default function RoutesPage() {
 
   const handleConfirmReturn = async (
     invoiceId: number,
-    _returns: ReturnLine[],
+    returns: ReturnLine[],
     _cash: number,
     _notes: string
   ) => {
-    // Фаза 2: просто закриваємо накладну як delivered
-    // Фаза 3: обробка повернень → рухи товару, фінанси
-    await api.put(`/invoices/${invoiceId}/status?status=delivered`, {})
+    // Відправляємо повернення → backend записує несвіжий товар у shop_counts
+    await api.post(`/invoices/${invoiceId}/process-return`, { returns })
     setInvoices((prev) =>
       prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'delivered' } : inv))
     )

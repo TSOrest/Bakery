@@ -159,6 +159,64 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     return inv
 
 
+@router.post("/{invoice_id}/process-return")
+def process_return(
+    invoice_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Обробляє повернення після доставки:
+    - Для кожного поверненого товару: додає рядок у shop_counts з product_type='stale'
+    - Переводить накладну у статус 'delivered'
+    """
+    from backend.models.shop import ShopCount
+
+    inv = db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+    if inv.status != "printed":
+        raise HTTPException(status_code=400, detail="Накладна має бути у статусі 'printed'")
+
+    for item in body.get("returns", []):
+        qty   = float(item.get("returned", 0))
+        pid   = int(item.get("productId", 0))
+        price = item.get("stalePrice")  # може бути None
+
+        if qty <= 0 or not pid:
+            continue
+
+        stale = (
+            db.query(ShopCount)
+            .filter(
+                ShopCount.count_date  == inv.invoice_date,
+                ShopCount.product_id  == pid,
+                ShopCount.product_type == "stale",
+            )
+            .first()
+        )
+        if stale:
+            stale.received_today += qty
+            if price is not None:
+                stale.price = float(price)
+        else:
+            stale = ShopCount(
+                count_date          = inv.invoice_date,
+                product_id          = pid,
+                product_type        = "stale",
+                yesterday_balance   = 0.0,
+                received_today      = qty,
+                written_off_entered = 0.0,
+                price               = float(price) if price is not None else None,
+                saved               = 0,
+            )
+            db.add(stale)
+
+    inv.status = "delivered"
+    db.commit()
+    return {"id": invoice_id, "status": "delivered", "stale_added": len(body.get("returns", []))}
+
+
 @router.put("/{invoice_id}/status")
 def update_invoice_status(
     invoice_id: int,

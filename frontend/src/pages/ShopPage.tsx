@@ -134,13 +134,19 @@ function BreadTab({ workDate }: { workDate: string }) {
 
   const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
 
-  const totalSold = counts.reduce((s, c) => s + (c.calculated_sold ?? 0) * (c.price ?? 0), 0)
+  const freshCounts = counts.filter((c) => c.product_type === 'bread')
+  const staleCounts = counts.filter((c) => c.product_type === 'stale')
+
+  const totalFreshSold = freshCounts.reduce((s, c) => s + (c.calculated_sold ?? 0) * (c.price ?? 0), 0)
+  const totalStaleSold = staleCounts.reduce((s, c) => s + (c.calculated_sold ?? 0) * (c.price ?? 0), 0)
 
   if (loading) return <p>Завантаження...</p>
 
+  const noFreshCounts = freshCounts.length === 0
+
   return (
     <section>
-      {counts.length === 0 ? (
+      {noFreshCounts ? (
         <div style={{ padding: '2rem 0' }}>
           <p style={{ color: '#666', marginBottom: '1rem' }}>
             Звірку за <strong>{workDate}</strong> ще не розпочато.
@@ -157,70 +163,37 @@ function BreadTab({ workDate }: { workDate: string }) {
             </div>
           )}
 
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ background: '#e8eef5' }}>
-                <Th>Виріб</Th>
-                <Th right>Залишок вчора</Th>
-                <Th right>Надійшло</Th>
-                <Th right>Доступно</Th>
-                <Th right>Списано</Th>
-                <Th right>Фактичний залишок</Th>
-                <Th right>Продано</Th>
-                <Th right>Ціна, грн</Th>
-                <Th right>Сума</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {counts.map((c) => {
-                const available = c.yesterday_balance + c.received_today
-                const sum = (c.calculated_sold ?? 0) * (c.price ?? 0)
-                return (
-                  <tr key={c.id} style={{ opacity: saving[c.id] ? 0.6 : 1 }}>
-                    <Td>{productName(c.product_id)}</Td>
-                    <Td right>{c.yesterday_balance}</Td>
-                    <Td right>{c.received_today}</Td>
-                    <Td right><strong>{available}</strong></Td>
-                    <Td right>
-                      <NumInput
-                        value={c.written_off_entered}
-                        disabled={!!c.saved}
-                        onBlur={(v) => handleUpdate(c, 'written_off_entered', v)}
-                      />
-                    </Td>
-                    <Td right>
-                      <NumInput
-                        value={c.entered_balance ?? ''}
-                        disabled={!!c.saved}
-                        placeholder="введіть"
-                        onBlur={(v) => handleUpdate(c, 'entered_balance', v)}
-                      />
-                    </Td>
-                    <Td right>
-                      <strong style={{ color: c.calculated_sold !== null ? '#1a3a5c' : '#aaa' }}>
-                        {c.calculated_sold !== null ? c.calculated_sold : '—'}
-                      </strong>
-                    </Td>
-                    <Td right>
-                      <NumInput
-                        value={c.price ?? ''}
-                        disabled={!!c.saved}
-                        placeholder="0.00"
-                        onBlur={(v) => handleUpdate(c, 'price', v)}
-                      />
-                    </Td>
-                    <Td right>{sum > 0 ? sum.toFixed(2) : '—'}</Td>
-                  </tr>
-                )
-              })}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: '#f5f8fb', fontWeight: 600 }}>
-                <td colSpan={8} style={tdStyle}>Разом продажів магазину:</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{totalSold.toFixed(2)} грн</td>
-              </tr>
-            </tfoot>
-          </table>
+          {/* ── Свіжий хліб ─────────────────────────────────────────────────── */}
+          <CountsTable
+            counts={freshCounts}
+            saving={saving}
+
+            productName={productName}
+            totalSold={totalFreshSold}
+            onUpdate={handleUpdate}
+          />
+
+          {/* ── Несвіжий товар (повернення) ─────────────────────────────────── */}
+          {staleCounts.length > 0 && (
+            <div style={{ marginTop: '1.5rem' }}>
+              <div style={{
+                fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.05em', color: '#c0392b', marginBottom: '0.5rem',
+                borderBottom: '2px solid #e74c3c', paddingBottom: '0.25rem',
+              }}>
+                Несвіжий товар (повернення від клієнтів)
+              </div>
+              <CountsTable
+                counts={staleCounts}
+                saving={saving}
+    
+                productName={productName}
+                totalSold={totalStaleSold}
+                onUpdate={handleUpdate}
+                staleStyle
+              />
+            </div>
+          )}
 
           {!confirmed && (
             <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
@@ -232,6 +205,87 @@ function BreadTab({ workDate }: { workDate: string }) {
         </>
       )}
     </section>
+  )
+}
+
+// ─── Таблиця звірки (свіжий або несвіжий) ────────────────────────────────────
+
+function CountsTable({
+  counts, saving, productName, totalSold, onUpdate, staleStyle = false,
+}: {
+  counts: ShopCount[]
+  saving: Record<number, boolean>
+  productName: (id: number) => string
+  totalSold: number
+  onUpdate: (c: ShopCount, field: 'entered_balance' | 'written_off_entered' | 'price', v: string) => void
+  staleStyle?: boolean
+}) {
+  const headerBg = staleStyle ? '#fdf0ef' : '#e8eef5'
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr style={{ background: headerBg }}>
+          <Th>Виріб</Th>
+          <Th right>Залишок вчора</Th>
+          <Th right>Надійшло</Th>
+          <Th right>Доступно</Th>
+          <Th right>Списано</Th>
+          <Th right>Фактичний залишок</Th>
+          <Th right>Продано</Th>
+          <Th right>Ціна, грн</Th>
+          <Th right>Сума</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {counts.map((c) => {
+          const available = c.yesterday_balance + c.received_today
+          const sum = (c.calculated_sold ?? 0) * (c.price ?? 0)
+          return (
+            <tr key={c.id} style={{ opacity: saving[c.id] ? 0.6 : 1 }}>
+              <Td>{productName(c.product_id)}</Td>
+              <Td right>{c.yesterday_balance}</Td>
+              <Td right>{c.received_today}</Td>
+              <Td right><strong>{available}</strong></Td>
+              <Td right>
+                <NumInput
+                  value={c.written_off_entered}
+                  disabled={!!c.saved}
+                  onBlur={(v) => onUpdate(c, 'written_off_entered', v)}
+                />
+              </Td>
+              <Td right>
+                <NumInput
+                  value={c.entered_balance ?? ''}
+                  disabled={!!c.saved}
+                  placeholder="введіть"
+                  onBlur={(v) => onUpdate(c, 'entered_balance', v)}
+                />
+              </Td>
+              <Td right>
+                <strong style={{ color: c.calculated_sold !== null ? '#1a3a5c' : '#aaa' }}>
+                  {c.calculated_sold !== null ? c.calculated_sold : '—'}
+                </strong>
+              </Td>
+              <Td right>
+                <NumInput
+                  value={c.price ?? ''}
+                  disabled={!!c.saved}
+                  placeholder="0.00"
+                  onBlur={(v) => onUpdate(c, 'price', v)}
+                />
+              </Td>
+              <Td right>{sum > 0 ? sum.toFixed(2) : '—'}</Td>
+            </tr>
+          )
+        })}
+      </tbody>
+      <tfoot>
+        <tr style={{ background: '#f5f8fb', fontWeight: 600 }}>
+          <td colSpan={8} style={tdStyle}>{staleStyle ? 'Разом несвіжий:' : 'Разом свіжий:'}</td>
+          <td style={{ ...tdStyle, textAlign: 'right' }}>{totalSold.toFixed(2)} грн</td>
+        </tr>
+      </tfoot>
+    </table>
   )
 }
 
