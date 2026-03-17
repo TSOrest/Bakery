@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { Client, Order, Product, Route } from '../types'
@@ -29,6 +29,8 @@ export default function OrdersPage() {
   const [copyResult,   setCopyResult]   = useState<string | null>(null)
 
   const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+  const inputRefs = useRef<Record<number, HTMLInputElement | null>>({})
+  const selectedClientRef = useRef<HTMLButtonElement | null>(null)
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -54,6 +56,14 @@ export default function OrdersPage() {
   }
 
   useEffect(() => { loadAll(workDate) }, [workDate])
+
+  // Прокручуємо сайдбар до вибраного клієнта при переходах
+  useEffect(() => {
+    selectedClientRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedClientId])
+
+  // Скидаємо refs на інпути при зміні клієнта
+  useEffect(() => { inputRefs.current = {} }, [selectedClientId])
 
   // ─── Допоміжні ─────────────────────────────────────────────────────────────
 
@@ -166,6 +176,48 @@ export default function OrdersPage() {
       })
     : activeProducts
 
+  // Плоский список клієнтів у порядку сайдбару — для Enter-навігації
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const orderedClients = useMemo(() => {
+    const result: number[] = []
+    for (const route of routes) {
+      const routeClients = clients.filter(c => c.route_id === route.id && c.is_active)
+      const grouped: Record<string, Client[]> = {}
+      for (const c of routeClients) {
+        const g = c.client_group ?? ''
+        if (!grouped[g]) grouped[g] = []
+        grouped[g].push(c)
+      }
+      for (const gClients of Object.values(grouped)) {
+        result.push(...gClients.map(c => c.id))
+      }
+    }
+    return result
+  }, [routes, clients])
+
+  const currentPos = selectedClientId != null ? orderedClients.indexOf(selectedClientId) : -1
+
+  // Перейти до наступного клієнта в сайдбарі
+  const goToNextClient = () => {
+    if (currentPos < 0 || currentPos >= orderedClients.length - 1) return
+    const nextId = orderedClients[currentPos + 1]
+    const client = clients.find(c => c.id === nextId)
+    if (client?.route_id) setExpandedRoutes(prev => new Set([...prev, client.route_id!]))
+    setSelectedClientId(nextId)
+  }
+
+  // Enter у полі qty → наступне поле; Enter в останньому → наступний клієнт
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, productId: number) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const idx = sortedProducts.findIndex(p => p.id === productId)
+    if (idx >= 0 && idx < sortedProducts.length - 1) {
+      inputRefs.current[sortedProducts[idx + 1].id]?.focus()
+    } else {
+      goToNextClient()
+    }
+  }
+
   return (
     <div className={styles.page}>
 
@@ -232,6 +284,7 @@ export default function OrdersPage() {
                       return (
                         <button
                           key={client.id}
+                          ref={isSelected ? selectedClientRef : undefined}
                           className={`${styles.clientRow} ${isSelected ? styles.clientSelected : ''} ${total > 0 ? styles.clientHasOrders : ''}`}
                           onClick={() => setSelectedClientId(client.id)}
                         >
@@ -262,7 +315,7 @@ export default function OrdersPage() {
                   {selectedClient.address && <span className={styles.clientAddr}> · {selectedClient.address}</span>}
                 </div>
                 <div className={styles.clientMeta}>
-                  {selectedClient.is_own_shop ? <span className={styles.ownShopBadge}>🏪 Власний магазин</span> : null}
+                  {selectedClient.is_own_shop ? <span className={styles.ownShopBadge}>Власний магазин</span> : null}
                   {selectedClient.phone && <span>{selectedClient.phone}</span>}
                 </div>
               </div>
@@ -291,13 +344,14 @@ export default function OrdersPage() {
                           <td className={styles.tdProd}>
                             <span className={styles.prodName}>{product.name}</span>
                             {product.weight ? <span className={styles.prodWeight}> {product.weight}кг</span> : null}
-                            {dup && <span className={styles.dupWarn} title="Можливий дублікат">⚠</span>}
+                            {dup && <span className={styles.dupWarn} title="Можливий дублікат">!</span>}
                           </td>
                           <td className={styles.tdAvg}>
                             {avg ? <span className={styles.avgHint}>{avg}</span> : null}
                           </td>
                           <td className={styles.tdQty}>
                             <input
+                              ref={el => { inputRefs.current[product.id] = el }}
                               type="number"
                               min={0}
                               step={1}
@@ -311,6 +365,7 @@ export default function OrdersPage() {
                               }
                               onFocus={e => e.target.select()}
                               onChange={e => handleQtyChange(selId, product.id, Number(e.target.value))}
+                              onKeyDown={e => handleInputKeyDown(e, product.id)}
                             />
                           </td>
                         </tr>
@@ -343,6 +398,20 @@ export default function OrdersPage() {
                   </tr>
                 </tfoot>
               </table>
+
+              {/* Навігація між клієнтами */}
+              <div className={styles.navFooter}>
+                <span className={styles.navPos}>
+                  {currentPos + 1} / {orderedClients.length}
+                </span>
+                <button
+                  className={styles.btnNext}
+                  onClick={goToNextClient}
+                  disabled={currentPos >= orderedClients.length - 1}
+                >
+                  Наступний клієнт →
+                </button>
+              </div>
             </>
           )}
         </main>
