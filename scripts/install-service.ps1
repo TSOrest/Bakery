@@ -95,13 +95,21 @@ $status = try {
 
 if ($status -eq 200) {
     Write-Host 'Server: OK' -ForegroundColor Green
-    Start-Process 'http://localhost:8000'
 } else {
     Write-Host 'Server starting... check http://localhost:8000 in a moment.' -ForegroundColor Yellow
 }
 
+# Launch tray icon (kill old instance first)
+$pythonw = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
+$trayScript = Join-Path $ROOT 'tray.py'
+Get-Process -Name pythonw -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 500
+Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
+
 Write-Host ''
 Write-Host '  Auto-start: ON (runs at every login)'
+Write-Host '  Tray icon:  active in system tray'
 Write-Host '  Logs:       logs\bakery.log'
 Write-Host '  App:        http://localhost:8000'
 Write-Host ''
