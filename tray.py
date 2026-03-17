@@ -18,6 +18,15 @@ _ROOT_BOOT = Path(__file__).parent
 _CRASH_LOG = _ROOT_BOOT / "logs" / "tray_crash.log"
 _CRASH_LOG.parent.mkdir(exist_ok=True)
 
+# ── Single-instance guard (lock file) ─────────────────────────────────────────
+_LOCK_FILE = _ROOT_BOOT / "logs" / "tray.lock"
+try:
+    _lock_fd = open(_LOCK_FILE, "w")
+    import msvcrt
+    msvcrt.locking(_lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+except OSError:
+    sys.exit(0)  # Another instance holds the lock — exit silently
+
 try:
     import pystray
     from PIL import Image, ImageDraw, ImageFont
