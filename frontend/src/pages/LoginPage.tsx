@@ -40,7 +40,7 @@ export default function LoginPage() {
   const [loading,  setLoading]  = useState(false)
 
   useEffect(() => {
-    fetch('/api/v1/auth/users/public')
+    fetch('/api/v1/auth/public-users')
       .then((r) => r.json())
       .then(setUsers)
       .catch(() => setUsers([]))

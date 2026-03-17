@@ -98,7 +98,7 @@ class UserUpdate(BaseModel):
 
 # ─── Ендпоінти ───────────────────────────────────────────────────────────────
 
-@router.get("/users/public")
+@router.get("/public-users")
 def list_users_public(db: Session = Depends(get_db)):
     """Публічний список активних користувачів для екрану входу (без паролів)."""
     return [
