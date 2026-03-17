@@ -350,6 +350,16 @@ export default function RoutesPage() {
   const clientInvoice = (clientId: number) =>
     invoices.find((inv) => inv.client_id === clientId && inv.status !== 'cancelled')
 
+  // При зміні накладних — вибрати всі (хуки МАЮТЬ бути до умовного return)
+  useEffect(() => {
+    if (invoices.length > 0) {
+      const allInvIds = new Set(
+        invoices.filter((i) => i.status !== 'cancelled').map((i) => i.id)
+      )
+      setCheckedIds(allInvIds)
+    }
+  }, [invoices])
+
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
   const activeRoute = routes.find((r) => r.id === activeRouteId)
@@ -400,16 +410,6 @@ export default function RoutesPage() {
       return next
     })
   }
-
-  // При зміні маршруту або підвантаженні — вибрати всі накладні
-  useEffect(() => {
-    if (invoices.length > 0) {
-      const allInvIds = new Set(
-        invoices.filter((i) => i.status !== 'cancelled').map((i) => i.id)
-      )
-      setCheckedIds(allInvIds)
-    }
-  }, [invoices])
 
   const checkedCount = visibleInvoices.filter((inv) => checkedIds.has(inv.id)).length
 
