@@ -19,16 +19,16 @@ export default function AdminPage() {
   const [products, setProducts]     = useState<Product[]>([])
 
   useEffect(() => {
-    api.get<Unit[]>('/units').then(setUnits)
-    api.get<Category[]>('/categories').then(setCategories)
+    api.get<Unit[]>('/units?active_only=false').then(setUnits)
+    api.get<Category[]>('/categories?active_only=false').then(setCategories)
     api.get<Route[]>('/routes/?active_only=false').then(setRoutes)
     api.get<Product[]>('/products/?active_only=false').then(setProducts)
   }, [])
 
   const reloadProducts   = () => api.get<Product[]>('/products/?active_only=false').then(setProducts)
   const reloadRoutes     = () => api.get<Route[]>('/routes/?active_only=false').then(setRoutes)
-  const reloadUnits      = () => api.get<Unit[]>('/units').then(setUnits)
-  const reloadCategories = () => api.get<Category[]>('/categories').then(setCategories)
+  const reloadUnits      = () => api.get<Unit[]>('/units?active_only=false').then(setUnits)
+  const reloadCategories = () => api.get<Category[]>('/categories?active_only=false').then(setCategories)
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'products',   label: 'Вироби' },
@@ -88,7 +88,7 @@ export default function AdminPage() {
           addLabel="+ Додати одиницю"
           placeholder="напр. буханка, шт, кг"
           onAdd={(name) => api.post('/units', null, `name=${encodeURIComponent(name)}`).then(reloadUnits)}
-          onDelete={(id) => api.delete(`/units/${id}`).then(reloadUnits)}
+          onUpdate={(id, patch) => api.put(`/units/${id}`, patch).then(reloadUnits)}
         />
       )}
       {tab === 'categories' && (
@@ -98,7 +98,7 @@ export default function AdminPage() {
           addLabel="+ Додати категорію"
           placeholder="напр. Хліб, Булки, Магазин"
           onAdd={(name) => api.post('/categories', null, `name=${encodeURIComponent(name)}`).then(reloadCategories)}
-          onDelete={(id) => api.delete(`/categories/${id}`).then(reloadCategories)}
+          onUpdate={(id, patch) => api.put(`/categories/${id}`, patch).then(reloadCategories)}
         />
       )}
     </div>
@@ -208,8 +208,10 @@ function ProductsTab({
               <Td>{p.is_active ? '✓' : '✗'}</Td>
               <Td>
                 <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>
-                {p.is_active === 1 && (
+                {p.is_active === 1 ? (
                   <button onClick={() => handleDeactivate(p)} style={delBtnStyle}>Деактивувати</button>
+                ) : (
+                  <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
                 )}
               </Td>
             </tr>
@@ -246,14 +248,14 @@ function ProductsTab({
               <label>Одиниця виміру</label>
               <select value={form.unit_id} onChange={(e) => setForm({ ...form, unit_id: e.target.value })}>
                 <option value="">— не вказано —</option>
-                {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {units.filter((u) => u.is_active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div className={formStyles.field}>
               <label>Категорія</label>
               <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
                 <option value="">— не вказано —</option>
-                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {categories.filter((c) => c.is_active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className={formStyles.actions}>
@@ -365,8 +367,10 @@ function ClientsTab({ routes }: { routes: Route[] }) {
               <Td>{c.is_active ? '✓' : '✗'}</Td>
               <Td>
                 <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-                {c.is_active === 1 && (
+                {c.is_active === 1 ? (
                   <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+                ) : (
+                  <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
                 )}
               </Td>
             </tr>
@@ -647,20 +651,22 @@ function PricesTab({ products, categories }: { products: Product[]; categories: 
 
 // ─── Універсальна вкладка для простих довідників (одиниці, категорії) ────────
 
-interface SimpleItem { id: number; name: string }
+interface SimpleItem { id: number; name: string; is_active: number }
 
 function SimpleListTab({
-  title, items, addLabel, placeholder, onAdd, onDelete,
+  title, items, addLabel, placeholder, onAdd, onUpdate,
 }: {
   title: string
   items: SimpleItem[]
   addLabel: string
   placeholder: string
   onAdd: (name: string) => Promise<unknown>
-  onDelete: (id: number) => Promise<unknown>
+  onUpdate: (id: number, patch: { name?: string; is_active?: number }) => Promise<unknown>
 }) {
-  const [newName, setNewName] = useState('')
-  const [saving,  setSaving]  = useState(false)
+  const [newName, setNewName]       = useState('')
+  const [saving,  setSaving]        = useState(false)
+  const [editItem, setEditItem]     = useState<SimpleItem | null>(null)
+  const [editName, setEditName]     = useState('')
 
   const handleAdd = async () => {
     const name = newName.trim()
@@ -670,15 +676,29 @@ function SimpleListTab({
     finally { setSaving(false) }
   }
 
-  const handleDelete = async (item: SimpleItem) => {
-    if (!confirm(`Видалити "${item.name}"?`)) return
-    await onDelete(item.id)
+  const openEdit = (item: SimpleItem) => { setEditItem(item); setEditName(item.name) }
+
+  const handleRename = async () => {
+    if (!editItem) return
+    const name = editName.trim()
+    if (!name || name === editItem.name) { setEditItem(null); return }
+    await onUpdate(editItem.id, { name })
+    setEditItem(null)
   }
+
+  const handleToggleActive = async (item: SimpleItem) => {
+    const label = item.is_active ? 'приховати' : 'відновити'
+    if (!confirm(`${label} "${item.name}"?`)) return
+    await onUpdate(item.id, { is_active: item.is_active ? 0 : 1 })
+  }
+
+  const active   = items.filter((i) => i.is_active)
+  const inactive = items.filter((i) => !i.is_active)
 
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>{title} ({items.length})</strong>
+        <strong>{title} ({active.length} активних{inactive.length > 0 ? `, ${inactive.length} прихованих` : ''})</strong>
       </div>
 
       {/* Форма додавання */}
@@ -703,11 +723,35 @@ function SimpleListTab({
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={item.id}>
+            <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.5 }}>
               <Td>{item.id}</Td>
-              <Td>{item.name}</Td>
               <Td>
-                <button onClick={() => handleDelete(item)} style={delBtnStyle}>Видалити</button>
+                {editItem?.id === item.id ? (
+                  <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditItem(null) }}
+                      style={{ padding: '0.2rem 0.4rem', border: '1px solid #bcd', borderRadius: '3px', fontSize: '0.9rem' }}
+                    />
+                    <button onClick={handleRename} style={editBtnStyle}>Зберегти</button>
+                    <button onClick={() => setEditItem(null)} style={{ ...editBtnStyle, color: '#888' }}>✕</button>
+                  </span>
+                ) : (
+                  item.name
+                )}
+              </Td>
+              <Td>
+                {editItem?.id !== item.id && (
+                  <button onClick={() => openEdit(item)} style={editBtnStyle}>Перейменувати</button>
+                )}
+                <button
+                  onClick={() => handleToggleActive(item)}
+                  style={item.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}
+                >
+                  {item.is_active ? 'Приховати' : 'Відновити'}
+                </button>
               </Td>
             </tr>
           ))}

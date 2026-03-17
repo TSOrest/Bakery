@@ -5,11 +5,13 @@
 export interface Unit {
   id: number
   name: string
+  is_active: number
 }
 
 export interface Category {
   id: number
   name: string
+  is_active: number
 }
 
 export interface Product {

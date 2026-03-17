@@ -14,18 +14,30 @@ class ProductType(str, Enum):
 
 # --- Units ---
 
+class UnitUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[int] = None
+
+
 class UnitOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    is_active: int
 
 
 # --- Categories ---
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[int] = None
+
 
 class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    is_active: int
 
 
 # --- Products ---

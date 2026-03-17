@@ -7,7 +7,7 @@ from backend.database import engine, Base
 import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
-    products, categories, clients, routes, prices, orders, baking, invoices,
+    products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
 )
 
 # Ініціалізуємо таблиці (якщо не існують)
@@ -40,6 +40,8 @@ app.include_router(prices.router,     prefix=PREFIX)
 app.include_router(orders.router,     prefix=PREFIX)
 app.include_router(baking.router,     prefix=PREFIX)
 app.include_router(invoices.router,   prefix=PREFIX)
+app.include_router(shop.router,       prefix=PREFIX)
+app.include_router(print_views.router, prefix=PREFIX)
 
 
 @app.get("/api/health")

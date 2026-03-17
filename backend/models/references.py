@@ -8,15 +8,17 @@ from backend.database import Base
 class Unit(Base):
     __tablename__ = "units"
 
-    id   = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(Text, nullable=False, unique=True)
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    name      = Column(Text, nullable=False, unique=True)
+    is_active = Column(Integer, default=1)
 
 
 class Category(Base):
     __tablename__ = "categories"
 
-    id   = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(Text, nullable=False, unique=True)
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    name      = Column(Text, nullable=False, unique=True)
+    is_active = Column(Integer, default=1)
 
 
 class Product(Base):
