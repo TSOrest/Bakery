@@ -1,4 +1,4 @@
-# 🍞 Пекарня — Система управління пекарнею
+# Пекарня — Система управління пекарнею
 
 Веб-застосунок для управління пекарнею. Замінює застарілу базу Access (.accdb).
 Повністю офлайн, локальне розгортання на Windows.
@@ -10,38 +10,68 @@
 | Компонент | Технологія |
 |-----------|-----------|
 | Backend | Python 3.11+ · FastAPI · SQLAlchemy 2.0 |
-| Database | SQLite (один файл `bakery.db`) |
+| Database | SQLite (`bakery.db`) |
 | Frontend | React 18 · Vite · TypeScript |
-| Друк | PDF (reportlab / weasyprint) — Фаза 2 |
-| Розгортання | localhost, локальна мережа |
+| Друк | PDF через браузер (weasyprint) |
+| Розгортання | localhost · Windows · Task Scheduler |
+| Трей | pystray · Pillow |
 
 ---
 
 ## Швидкий старт
 
-```bash
-# 1. Встановлення (один раз)
-bash scripts/install.sh
+### Перший запуск (встановлення)
 
-# 2. Запуск
-bash scripts/start.sh
+```
+install.bat          ← встановлює venv, залежності, базу
+install-service.bat  ← реєструє автозапуск при вході в систему + запускає трей
+```
+
+### Щоденна робота
+
+Після `install-service.bat` сервер стартує **автоматично при вході в Windows**.
+Іконка у системному треї показує стан:
+
+| Іконка | Стан |
+|--------|------|
+| Зелена | Сервер працює |
+| Червона | Сервер зупинений |
+| З бейджем | Доступне оновлення |
+
+**Меню трею:** Відкрити · Запустити · Перезапустити · Зупинити · Логи · Оновлення · Вийти
+
+### Ручне керування
+
+```
+start.bat        ← запустити сервер
+stop.bat         ← зупинити сервер
+tray.bat         ← запустити іконку трею (якщо закрита)
+start-dev.bat    ← режим розробки (hot-reload + Vite dev server)
+```
+
+### Оновлення та відкат
+
+```
+update.bat       ← завантажує і встановлює нову версію з GitHub
+rollback.bat     ← повертає попередню версію
 ```
 
 | Сервіс | URL |
 |--------|-----|
-| Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8000 |
+| Застосунок | http://localhost:8000 |
 | Swagger docs | http://localhost:8000/api/docs |
+| Dev UI (HMR) | http://localhost:5173 *(тільки в dev-режимі)* |
 
 ---
 
 ## Структура проекту
 
 ```
+Пекарня 2/
 ├── backend/
-│   ├── main.py            ← FastAPI app
+│   ├── main.py            ← FastAPI app + роздача фронтенду
 │   ├── database.py        ← SQLite + SQLAlchemy session
-│   ├── models/            ← ORM-моделі (10 модулів)
+│   ├── models/            ← ORM-моделі (18 таблиць)
 │   ├── routers/           ← API ендпоінти
 │   ├── schemas/           ← Pydantic схеми
 │   ├── services/          ← бізнес-логіка
@@ -51,18 +81,34 @@ bash scripts/start.sh
 │       ├── pages/         ← 6 вкладок застосунку
 │       ├── components/    ← Layout, спільні компоненти
 │       ├── api/           ← fetch-обгортки
-│       ├── context/       ← DateContext (дата роботи)
+│       ├── context/       ← AuthContext, DateContext
 │       └── types/         ← TypeScript типи
 ├── database/
 │   ├── schema.sql         ← повна схема SQLite
 │   └── migrations/
 ├── scripts/
-│   ├── install.sh
-│   ├── start.sh
-│   └── run_tests.sh
-└── tests/
-    ├── test_api.py
-    └── test_services.py
+│   ├── install-service.ps1  ← Task Scheduler + трей
+│   ├── uninstall-service.ps1
+│   ├── start.ps1
+│   ├── stop.ps1
+│   ├── start-dev.ps1
+│   ├── update.ps1           ← git checkout + rebuild + restart
+│   └── rollback.ps1
+├── logs/
+│   ├── bakery.log           ← лог сервера (uvicorn)
+│   └── tray_crash.log       ← лог помилок трею
+├── tray.py                  ← системний трей (pystray)
+├── VERSION                  ← поточна версія (напр. v1.0.0)
+├── PREVIOUS_VERSION         ← попередня версія (після оновлення)
+├── install.bat
+├── install-service.bat
+├── uninstall-service.bat
+├── start.bat
+├── stop.bat
+├── start-dev.bat
+├── tray.bat
+├── update.bat
+└── rollback.bat
 ```
 
 ---
@@ -76,7 +122,7 @@ bash scripts/start.sh
 | Маршрути | `/routes` | Накладні + переміщення після повернення водія |
 | Магазин | `/shop` | Щоденна звірка, несвіжий товар, група ІНШЕ |
 | Фінанси | `/finances` | Баланси клієнтів, рух коштів |
-| Довідники | `/admin` | Вироби, клієнти, ціни, маршрути, налаштування |
+| Довідники | `/admin` | Вироби, клієнти, ціни, маршрути, налаштування, права ролей |
 
 ---
 
@@ -93,6 +139,8 @@ bash scripts/start.sh
     /baking/tasks      GET, POST (generate), PUT
     /baking/surplus    GET, POST
     /invoices          GET, POST, PUT /status
+    /auth              POST /login · GET /public-users · CRUD /users
+    /settings          GET, PUT
 ```
 
 ---
@@ -104,72 +152,70 @@ bash scripts/start.sh
 | operator | замовлення, випічка, маршрути, накладні, магазин |
 | accountant | фінанси, баланси, перегляд всього |
 | admin | довідники, ціни, налаштування, повний доступ |
-| owner | read-only дашборд (мобільний) |
+| owner | read-only дашборд |
+
+Права ролей налаштовуються через вкладку **Довідники → Права ролей**.
 
 ---
 
-## Фази розробки
+## Система оновлень
 
-### ✅ Фаза 1 — MVP
-- [x] Структура проекту + `install.sh`
-- [x] SQLite схема (`database/schema.sql`) — всі 18 таблиць
-- [x] FastAPI app + database session (WAL, foreign keys)
-- [x] SQLAlchemy моделі для всіх таблиць
-- [x] Pydantic schemas + CRUD endpoints для довідників
-- [x] Логіка замовлень: POST/GET/PUT/DELETE + копіювання з дати
-- [x] Сервіс `get_price()` — 4-рівневий пріоритет цін
-- [x] Завдання на випічку + внесення результату + розподіл надлишків
-- [x] Накладні: генерація + автонумерація `YYYYMMDD-NNN`
-- [x] React каркас: навігація по вкладках + дата роботи в хедері
-- [x] Вкладка Замовлення (таблиця клієнт × виріб, inline-редагування)
-- [x] Вкладка Випічка (завдання + baked_qty)
-- [x] Вкладка Довідники (перегляд виробів, клієнтів, маршрутів)
-- [x] Базові тести: pytest + TestClient (18 тест-кейсів)
-
-### 🔄 Фаза 2 — Повний цикл
-- [x] Stale-логіка: несвіжий товар по всьому ланцюжку
-- [x] Скасування рейсу
-- [x] Магазин: щоденна звірка (received_today авто з випічки), підтвердження, товари ІНШЕ
-- [x] Переробка вкладки Маршрути (двохрівнева панель, друк з галочками, модал повернення)
-- [x] Авторизація і ролі
-- [x] Друк PDF — накладні (2 на A4, оригінал+копія, маршрут у шапці, групування по типу) + завдання пекарям
-
-### ⬜ Фаза 3 — Фінанси та аналітика
-- [ ] Фінансовий модуль
-- [ ] Управління цінами (майбутні дати, % зміна)
-- [ ] Собівартість і маржинальність
-- [ ] Мобільний дашборд для власника
-
-### ⬜ Фаза 4 — Розширення
-- [ ] Міграція з .accdb
-- [ ] Розширені звіти
-- [ ] Архівування, автобекапи
-
----
-
-## Запуск тестів
+Версія зберігається у файлі `VERSION`. При випуску нової версії:
 
 ```bash
-bash scripts/run_tests.sh
+# На стороні розробника:
+echo "v1.1.0" > VERSION
+git add VERSION && git commit -m "feat: ..."
+git tag v1.1.0
+git push origin master --tags
 ```
 
+На стороні клієнта: трей автоматично виявляє нову версію (перевірка раз на годину),
+показує бейдж на іконці та пропонує встановити через меню.
+
+Після оновлення зберігається `PREVIOUS_VERSION` — для відкату через `rollback.bat`.
+
+---
+
+## Архітектура розгортання
+
 ```
-tests/test_services.py   # юніт-тести сервісів (get_price, invoice_number, copy_orders)
-tests/test_api.py        # інтеграційні тести API через TestClient
+Windows Task Scheduler
+    └── BakeryApp (AtLogon, автоперезапуск 5×)
+            └── scripts/run-server.ps1
+                    └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
+                            ├── /api/v1/...          (FastAPI роутери)
+                            └── /*                   (frontend/dist — React SPA)
+tray.py (pythonw, без вікна)
+    └── моніторить сервер, керує задачею, оновлення
 ```
 
 ---
 
 ## Розробка
 
-```bash
-# Backend (з hot-reload)
-bash scripts/start_backend.sh
-
-# Frontend (Vite dev server)
-bash scripts/start_frontend.sh
+```
+start-dev.bat
 ```
 
-> **Примітка для Windows:** якщо проект знаходиться на мережевому диску (UNC-шлях),
-> використовуйте `scripts/start_frontend.sh` — в `vite.config.ts` вже налаштовано
-> `optimizeDeps` для коректного резолвингу пакетів.
+Запускає:
+- uvicorn з `--reload` на порту 8000
+- Vite dev server з HMR на порту 5173
+
+Проксі в `vite.config.ts` перенаправляє `/api` → `http://localhost:8000`.
+На мережевому диску увімкнено `usePolling: true` (chokidar).
+
+### Тести
+
+```bash
+backend/venv/Scripts/pytest tests/ -v
+```
+
+---
+
+## Логи
+
+| Файл | Вміст |
+|------|-------|
+| `logs/bakery.log` | вивід uvicorn (INFO/ERROR) |
+| `logs/tray_crash.log` | помилки запуску трею |
