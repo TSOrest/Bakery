@@ -396,13 +396,21 @@ export default function BakingPage() {
           {generating ? 'Формую...' : '⟳ Сформувати із замовлень'}
         </button>
         {tasks.length > 0 && (
-          <button
-            className={styles.btnToggleRec}
-            onClick={() => setShowRec((v) => !v)}
-            title="Показати / приховати рекомендовану кількість"
-          >
-            {showRec ? '▲ Сховати рекомендовано' : '▼ Показати рекомендовано'}
-          </button>
+          <>
+            <button
+              className={styles.btnToggleRec}
+              onClick={() => setShowRec((v) => !v)}
+              title="Показати / приховати рекомендовану кількість"
+            >
+              {showRec ? '▲ Сховати рекомендовано' : '▼ Показати рекомендовано'}
+            </button>
+            <button
+              className={styles.btnPrint}
+              onClick={() => window.open(`/api/v1/print/baking?task_date=${workDate}`, '_blank')}
+            >
+              🖨 Завдання пекарям
+            </button>
+          </>
         )}
       </div>
 

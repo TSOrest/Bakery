@@ -273,6 +273,17 @@
 }
 .btnToggleRec:hover { background: #e8eef5; }
 
+.btnPrint {
+  padding: 0.4rem 0.9rem;
+  background: #5c7a9c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.btnPrint:hover { background: #486282; }
+
 .btnAdd {
   padding: 0.3rem 0.75rem;
   background: #27ae60;
