@@ -8,6 +8,12 @@ import styles from './OrdersPage.module.css'
 type CellKey = `${number}-${number}`
 type SavingMap = Record<CellKey, 'saving' | 'saved' | 'error'>
 
+// effectivePrices[clientId][productId] = price
+type PricesCache = Record<number, Record<number, number>>
+
+const fmt = (n: number) =>
+  n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 export default function OrdersPage() {
   const { workDate } = useWorkDate()
 
@@ -17,6 +23,7 @@ export default function OrdersPage() {
   const [orders,   setOrders]   = useState<Order[]>([])
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState<SavingMap>({})
+  const [prices,   setPrices]   = useState<PricesCache>({})
 
   const [selectedRouteId,  setSelectedRouteId]  = useState<number | null>(null)
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null)
@@ -32,8 +39,27 @@ export default function OrdersPage() {
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
+  const fetchPricesForClients = (clientIds: number[], date: string) => {
+    const missing = clientIds.filter(id => !(id in prices))
+    if (missing.length === 0) return
+    Promise.all(
+      missing.map(cid =>
+        api.get<Record<number, number>>(`/prices/effective?client_id=${cid}&date=${date}`)
+          .then(p => ({ cid, p }))
+          .catch(() => ({ cid, p: {} as Record<number, number> }))
+      )
+    ).then(results => {
+      setPrices(prev => {
+        const next = { ...prev }
+        for (const { cid, p } of results) next[cid] = p
+        return next
+      })
+    })
+  }
+
   const loadAll = (date: string) => {
     setLoading(true)
+    setPrices({})
     Promise.all([
       api.get<Route[]>('/routes/'),
       api.get<Client[]>('/clients/'),
@@ -45,10 +71,30 @@ export default function OrdersPage() {
       setProducts(p)
       setOrders(o)
       setLoading(false)
+      // Завантажуємо ціни для всіх клієнтів з замовленнями
+      const uniqueIds = [...new Set(o.map(ord => ord.client_id))]
+      if (uniqueIds.length > 0) {
+        Promise.all(
+          uniqueIds.map(cid =>
+            api.get<Record<number, number>>(`/prices/effective?client_id=${cid}&date=${date}`)
+              .then(pr => ({ cid, pr }))
+              .catch(() => ({ cid, pr: {} as Record<number, number> }))
+          )
+        ).then(results => {
+          const cache: PricesCache = {}
+          for (const { cid, pr } of results) cache[cid] = pr
+          setPrices(cache)
+        })
+      }
     })
   }
 
   useEffect(() => { loadAll(workDate) }, [workDate])
+
+  // Якщо відкривається модалка для клієнта без завантажених цін — підвантажуємо
+  useEffect(() => {
+    if (modalClientId != null) fetchPricesForClients([modalClientId], workDate)
+  }, [modalClientId, workDate])
 
   // ─── Збереження з дебаунсом ────────────────────────────────────────────────
 
@@ -115,11 +161,11 @@ export default function OrdersPage() {
     finally { setCopyLoading(false) }
   }
 
-  // ─── Індекси для швидкого пошуку ──────────────────────────────────────────
+  // ─── Індекси ──────────────────────────────────────────────────────────────
 
-  const clientMap  = useMemo(() => new Map(clients.map(c => [c.id, c])),   [clients])
-  const routeMap   = useMemo(() => new Map(routes.map(r => [r.id, r])),    [routes])
-  const productMap = useMemo(() => new Map(products.map(p => [p.id, p])),  [products])
+  const clientMap  = useMemo(() => new Map(clients.map(c => [c.id, c])),  [clients])
+  const routeMap   = useMemo(() => new Map(routes.map(r => [r.id, r])),   [routes])
+  const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products])
 
   // ─── Підрахунки по клієнту ────────────────────────────────────────────────
 
@@ -135,12 +181,10 @@ export default function OrdersPage() {
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  // Клієнти в сайдбарі (відфільтровані за маршрутом)
   const sidebarClients = clients.filter(c =>
     c.is_active && (selectedRouteId == null || c.route_id === selectedRouteId)
   )
 
-  // Замовлення для таблиці (без дочірніх, з кількістю > 0)
   const ordersToShow = orders
     .filter(o => {
       if (o.parent_order_id != null || o.qty <= 0) return false
@@ -161,7 +205,6 @@ export default function OrdersPage() {
       return (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
     })
 
-  // Badge маршруту: кількість клієнтів з замовленнями / всього
   const routeBadge = (routeId: number | null) => {
     const rc = routeId == null
       ? clients.filter(c => c.is_active)
@@ -174,10 +217,17 @@ export default function OrdersPage() {
 
   const showRouteCol  = selectedRouteId == null
   const showClientCol = selectedClientId == null
-  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 2
+  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 6
 
   const openBakingPrint = (type: 'bread' | 'bun') =>
     window.open(`/api/v1/print/baking?task_date=${workDate}&product_type=${type}`, '_blank')
+
+  // Колір клітинки Хл/Бул: червоний якщо обидва 0, жовтий якщо цей 0 а інший > 0
+  const numCellClass = (val: number, other: number) => {
+    if (val === 0 && other === 0) return styles.cellRed
+    if (val === 0) return styles.cellYellow
+    return ''
+  }
 
   return (
     <div className={styles.page}>
@@ -189,12 +239,8 @@ export default function OrdersPage() {
           Скопіювати з дати
         </button>
         <div className={styles.bakingBtns}>
-          <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>
-            Завдання Хліб
-          </button>
-          <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>
-            Завдання Булки
-          </button>
+          <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>Завдання Хліб</button>
+          <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>Завдання Булки</button>
         </div>
       </div>
 
@@ -215,7 +261,7 @@ export default function OrdersPage() {
         {/* ── Ліва панель ── */}
         <aside className={styles.sidebar}>
 
-          {/* Фільтр маршрутів */}
+          {/* Маршрути */}
           <div className={styles.routeFilter}>
             <button
               className={`${styles.routeBtn} ${selectedRouteId == null ? styles.routeBtnActive : ''}`}
@@ -236,7 +282,7 @@ export default function OrdersPage() {
             ))}
           </div>
 
-          {/* Список клієнтів */}
+          {/* Клієнти */}
           <div className={styles.clientListWrap}>
             <div className={styles.clientListHeader}>
               <span className={styles.chName}>Клієнт</span>
@@ -248,17 +294,20 @@ export default function OrdersPage() {
               {sidebarClients.map(client => {
                 const bread = clientBread(client.id)
                 const bun   = clientBun(client.id)
-                const hasAny = bread > 0 || bun > 0
-                const isSel  = client.id === selectedClientId
+                const isSel = client.id === selectedClientId
                 return (
                   <div
                     key={client.id}
-                    className={`${styles.clientItem} ${isSel ? styles.clientSel : ''} ${hasAny ? styles.clientHas : ''}`}
+                    className={`${styles.clientItem} ${isSel ? styles.clientSel : ''}`}
                     onClick={() => setSelectedClientId(isSel ? null : client.id)}
                   >
                     <span className={styles.ciName}>{client.short_name ?? client.full_name}</span>
-                    <span className={`${styles.ciNum} ${bread > 0 ? styles.ciNumActive : ''}`}>{bread || ''}</span>
-                    <span className={`${styles.ciNum} ${bun  > 0 ? styles.ciNumActive : ''}`}>{bun  || ''}</span>
+                    <span className={`${styles.ciNum} ${numCellClass(bread, bun)}`}>
+                      {bread || ''}
+                    </span>
+                    <span className={`${styles.ciNum} ${numCellClass(bun, bread)}`}>
+                      {bun || ''}
+                    </span>
                     <button
                       className={styles.ciAddBtn}
                       title="Відкрити замовлення"
@@ -279,7 +328,11 @@ export default function OrdersPage() {
                 {showRouteCol  && <th className={styles.thRoute}>Маршрут</th>}
                 {showClientCol && <th className={styles.thClient}>Клієнт</th>}
                 <th className={styles.thProduct}>Виріб</th>
-                <th className={styles.thQty}>Кільк.</th>
+                <th className={styles.thNum}>Замовл.</th>
+                <th className={styles.thNum}>Ціна</th>
+                <th className={styles.thNum}>Обмін</th>
+                <th className={styles.thNum}>Всього</th>
+                <th className={styles.thNum}>Сума</th>
               </tr>
             </thead>
             <tbody>
@@ -287,6 +340,10 @@ export default function OrdersPage() {
                 const client  = clientMap.get(order.client_id)
                 const route   = routeMap.get(client?.route_id ?? 0)
                 const product = productMap.get(order.product_id)
+                const price   = prices[order.client_id]?.[order.product_id]
+                const exQty   = order.exchange_qty ?? 0
+                const total   = order.qty + exQty
+                const sum     = price != null ? order.qty * price : null
                 const isSel   = order.client_id === selectedClientId
                 return (
                   <tr
@@ -303,7 +360,15 @@ export default function OrdersPage() {
                       </td>
                     )}
                     <td className={styles.tdProduct}>{product?.name ?? '—'}</td>
-                    <td className={styles.tdQty}>{order.qty}</td>
+                    <td className={styles.tdNum}>{order.qty}</td>
+                    <td className={styles.tdPrice}>
+                      {price != null && price > 0 ? fmt(price) : '—'}
+                    </td>
+                    <td className={styles.tdNum}>{exQty > 0 ? exQty : ''}</td>
+                    <td className={styles.tdNum}>{total}</td>
+                    <td className={styles.tdSum}>
+                      {sum != null && sum > 0 ? fmt(sum) : '—'}
+                    </td>
                   </tr>
                 )
               })}

@@ -46,6 +46,16 @@
 .clientAddr  { color: #8fa8c0; font-size: 0.82rem; }
 .clientPhone { color: #6a8aac; font-size: 0.85rem; }
 
+.discountBadge {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 10px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .closeBtn {
   background: none;
   border: none;
@@ -118,23 +128,28 @@
 .productTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
+.productTable thead tr { background: #e8eef5; position: sticky; top: 0; z-index: 1; }
 .productTable tr { transition: background 0.08s; }
 .productTable tr:hover { background: #f5f9fd; }
 
 .hasQty { background: #eef6ff; }
 .hasQty:hover { background: #e5f1ff !important; }
 
+.thName   { padding: 0.3rem 1rem 0.3rem 1rem; text-align: left; font-weight: 600; }
+.thWeight { padding: 0.3rem 0.4rem; text-align: center; font-weight: 600; color: #8fa8c0; width: 48px; }
+.thPrice  { padding: 0.3rem 0.6rem; text-align: right;  font-weight: 600; width: 70px; }
+.thQtyH   { padding: 0.3rem 0.6rem; text-align: center; font-weight: 600; width: 82px; }
+
 .tdName {
-  padding: 0.35rem 1rem;
+  padding: 0.32rem 0.6rem 0.32rem 1rem;
   border-bottom: 1px solid #f0f0f0;
 }
 
-.prodName  { color: #1a2a3c; }
-.weight    { color: #8fa8c0; font-size: 0.8rem; }
-.freqHint  {
+.prodName { color: #1a2a3c; }
+.freqHint {
   display: inline-block;
   background: #e4f0fa;
   color: #2a6aac;
@@ -144,8 +159,26 @@
   margin-left: 0.4rem;
 }
 
+.tdWeight {
+  padding: 0.32rem 0.4rem;
+  border-bottom: 1px solid #f0f0f0;
+  text-align: center;
+  color: #9ab8d0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.tdPrice {
+  padding: 0.32rem 0.6rem;
+  border-bottom: 1px solid #f0f0f0;
+  text-align: right;
+  color: #2a5080;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .tdInput {
-  padding: 0.2rem 0.6rem 0.2rem 0.3rem;
+  padding: 0.18rem 0.5rem 0.18rem 0.3rem;
   border-bottom: 1px solid #f0f0f0;
   text-align: right;
   width: 82px;
@@ -259,6 +292,12 @@
   gap: 1.4rem;
   font-size: 0.9rem;
   color: #444;
+  flex-wrap: wrap;
+}
+
+.totalSum {
+  color: #1a3a5c;
+  font-size: 0.95rem;
 }
 
 .footerActions {

@@ -1,6 +1,6 @@
 """Ендпоінти для управління цінами."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
@@ -16,6 +16,15 @@ from backend.schemas.pricing import (
 from backend.services.prices import get_price
 
 router = APIRouter(prefix="/prices", tags=["Ціни"])
+
+
+# ── Ефективні ціни для клієнта ─────────────────────────────────────────────────
+
+@router.get("/effective", response_model=Dict[int, float])
+def effective_prices_for_client(client_id: int, date: str, db: Session = Depends(get_db)):
+    """Ефективні ціни всіх активних продуктів для клієнта на задану дату."""
+    prods = db.query(Product).filter(Product.is_active == 1).all()
+    return {p.id: get_price(db, p.id, client_id, date) for p in prods}
 
 
 # ── Базові ціни ────────────────────────────────────────────────────────────────

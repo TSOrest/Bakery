@@ -171,13 +171,23 @@
 .ciName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.84rem; }
 
 .ciNum {
-  width: 26px;
+  width: 28px;
   text-align: center;
   font-size: 0.8rem;
   color: #9ab8d0;
+  border-radius: 3px;
+  padding: 0 2px;
 }
-.ciNumActive {
-  color: #1a3a5c;
+
+/* Підсвічування клітинок Хл/Бул */
+.cellYellow {
+  background: #fff3b0;
+  color: #7a5c00 !important;
+  font-weight: 700;
+}
+.cellRed {
+  background: #ffd0d0;
+  color: #8a0000 !important;
   font-weight: 700;
 }
 
@@ -213,24 +223,74 @@
 
 .ordersTable thead tr { background: #e8eef5; position: sticky; top: 0; z-index: 1; }
 
-.thRoute, .thClient { padding: 0.4rem 0.8rem; text-align: left; font-weight: 600; border-bottom: 2px solid #c5d8ed; white-space: nowrap; }
-.thProduct { padding: 0.4rem 0.8rem; text-align: left; font-weight: 600; border-bottom: 2px solid #c5d8ed; }
-.thQty { padding: 0.4rem 0.8rem; text-align: center; font-weight: 600; border-bottom: 2px solid #c5d8ed; width: 70px; white-space: nowrap; }
+.thRoute, .thClient {
+  padding: 0.38rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  white-space: nowrap;
+}
+.thProduct {
+  padding: 0.38rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+}
+.thNum {
+  padding: 0.38rem 0.5rem;
+  text-align: right;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  white-space: nowrap;
+  width: 70px;
+}
 
 .orderRow { cursor: pointer; transition: background 0.08s; }
 .orderRow:hover { background: #f2f7fc; }
 .orderRowSel { background: #daeaf8 !important; }
 
-.tdRoute, .tdClient {
-  padding: 0.3rem 0.8rem;
+.tdRoute {
+  padding: 0.28rem 0.7rem;
   border-bottom: 1px solid #eee;
   white-space: nowrap;
-  color: #5580a0;
-  font-size: 0.83rem;
+  color: #7090b0;
+  font-size: 0.82rem;
 }
-.tdClient { color: #1a3a5c; font-weight: 500; }
-.tdProduct { padding: 0.3rem 0.8rem; border-bottom: 1px solid #eee; }
-.tdQty { padding: 0.3rem 0.8rem; border-bottom: 1px solid #eee; text-align: center; font-weight: 600; color: #1a3a5c; }
+.tdClient {
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  color: #1a3a5c;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.tdProduct {
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #eee;
+  font-size: 0.87rem;
+}
+.tdNum {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.85rem;
+  color: #1a3a5c;
+}
+.tdPrice {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.82rem;
+  color: #5580a0;
+}
+.tdSum {
+  padding: 0.28rem 0.6rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1a3a5c;
+}
 
 .emptyMsg {
   padding: 2rem;

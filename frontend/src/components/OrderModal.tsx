@@ -16,10 +16,13 @@ interface Props {
   onClose: () => void
 }
 
+const fmt = (n: number) => n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 export default function OrderModal({ client, workDate, products, orders, saving, onQtyChange, onClose }: Props) {
   const [filter,  setFilter]  = useState<'all' | 'bread' | 'bun'>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
+  const [prices,  setPrices]  = useState<Record<number, number>>({})
 
   const [showRepeat,    setShowRepeat]    = useState(false)
   const [repeatDate,    setRepeatDate]    = useState('')
@@ -36,13 +39,19 @@ export default function OrderModal({ client, workDate, products, orders, saving,
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Завантажуємо ефективні ціни при відкритті
+  useEffect(() => {
+    api.get<Record<number, number>>(`/prices/effective?client_id=${client.id}&date=${workDate}`)
+      .then(setPrices)
+      .catch(() => {})
+  }, [client.id, workDate])
+
   // Завантажуємо частоту клієнта при перемиканні на сортування за частотою
   useEffect(() => {
     if (sortBy !== 'freq' || Object.keys(freqs).length > 0) return
     const from = new Date(); from.setDate(from.getDate() - 90)
-    const dateFrom = from.toISOString().split('T')[0]
     api.get<Record<number, number>>(
-      `/orders/averages?client_id=${client.id}&date_from=${dateFrom}`
+      `/orders/averages?client_id=${client.id}&date_from=${from.toISOString().split('T')[0]}`
     ).then(setFreqs).catch(() => {})
   }, [sortBy, client.id, freqs])
 
@@ -67,9 +76,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
     orders.find(o => o.client_id === client.id && o.product_id === productId && o.parent_order_id == null)?.qty ?? 0
 
   const activeProducts = products.filter(p => p.is_active)
-
   const filtered = filter === 'all' ? activeProducts : activeProducts.filter(p => p.type === filter)
-
   const displayed = [...filtered].sort((a, b) => {
     if (sortBy === 'freq') {
       const diff = (freqs[b.id] ?? 0) - (freqs[a.id] ?? 0)
@@ -80,8 +87,9 @@ export default function OrderModal({ client, workDate, products, orders, saving,
 
   // Підсумки
   const clientOrders = orders.filter(o => o.client_id === client.id && o.parent_order_id == null && o.qty > 0)
-  const uniqueCount  = new Set(clientOrders.map(o => o.product_id)).size
-  const totalQty     = clientOrders.reduce((s, o) => s + o.qty, 0)
+  const uniqueCount = new Set(clientOrders.map(o => o.product_id)).size
+  const totalQty    = clientOrders.reduce((s, o) => s + o.qty, 0)
+  const totalSum    = clientOrders.reduce((s, o) => s + o.qty * (prices[o.product_id] ?? 0), 0)
 
   // ─── Enter-навігація ───────────────────────────────────────────────────────
 
@@ -98,14 +106,14 @@ export default function OrderModal({ client, workDate, products, orders, saving,
 
   const handleAddRepeat = () => {
     for (const o of repeatOrders) {
-      if (repeatChecked.has(o.product_id)) {
-        onQtyChange(client.id, o.product_id, o.qty)
-      }
+      if (repeatChecked.has(o.product_id)) onQtyChange(client.id, o.product_id, o.qty)
     }
     setShowRepeat(false)
   }
 
   // ─── Рендер ───────────────────────────────────────────────────────────────
+
+  const hasDiscount = (client.discount_pct ?? 0) > 0
 
   return (
     <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -116,8 +124,13 @@ export default function OrderModal({ client, workDate, products, orders, saving,
           <div className={styles.headerLeft}>
             <strong>{client.full_name}</strong>
             {client.short_name && <span className={styles.clientShort}>({client.short_name})</span>}
-            {client.address && <span className={styles.clientAddr}>{client.address}</span>}
-            {client.phone && <span className={styles.clientPhone}>{client.phone}</span>}
+            {client.address   && <span className={styles.clientAddr}>{client.address}</span>}
+            {client.phone     && <span className={styles.clientPhone}>{client.phone}</span>}
+            {hasDiscount && (
+              <span className={styles.discountBadge} title={`Знижка ${client.discount_pct}%`}>
+                -{client.discount_pct}%
+              </span>
+            )}
           </div>
           <button className={styles.closeBtn} onClick={onClose} title="Закрити (Esc)">×</button>
         </div>
@@ -149,26 +162,40 @@ export default function OrderModal({ client, workDate, products, orders, saving,
           </div>
         </div>
 
-        {/* Тіло: список виробів + панель повтору */}
+        {/* Тіло */}
         <div className={styles.body}>
 
           {/* Список виробів */}
           <div className={styles.productCol}>
             <table className={styles.productTable}>
+              <thead>
+                <tr>
+                  <th className={styles.thName}>Виріб</th>
+                  <th className={styles.thWeight}>Вага</th>
+                  <th className={styles.thPrice}>Ціна</th>
+                  <th className={styles.thQtyH}>Кількість</th>
+                </tr>
+              </thead>
               <tbody>
                 {displayed.map(product => {
                   const key: CellKey = `${client.id}-${product.id}`
                   const state = saving[key]
                   const qty   = getQty(product.id)
                   const freq  = freqs[product.id]
+                  const price = prices[product.id]
                   return (
                     <tr key={product.id} className={qty > 0 ? styles.hasQty : ''}>
                       <td className={styles.tdName}>
                         <span className={styles.prodName}>{product.name}</span>
-                        {product.weight ? <span className={styles.weight}> {product.weight}кг</span> : null}
                         {sortBy === 'freq' && freq
                           ? <span className={styles.freqHint}>~{freq}</span>
                           : null}
+                      </td>
+                      <td className={styles.tdWeight}>
+                        {product.weight ? <span>{product.weight}</span> : null}
+                      </td>
+                      <td className={styles.tdPrice}>
+                        {price != null && price > 0 ? fmt(price) : '—'}
                       </td>
                       <td className={styles.tdInput}>
                         <input
@@ -263,6 +290,9 @@ export default function OrderModal({ client, workDate, products, orders, saving,
           <div className={styles.totals}>
             <span>Видів: <strong>{uniqueCount}</strong></span>
             <span>Виробів: <strong>{totalQty}</strong></span>
+            {totalSum > 0 && (
+              <span className={styles.totalSum}>Сума: <strong>{fmt(totalSum)} ₴</strong></span>
+            )}
           </div>
           <div className={styles.footerActions}>
             <button
