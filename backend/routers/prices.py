@@ -43,17 +43,9 @@ def create_price(data: PriceCreate, db: Session = Depends(get_db)):
     return p
 
 
-@router.delete("/{price_id}", status_code=204)
-def delete_price(price_id: int, db: Session = Depends(get_db)):
-    """Деактивує ціну (встановлює is_active=0 і valid_to=сьогодні)."""
-    p = db.get(Price, price_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="Ціну не знайдено")
-    p.is_active = 0
-    if not p.valid_to:
-        p.valid_to = date.today().isoformat()
-    db.commit()
-
+# ВАЖЛИВО: фіксовані шляхи (/replace, /bulk-preview, /bulk-change, /resolve)
+# мають бути оголошені ДО параметризованих (/{price_id}), інакше FastAPI
+# матчить "replace" як значення price_id і повертає 405.
 
 @router.post("/replace", response_model=PriceOut, status_code=201)
 def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db)):
@@ -65,8 +57,8 @@ def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db)):
     if not old:
         raise HTTPException(status_code=404, detail="Ціну не знайдено")
 
-    eff     = date.fromisoformat(data.effective_date)
-    prev    = (eff - timedelta(days=1)).isoformat()
+    eff  = date.fromisoformat(data.effective_date)
+    prev = (eff - timedelta(days=1)).isoformat()
 
     # Закриваємо стару ціну
     if prev >= old.valid_from:
@@ -96,15 +88,14 @@ def bulk_preview(
     db: Session  = Depends(get_db),
 ):
     """Повертає попередній перегляд масової зміни цін (без збереження)."""
-    today_str = effective_date
     active = (
         db.query(Price)
         .filter(
             Price.is_active == 1,
-            Price.valid_from <= today_str,
+            Price.valid_from <= effective_date,
         )
         .filter(
-            (Price.valid_to == None) | (Price.valid_to >= today_str)
+            (Price.valid_to == None) | (Price.valid_to >= effective_date)
         )
         .order_by(Price.product_id)
         .all()
@@ -193,6 +184,20 @@ def resolve_price(
     """Повертає актуальну ціну для клієнта+продукт на дату."""
     price = get_price(db, product_id, client_id, date)
     return {"price": price}
+
+
+# ── Параметризований маршрут — після всіх фіксованих ─────────────────────────
+
+@router.delete("/{price_id}", status_code=204)
+def delete_price(price_id: int, db: Session = Depends(get_db)):
+    """Деактивує ціну (встановлює is_active=0 і valid_to=сьогодні)."""
+    p = db.get(Price, price_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Ціну не знайдено")
+    p.is_active = 0
+    if not p.valid_to:
+        p.valid_to = date.today().isoformat()
+    db.commit()
 
 
 # ── Індивідуальні ціни клієнтів ───────────────────────────────────────────────
