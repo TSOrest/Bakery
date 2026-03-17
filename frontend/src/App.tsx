@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { DateProvider } from './context/DateContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import LoginPage from './pages/LoginPage'
 import OrdersPage from './pages/OrdersPage'
 import BakingPage from './pages/BakingPage'
 import RoutesPage from './pages/RoutesPage'
@@ -8,7 +10,19 @@ import ShopPage from './pages/ShopPage'
 import FinancesPage from './pages/FinancesPage'
 import AdminPage from './pages/AdminPage'
 
-export default function App() {
+function AppRoutes() {
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888' }}>
+        Завантаження...
+      </div>
+    )
+  }
+
+  if (!user) return <LoginPage />
+
   return (
     <DateProvider>
       <BrowserRouter>
@@ -19,11 +33,24 @@ export default function App() {
             <Route path="baking"   element={<BakingPage />} />
             <Route path="routes"   element={<RoutesPage />} />
             <Route path="shop"     element={<ShopPage />} />
-            <Route path="finances" element={<FinancesPage />} />
-            <Route path="admin"    element={<AdminPage />} />
+            {(user.role === 'accountant' || user.role === 'admin') && (
+              <Route path="finances" element={<FinancesPage />} />
+            )}
+            {user.role === 'admin' && (
+              <Route path="admin" element={<AdminPage />} />
+            )}
+            <Route path="*" element={<Navigate to="/orders" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>
     </DateProvider>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   )
 }

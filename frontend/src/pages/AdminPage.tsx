@@ -3,9 +3,10 @@ import { api } from '../api/client'
 import type { Client, Product, Route, Unit, Category, Price } from '../types'
 import Modal from '../components/Modal'
 import formStyles from '../components/Form.module.css'
+import UsersTab from './UsersTab'
 
 // Тип вкладки довідника
-type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'units' | 'categories'
+type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'units' | 'categories' | 'users'
 
 // ─── Головний компонент ──────────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ export default function AdminPage() {
     { key: 'prices',     label: 'Ціни' },
     { key: 'units',      label: 'Одиниці виміру' },
     { key: 'categories', label: 'Категорії' },
+    { key: 'users',      label: 'Користувачі' },
   ]
 
   return (
@@ -101,6 +103,7 @@ export default function AdminPage() {
           onUpdate={(id, patch) => api.put(`/categories/${id}`, patch).then(reloadCategories)}
         />
       )}
+      {tab === 'users' && <UsersTab />}
     </div>
   )
 }

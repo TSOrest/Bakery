@@ -13,6 +13,7 @@ from backend.models.shop import ShopCount, OtherStockIn
 from backend.models.finances import Finance
 from backend.models.settings import Setting
 from backend.models.cancellations import RouteCancellation, CancellationLine
+from backend.models.auth import User, UserSession
 
 __all__ = [
     "Unit", "Category", "Product", "Ingredient", "ProductIngredient",
@@ -26,4 +27,5 @@ __all__ = [
     "Finance",
     "Setting",
     "RouteCancellation", "CancellationLine",
+    "User", "UserSession",
 ]

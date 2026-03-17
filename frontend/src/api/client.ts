@@ -1,12 +1,21 @@
 // Базовий fetch-клієнт для API
 
 const BASE = '/api/v1'
+const TOKEN_KEY = 'bakery_token'
+
+function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
+  const token = getToken()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(`${BASE}${path}`, { ...options, headers })
 
   if (!res.ok) {
     const text = await res.text()

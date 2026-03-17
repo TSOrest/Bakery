@@ -28,7 +28,12 @@
       "Bash(netstat -ano)",
       "Bash(taskkill /PID 32876 /F)",
       "Bash(bash scripts/run_tests.sh)",
-      "Bash(python -m pytest tests/ -v)"
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(curl -s http://127.0.0.1:8000/api/v1/units)",
+      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://127.0.0.1:8000/api/v1/units'' -Method Get | ConvertTo-Json\")",
+      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://127.0.0.1:8000/api/v1/categories'' -Method Get | ConvertTo-Json\")",
+      "Bash(\"z:\\\\Пекарня 2\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m pytest tests/ -v)"
     ]
   }
 }

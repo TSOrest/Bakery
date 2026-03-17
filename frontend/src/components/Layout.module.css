@@ -49,14 +49,55 @@
   font-weight: 600;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
 .datePicker {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
   white-space: nowrap;
-  margin-left: auto;
 }
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.25);
+  padding-left: 1rem;
+}
+
+.userName {
+  font-size: 0.88rem;
+  color: #e8f0f8;
+  font-weight: 500;
+}
+
+.userRole {
+  font-size: 0.78rem;
+  color: #9ab5cf;
+  background: rgba(255,255,255,0.10);
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+
+.logoutBtn {
+  background: none;
+  border: none;
+  color: #9ab5cf;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+  line-height: 1;
+}
+.logoutBtn:hover { color: #fff; background: rgba(255,255,255,0.12); }
 
 .datePicker input {
   padding: 0.3rem 0.5rem;

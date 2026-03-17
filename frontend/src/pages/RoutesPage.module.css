@@ -448,6 +448,33 @@
 }
 .btnPrintSingle:hover { background: #dde8f4; }
 
+.btnCancelRoute {
+  padding: 0.3rem 0.75rem;
+  background: #fff;
+  color: #c0392b;
+  border: 1px solid #e74c3c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.btnCancelRoute:hover { background: #fdf0ef; }
+
+.cancelledBadge {
+  font-size: 0.82rem;
+  color: #721c24;
+  background: #f8d7da;
+  padding: 0.25rem 0.65rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.routeCancelled {
+  font-size: 0.73rem;
+  color: #c0392b;
+  font-weight: 600;
+}
+
 .btnCancel {
   padding: 0.35rem 0.9rem;
   background: #fff;
