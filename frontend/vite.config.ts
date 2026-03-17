@@ -17,9 +17,14 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname, '..')],
     },
+    // usePolling потрібен для мережевих дисків (Z:) — без нього Vite падає
+    watch: {
+      usePolling: true,
+      interval: 800,
+    },
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },
