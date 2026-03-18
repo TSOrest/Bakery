@@ -165,8 +165,9 @@
 }
 .clientItem:hover { background: #eaf0f8; }
 
-.clientSel { background: #d0e4f5 !important; font-weight: 600; color: #0a2a4c; }
-.clientHas .ciName { color: #0a2040; }
+.clientSel  { background: #d0e4f5 !important; font-weight: 600; color: #0a2a4c; }
+.clientHas  .ciName { color: #0a2040; }
+.clientShop { background: #fffbe8; border-left: 3px solid #f0c040; }
 
 .ciName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.84rem; }
 
@@ -245,7 +246,7 @@
   width: 70px;
 }
 
-.orderRow { cursor: pointer; transition: background 0.08s; }
+.orderRow { transition: background 0.08s; }
 .orderRow:hover { background: #f2f7fc; }
 .orderRowSel { background: #daeaf8 !important; }
 

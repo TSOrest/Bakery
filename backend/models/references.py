@@ -112,5 +112,7 @@ class Client(Base):
     delivery_note_number = Column(Text)                 # номер доручення
     delivery_note_date   = Column(Text)                 # дата доручення
     client_group         = Column(Text)                 # підгрупа в маршруті
+    # customer=звичайний, shop=власний магазин, writeoff=списання, ration=пайок
+    client_kind          = Column(Text, default='customer')
 
     route = relationship("Route", back_populates="clients")

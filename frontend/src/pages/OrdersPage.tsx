@@ -35,7 +35,8 @@ export default function OrdersPage() {
   const [copyLoading,  setCopyLoading]  = useState(false)
   const [copyResult,   setCopyResult]   = useState<string | null>(null)
 
-  const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+  const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+  const exTimers  = useRef<Record<string,  ReturnType<typeof setTimeout>>>({})
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -148,6 +149,27 @@ export default function OrdersPage() {
     }, 600)
   }
 
+  // ─── Зміна exchange_qty ────────────────────────────────────────────────────
+
+  const handleExchangeQtyChange = (clientId: number, productId: number, exQty: number) => {
+    setOrders(prev => prev.map(o =>
+      o.client_id === clientId && o.product_id === productId && o.parent_order_id == null
+        ? { ...o, exchange_qty: exQty }
+        : o
+    ))
+    const timerKey = `ex-${clientId}-${productId}`
+    if (exTimers.current[timerKey]) clearTimeout(exTimers.current[timerKey])
+    exTimers.current[timerKey] = setTimeout(async () => {
+      const existing = orders.find(o =>
+        o.client_id === clientId && o.product_id === productId && o.parent_order_id == null && o.id !== -1
+      )
+      if (existing) {
+        try { await api.put(`/orders/${existing.id}`, { exchange_qty: exQty >= 0 ? exQty : 0 }) }
+        catch {}
+      }
+    }, 600)
+  }
+
   // ─── Копіювання ────────────────────────────────────────────────────────────
 
   const handleCopy = async () => {
@@ -181,9 +203,14 @@ export default function OrdersPage() {
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  const sidebarClients = clients.filter(c =>
-    c.is_active && (selectedRouteId == null || c.route_id === selectedRouteId)
-  )
+  const sidebarClients = clients.filter(c => {
+    if (!c.is_active) return false
+    // Системні внутрішні клієнти не відображаються в заказах
+    if (c.client_kind === 'writeoff' || c.client_kind === 'ration') return false
+    // Магазини пекарні — завжди видно, без прив'язки до маршруту
+    if (c.client_kind === 'shop' || c.is_own_shop) return true
+    return selectedRouteId == null || c.route_id === selectedRouteId
+  })
 
   const ordersToShow = orders
     .filter(o => {
@@ -206,9 +233,11 @@ export default function OrdersPage() {
     })
 
   const routeBadge = (routeId: number | null) => {
+    const visible = (c: typeof clients[0]) =>
+      c.is_active && c.client_kind !== 'writeoff' && c.client_kind !== 'ration'
     const rc = routeId == null
-      ? clients.filter(c => c.is_active)
-      : clients.filter(c => c.is_active && c.route_id === routeId)
+      ? clients.filter(visible)
+      : clients.filter(c => visible(c) && (c.client_kind === 'shop' || c.is_own_shop || c.route_id === routeId))
     const withOrders = rc.filter(c => orders.some(o => o.client_id === c.id && o.qty > 0 && o.parent_order_id == null))
     return `${withOrders.length}/${rc.length}`
   }
@@ -298,7 +327,11 @@ export default function OrdersPage() {
                 return (
                   <div
                     key={client.id}
-                    className={`${styles.clientItem} ${isSel ? styles.clientSel : ''}`}
+                    className={[
+                      styles.clientItem,
+                      isSel ? styles.clientSel : '',
+                      (client.client_kind === 'shop' || client.is_own_shop) ? styles.clientShop : '',
+                    ].join(' ')}
                     onClick={() => setSelectedClientId(isSel ? null : client.id)}
                   >
                     <span className={styles.ciName}>{client.short_name ?? client.full_name}</span>
@@ -349,9 +382,6 @@ export default function OrdersPage() {
                   <tr
                     key={order.id}
                     className={`${styles.orderRow} ${isSel ? styles.orderRowSel : ''}`}
-                    onClick={() => setSelectedClientId(
-                      selectedClientId === order.client_id ? null : order.client_id
-                    )}
                   >
                     {showRouteCol  && <td className={styles.tdRoute}>{route?.name ?? '—'}</td>}
                     {showClientCol && (
@@ -362,12 +392,12 @@ export default function OrdersPage() {
                     <td className={styles.tdProduct}>{product?.name ?? '—'}</td>
                     <td className={styles.tdNum}>{order.qty}</td>
                     <td className={styles.tdPrice}>
-                      {price != null && price > 0 ? fmt(price) : '—'}
+                      {price != null ? fmt(price) : '—'}
                     </td>
                     <td className={styles.tdNum}>{exQty > 0 ? exQty : ''}</td>
                     <td className={styles.tdNum}>{total}</td>
                     <td className={styles.tdSum}>
-                      {sum != null && sum > 0 ? fmt(sum) : '—'}
+                      {sum != null ? fmt(sum) : '—'}
                     </td>
                   </tr>
                 )
@@ -392,6 +422,7 @@ export default function OrdersPage() {
           orders={orders}
           saving={saving}
           onQtyChange={handleQtyChange}
+          onExchangeQtyChange={handleExchangeQtyChange}
           onClose={() => setModalClientId(null)}
         />
       )}

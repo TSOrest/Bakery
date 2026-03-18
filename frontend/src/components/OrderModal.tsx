@@ -13,12 +13,13 @@ interface Props {
   orders: Order[]
   saving: SavingMap
   onQtyChange: (clientId: number, productId: number, qty: number) => void
+  onExchangeQtyChange: (clientId: number, productId: number, exQty: number) => void
   onClose: () => void
 }
 
 const fmt = (n: number) => n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function OrderModal({ client, workDate, products, orders, saving, onQtyChange, onClose }: Props) {
+export default function OrderModal({ client, workDate, products, orders, saving, onQtyChange, onExchangeQtyChange, onClose }: Props) {
   const [filter,  setFilter]  = useState<'all' | 'bread' | 'bun'>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
@@ -74,6 +75,9 @@ export default function OrderModal({ client, workDate, products, orders, saving,
 
   const getQty = (productId: number): number =>
     orders.find(o => o.client_id === client.id && o.product_id === productId && o.parent_order_id == null)?.qty ?? 0
+
+  const getExQty = (productId: number): number =>
+    orders.find(o => o.client_id === client.id && o.product_id === productId && o.parent_order_id == null)?.exchange_qty ?? 0
 
   const activeProducts = products.filter(p => p.is_active)
   const filtered = filter === 'all' ? activeProducts : activeProducts.filter(p => p.type === filter)
@@ -174,6 +178,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                   <th className={styles.thWeight}>Вага</th>
                   <th className={styles.thPrice}>Ціна</th>
                   <th className={styles.thQtyH}>Кількість</th>
+                  <th className={styles.thQtyH}>Обмін</th>
                 </tr>
               </thead>
               <tbody>
@@ -214,6 +219,18 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                           onFocus={e => e.target.select()}
                           onChange={e => onQtyChange(client.id, product.id, Number(e.target.value))}
                           onKeyDown={e => handleKeyDown(e, product.id)}
+                        />
+                      </td>
+                      <td className={styles.tdInput}>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={getExQty(product.id) || ''}
+                          placeholder="—"
+                          className={styles.qtyInput}
+                          onFocus={e => e.target.select()}
+                          onChange={e => onExchangeQtyChange(client.id, product.id, Number(e.target.value))}
                         />
                       </td>
                     </tr>

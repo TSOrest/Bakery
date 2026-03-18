@@ -50,6 +50,7 @@ export interface Client {
   delivery_note_number: string | null
   delivery_note_date: string | null
   client_group: string | null
+  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
 }
 
 export interface Order {
