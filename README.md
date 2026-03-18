@@ -181,13 +181,14 @@ git push origin master --tags
 
 ```
 Windows Task Scheduler
-    └── BakeryApp (AtLogon, автоперезапуск 5×)
-            └── scripts/run-server.ps1
-                    └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
-                            ├── /api/v1/...          (FastAPI роутери)
-                            └── /*                   (frontend/dist — React SPA)
-tray.py (pythonw, без вікна)
-    └── моніторить сервер, керує задачею, оновлення
+    ├── BakeryApp (AtLogon, автоперезапуск 5×)
+    │       └── scripts/run-server.ps1
+    │               └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    │                       ├── /api/v1/...          (FastAPI роутери)
+    │                       └── /*                   (frontend/dist — React SPA)
+    └── BakeryTray (AtLogon)
+            └── tray.py (pythonw, без вікна)
+                    └── моніторить сервер, керує задачами, оновлення
 ```
 
 ---

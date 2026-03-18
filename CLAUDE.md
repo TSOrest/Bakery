@@ -477,12 +477,15 @@ INSERT INTO settings VALUES
 - [x] FastAPI роздає зібраний фронтенд (один процес, без окремого Vite в продакшні)
 - [x] Task Scheduler автозапуск при вході в систему (`install-service.bat`)
   - задача `BakeryApp`, тригер AtLogon, перезапуск 5×/хв при збої
+  - задача `BakeryTray`, тригер AtLogon — трей стартує автоматично
+  - `run-server.ps1` вбиває orphan-процеси перед стартом (fix port 8000 conflict)
   - лог сервера → `logs/bakery.log`
 - [x] Системний трей `tray.py` (pystray):
   - зелена/червона іконка = стан сервера, оновлення кожні 5 сек
   - бейдж = доступне оновлення
   - меню: Відкрити · Запустити · Перезапустити · Зупинити · Логи · Вийти
   - захист від дублювання (lock-файл)
+  - task `BakeryTray` (AtLogon) — автозапуск після перезавантаження
 - [x] Система оновлень через GitHub:
   - `VERSION` файл + git-теги (`v1.0.0`, `v1.1.0`, …)
   - автоперевірка GitHub API раз на годину
@@ -596,14 +599,16 @@ INSERT INTO settings VALUES
 ```
 Windows Task Scheduler → BakeryApp (AtLogon, перезапуск 5×/хв)
     └── scripts/run-server.ps1
+            ├── вбиває orphan-процеси uvicorn перед стартом (fix порту 8000)
             └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
                     ├── /api/v1/...     FastAPI роутери
                     └── /*              frontend/dist (React SPA, StaticFiles)
 
-tray.py (pythonw — без вікна)
-    ├── моніторить /api/health кожні 5 сек
-    ├── перевіряє GitHub tags раз на годину
-    └── керує Task Scheduler задачею
+Windows Task Scheduler → BakeryTray (AtLogon)
+    └── tray.py (pythonw — без вікна)
+            ├── моніторить /api/health кожні 5 сек
+            ├── перевіряє GitHub tags раз на годину
+            └── керує Task Scheduler задачами (BakeryApp, BakeryTray)
 ```
 
 **Важливо:** `frontend/dist` будується при `install-service.bat` і `update.bat`.
