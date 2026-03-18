@@ -88,23 +88,23 @@ Register-ScheduledTask `
 Write-Host ('Task ' + $TASK + ' registered - starts automatically at logon.') -ForegroundColor Green
 
 # ── Register tray task ────────────────────────────────────────────────────────
-$TRAY_TASK = 'BakeryTray'
-$pythonw   = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
-$trayScript = Join-Path $ROOT 'tray.py'
+# Uses run-tray.ps1 watchdog (infinite loop) — tray restarts 5 sec after any
+# exit (user clicked Exit, crash, update). Task Scheduler only stops it via
+# Stop-ScheduledTask (RestartCount is irrelevant since the task never ends).
+$TRAY_TASK  = 'BakeryTray'
+$trayRunner = Join-Path $ROOT 'scripts\run-tray.ps1'
 
 Unregister-ScheduledTask -TaskName $TRAY_TASK -Confirm:$false -ErrorAction SilentlyContinue
 
 $trayAction = New-ScheduledTaskAction `
-    -Execute $pythonw `
-    -Argument "`"$trayScript`"" `
+    -Execute 'powershell.exe' `
+    -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$trayRunner`"" `
     -WorkingDirectory $ROOT
 
 $trayTrigger = New-ScheduledTaskTrigger -AtLogon -User $env:USERNAME
 
 $traySettings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 5 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew
 
@@ -114,7 +114,7 @@ Register-ScheduledTask `
     -Trigger $trayTrigger `
     -Settings $traySettings `
     -Principal $principal `
-    -Description 'Bakery tray icon - auto-start at logon' `
+    -Description 'Bakery tray watchdog - auto-start at logon, restarts tray after exit' `
     -Force | Out-Null
 
 Write-Host ('Task ' + $TRAY_TASK + ' registered - tray starts automatically at logon.') -ForegroundColor Green
