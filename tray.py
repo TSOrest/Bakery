@@ -252,8 +252,6 @@ def action_logs(icon, _item=None) -> None:
 
 
 def action_exit(icon, _item=None) -> None:
-    # Stop the tray scheduled task so it doesn't auto-restart immediately after exit
-    _run_ps(f"Stop-ScheduledTask -TaskName {TRAY_TASK} -ErrorAction SilentlyContinue")
     icon.stop()
 
 

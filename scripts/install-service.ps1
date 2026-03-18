@@ -103,8 +103,8 @@ $trayTrigger = New-ScheduledTaskTrigger -AtLogon -User $env:USERNAME
 
 $traySettings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 2) `
+    -RestartCount 5 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
     -MultipleInstances IgnoreNew
 
