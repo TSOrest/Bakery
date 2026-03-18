@@ -4,6 +4,7 @@ Manages the BakeryApp Task Scheduler task and provides quick access via tray ico
 """
 import sys
 import time
+import socket
 import subprocess
 import threading
 import webbrowser
@@ -49,6 +50,7 @@ GITHUB_TAGS_URL = "https://api.github.com/repos/TSOrest/Bakery/tags"
 
 CHECK_INTERVAL  = 5    # server status check, seconds
 UPDATE_INTERVAL = 3600 # update check, seconds
+NO_INTERNET_NOTIFY_INTERVAL = 1800  # notify about no internet at most every 30 min
 
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 
@@ -129,9 +131,10 @@ def _has_rollback() -> bool:
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
-_server_up      = False
-_latest_version = ""   # "" = not checked yet / no update
-_update_lock    = threading.Lock()
+_server_up               = False
+_latest_version          = ""     # "" = not checked yet / no update
+_update_lock             = threading.Lock()
+_no_internet_notified_at = 0.0   # timestamp of last "no internet" notification
 
 
 # ── Windows helpers ────────────────────────────────────────────────────────────
@@ -146,6 +149,26 @@ def _confirm(title: str, text: str) -> bool:
     MB_YESNO = 0x04
     IDYES    = 6
     return _msgbox(title, text, MB_YESNO) == IDYES
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+def _notify(icon, title: str, message: str) -> None:
+    """Show a system tray balloon notification (non-blocking)."""
+    try:
+        icon.notify(message, title)
+    except Exception:
+        pass
+
+
+def _check_internet() -> bool:
+    """Return True if internet is reachable (DNS to 8.8.8.8)."""
+    try:
+        socket.setdefaulttimeout(3)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        return True
+    except Exception:
+        return False
 
 
 # ── Server status ──────────────────────────────────────────────────────────────
@@ -242,9 +265,18 @@ def action_check_update(icon, _item=None) -> None:
 
 
 def _do_check_update(icon, show_if_none: bool = False) -> None:
-    global _latest_version
+    global _latest_version, _no_internet_notified_at
     current = _read_version()
-    latest  = _fetch_latest_tag()
+
+    if not _check_internet():
+        now = time.time()
+        if now - _no_internet_notified_at > NO_INTERNET_NOTIFY_INTERVAL:
+            _no_internet_notified_at = now
+            _notify(icon, "Bakery — увага",
+                    "Немає інтернету. Перевірка оновлень недоступна.")
+        return
+
+    latest = _fetch_latest_tag()
 
     with _update_lock:
         _latest_version = latest if _is_newer(latest, current) else ""
@@ -252,12 +284,18 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
     _refresh(icon)
 
     if _latest_version:
-        _msgbox(
-            "Bakery — оновлення",
-            f"Доступна нова версія: {latest}\nПоточна версія: {current}\n\n"
-            f"Натисніть 'Встановити оновлення' у меню треї.",
-            0,
-        )
+        if show_if_none:
+            # Ручна перевірка — показати діалог із деталями
+            _msgbox(
+                "Bakery — оновлення",
+                f"Доступна нова версія: {latest}\nПоточна версія: {current}\n\n"
+                f"Натисніть 'Встановити оновлення' у меню треї.",
+                0,
+            )
+        else:
+            # Фонова перевірка — ненав'язливе balloon-сповіщення
+            _notify(icon, "Bakery — оновлення",
+                    f"Доступна нова версія {latest}. Відкрийте меню треї.")
     elif show_if_none:
         _msgbox("Bakery — оновлення", f"Встановлена остання версія: {current}", 0)
 
@@ -275,6 +313,9 @@ def action_install_update(icon, _item=None) -> None:
         f"Сервер буде тимчасово зупинено.",
     ):
         return
+
+    _notify(icon, "Bakery — оновлення",
+            f"Встановлення {current} → {latest}. Сервер буде перезапущено...")
 
     script = str(ROOT / "scripts" / "update.ps1")
     subprocess.Popen(
@@ -382,6 +423,10 @@ def _poll_status(icon) -> None:
             icon.icon  = _pick_icon(up)
             icon.title = _build_title(up)
             icon.menu  = _build_menu(up)
+            if up:
+                _notify(icon, "Bakery", "Сервер запущено ✓")
+            else:
+                _notify(icon, "Bakery — увага", "Сервер недоступний!")
         time.sleep(CHECK_INTERVAL)
 
 
