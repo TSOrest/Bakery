@@ -203,21 +203,30 @@ export default function OrdersPage() {
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  const sidebarClients = clients.filter(c => {
-    if (!c.is_active) return false
-    // Системні внутрішні клієнти не відображаються в заказах
-    if (c.client_kind === 'writeoff' || c.client_kind === 'ration') return false
-    // Магазини пекарні — завжди видно, без прив'язки до маршруту
-    if (c.client_kind === 'shop' || c.is_own_shop) return true
-    return selectedRouteId == null || c.route_id === selectedRouteId
-  })
+  const isShop = (c: Client) => c.client_kind === 'shop' || c.is_own_shop === 1
+
+  const sidebarClients = clients
+    .filter(c => {
+      if (!c.is_active) return false
+      if (c.client_kind === 'writeoff' || c.client_kind === 'ration') return false
+      if (isShop(c)) return true   // магазин — завжди видно
+      return selectedRouteId == null || c.route_id === selectedRouteId
+    })
+    .sort((a, b) => {
+      // Магазини — завжди зверху
+      const aShop = isShop(a) ? 0 : 1
+      const bShop = isShop(b) ? 0 : 1
+      if (aShop !== bShop) return aShop - bShop
+      return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
+    })
 
   const ordersToShow = orders
     .filter(o => {
       if (o.parent_order_id != null || o.qty <= 0) return false
       if (selectedRouteId != null) {
         const c = clientMap.get(o.client_id)
-        if (c?.route_id !== selectedRouteId) return false
+        // Магазин показуємо завжди, решту — тільки якщо маршрут збігається
+        if (!c || (!isShop(c) && c.route_id !== selectedRouteId)) return false
       }
       if (selectedClientId != null && o.client_id !== selectedClientId) return false
       return true

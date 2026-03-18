@@ -297,12 +297,21 @@ interface ClientFormState {
   full_name: string; short_name: string; address: string
   phone: string; director: string; accountant: string
   route_id: string; discount_pct: string
+  client_kind: string
 }
 
 const emptyClient = (): ClientFormState => ({
   full_name: '', short_name: '', address: '', phone: '',
   director: '', accountant: '', route_id: '', discount_pct: '0',
+  client_kind: 'customer',
 })
+
+const CLIENT_KIND_LABELS: Record<string, string> = {
+  customer: 'Клієнт',
+  shop:     'Власний магазин',
+  writeoff: 'Списання',
+  ration:   'Пайок',
+}
 
 function ClientsTab({ routes }: { routes: Route[] }) {
   const [clients, setClients]   = useState<Client[]>([])
@@ -326,6 +335,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       accountant:  '',
       route_id:    c.route_id?.toString() ?? '',
       discount_pct: c.discount_pct.toString(),
+      client_kind:  c.client_kind ?? 'customer',
     })
     setModal(true)
   }
@@ -343,6 +353,8 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       accountant:  form.accountant || null,
       route_id:    form.route_id ? Number(form.route_id) : null,
       discount_pct: Number(form.discount_pct),
+      client_kind: form.client_kind,
+      is_own_shop: form.client_kind === 'shop' ? 1 : 0,
     }
     try {
       if (editing) {
@@ -372,7 +384,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
+            <Th>Назва</Th><Th>Скорочена</Th><Th>Тип</Th><Th>Маршрут</Th>
             <Th>Знижка %</Th><Th>Телефон</Th><Th>Активний</Th><Th>Дії</Th>
           </tr>
         </thead>
@@ -381,6 +393,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
             <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
               <Td>{c.full_name}</Td>
               <Td>{c.short_name ?? '—'}</Td>
+              <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
               <Td>{routeName(c.route_id)}</Td>
               <Td>{c.discount_pct}</Td>
               <Td>{c.phone ?? '—'}</Td>
@@ -409,6 +422,15 @@ function ClientsTab({ routes }: { routes: Route[] }) {
               <label>Скорочена назва</label>
               <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
               <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
+            </div>
+            <div className={formStyles.field}>
+              <label>Тип клієнта</label>
+              <select value={form.client_kind} onChange={(e) => setForm({ ...form, client_kind: e.target.value })}>
+                <option value="customer">Клієнт</option>
+                <option value="shop">Власний магазин</option>
+                <option value="writeoff">Списання</option>
+                <option value="ration">Пайок</option>
+              </select>
             </div>
             <div className={formStyles.field}>
               <label>Маршрут</label>

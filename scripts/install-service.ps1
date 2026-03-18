@@ -42,6 +42,14 @@ $pythonEsc = $python.Replace('\','\\')
 $runnerContent = @"
 `$log = Join-Path '$rootEsc' 'logs\bakery.log'
 `$python = '$pythonEsc'
+
+# Kill any orphaned uvicorn processes before starting (prevents port 8000 conflict
+# after Task Scheduler kills the parent but the grandchild survives as an orphan).
+Get-CimInstance Win32_Process |
+    Where-Object { `$_.Name -like 'python*' -and `$_.CommandLine -like '*uvicorn*' } |
+    ForEach-Object { Stop-Process -Id `$_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+
 Add-Content `$log ("`n[" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "] Server starting...")
 & `$python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 2>&1 |
     ForEach-Object { Add-Content `$log `$_ }
@@ -79,6 +87,38 @@ Register-ScheduledTask `
 
 Write-Host ('Task ' + $TASK + ' registered - starts automatically at logon.') -ForegroundColor Green
 
+# ── Register tray task ────────────────────────────────────────────────────────
+$TRAY_TASK = 'BakeryTray'
+$pythonw   = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
+$trayScript = Join-Path $ROOT 'tray.py'
+
+Unregister-ScheduledTask -TaskName $TRAY_TASK -Confirm:$false -ErrorAction SilentlyContinue
+
+$trayAction = New-ScheduledTaskAction `
+    -Execute $pythonw `
+    -Argument "`"$trayScript`"" `
+    -WorkingDirectory $ROOT
+
+$trayTrigger = New-ScheduledTaskTrigger -AtLogon -User $env:USERNAME
+
+$traySettings = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 2) `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew
+
+Register-ScheduledTask `
+    -TaskName $TRAY_TASK `
+    -Action $trayAction `
+    -Trigger $trayTrigger `
+    -Settings $traySettings `
+    -Principal $principal `
+    -Description 'Bakery tray icon - auto-start at logon' `
+    -Force | Out-Null
+
+Write-Host ('Task ' + $TRAY_TASK + ' registered - tray starts automatically at logon.') -ForegroundColor Green
+
 # Stop any existing process and start via task
 Get-CimInstance Win32_Process |
     Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*uvicorn*' } |
@@ -99,13 +139,12 @@ if ($status -eq 200) {
     Write-Host 'Server starting... check http://localhost:8000 in a moment.' -ForegroundColor Yellow
 }
 
-# Launch tray icon (kill old instance first)
-$pythonw = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
-$trayScript = Join-Path $ROOT 'tray.py'
-Get-Process -Name pythonw -ErrorAction SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+# Launch tray icon via Task Scheduler (kill old instance first)
+Get-CimInstance Win32_Process |
+    Where-Object { $_.Name -eq 'pythonw.exe' -and $_.CommandLine -like '*tray.py*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 500
-Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
+Start-ScheduledTask -TaskName $TRAY_TASK
 
 Write-Host ''
 Write-Host '  Auto-start: ON (runs at every login)'

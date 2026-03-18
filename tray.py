@@ -39,6 +39,7 @@ except Exception:
 # ── Constants ─────────────────────────────────────────────────────────────────
 ROOT       = Path(__file__).parent
 TASK_NAME  = "BakeryApp"
+TRAY_TASK  = "BakeryTray"
 HEALTH_URL = "http://localhost:8000/api/health"
 APP_URL    = "http://localhost:8000"
 LOG_FILE   = ROOT / "logs" / "bakery.log"
@@ -187,6 +188,9 @@ def _kill_uvicorn() -> None:
 def action_start(icon, _item=None) -> None:
     icon.icon = ICON_YELLOW
     icon.title = "Bakery: запуск..."
+    # Kill any orphaned uvicorn processes first to prevent port 8000 conflict
+    _kill_uvicorn()
+    time.sleep(1)
     if _task_exists():
         _run_ps(f"Start-ScheduledTask -TaskName {TASK_NAME}")
     else:
@@ -225,6 +229,8 @@ def action_logs(icon, _item=None) -> None:
 
 
 def action_exit(icon, _item=None) -> None:
+    # Stop the tray scheduled task so it doesn't auto-restart immediately after exit
+    _run_ps(f"Stop-ScheduledTask -TaskName {TRAY_TASK} -ErrorAction SilentlyContinue")
     icon.stop()
 
 
