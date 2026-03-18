@@ -154,9 +154,41 @@ def _confirm(title: str, text: str) -> bool:
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def _notify(icon, title: str, message: str) -> None:
-    """Show a system tray balloon notification (non-blocking)."""
+    """Show a system tray balloon notification with PowerShell toast fallback."""
+    # Log every call so we can verify the function is being reached
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[NOTIFY] {time.strftime('%H:%M:%S')} {title}: {message}\n")
+    except Exception:
+        pass
+
+    # Try pystray balloon first
+    pystray_ok = False
     try:
         icon.notify(message, title)
+        pystray_ok = True
+    except Exception:
+        pass
+
+    if pystray_ok:
+        return
+
+    # Fallback: PowerShell Windows.UI.Notifications toast (Windows 10/11)
+    _notify_ps(title, message)
+
+
+def _notify_ps(title: str, message: str) -> None:
+    """PowerShell-based Windows 10/11 toast notification via scripts/notify.ps1."""
+    script = str(ROOT / "scripts" / "notify.ps1")
+    try:
+        subprocess.Popen(
+            ["powershell", "-WindowStyle", "Hidden",
+             "-ExecutionPolicy", "Bypass",
+             "-File", script,
+             "-Title", title,
+             "-Message", message],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
     except Exception:
         pass
 
