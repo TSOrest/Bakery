@@ -209,6 +209,7 @@ def _kill_uvicorn() -> None:
 
 
 def action_start(icon, _item=None) -> None:
+    global _server_up
     icon.icon = ICON_YELLOW
     icon.title = "Bakery: запуск..."
     # Kill any orphaned uvicorn processes first to prevent port 8000 conflict
@@ -223,15 +224,21 @@ def action_start(icon, _item=None) -> None:
             cwd=str(ROOT),
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
+    # Reset so _poll_status will detect the UP transition and notify
+    _server_up = False
     _refresh(icon)
 
 
 def action_stop(icon, _item=None) -> None:
+    global _server_up
     icon.icon = ICON_YELLOW
     icon.title = "Bakery: зупинка..."
     if _task_exists():
         _run_ps(f"Stop-ScheduledTask -TaskName {TASK_NAME} -ErrorAction SilentlyContinue")
     _kill_uvicorn()
+    # Notify immediately (don't wait for poll) and reset so poll won't fire duplicate
+    _server_up = False
+    _notify(icon, "Bakery", "Сервер зупинено")
     _refresh(icon)
 
 
