@@ -149,6 +149,10 @@ function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }
         try {
           const { markdown } = await uploadAsset(screenshot)
           body = body ? `${body}\n\n${markdown}` : markdown
+        } catch {
+          body = body
+            ? `${body}\n\n> ⚠️ Скріншот не вдалося завантажити`
+            : '> ⚠️ Скріншот не вдалося завантажити'
         } finally {
           setUploading(false)
         }
@@ -319,19 +323,23 @@ export default function IssuesWidget() {
     setSending(true); setError(''); setSuccess('')
     try {
       let body = form.body + getSystemInfo()
+      let imageWarning = ''
 
       if (screenshot) {
         setUploading(true)
         try {
           const { markdown } = await uploadAsset(screenshot)
           body += `\n\n${markdown}`
+        } catch {
+          imageWarning = ' Скріншот не вдалося завантажити — потрібні права Contents: Write у токені.'
+          body += '\n\n> ⚠️ Скріншот не вдалося завантажити (недостатньо прав токена)'
         } finally {
           setUploading(false)
         }
       }
 
       await createIssue({ ...form, body })
-      setSuccess('Звернення надіслано! Ми розглянемо його найближчим часом.')
+      setSuccess(`Звернення надіслано!${imageWarning}`)
       setForm({ title: '', body: '', issue_type: 'bug' })
       removeScreenshot()
     } catch {
