@@ -162,19 +162,13 @@ def _notify(icon, title: str, message: str) -> None:
     except Exception:
         pass
 
-    # Try pystray balloon first
-    pystray_ok = False
+    # PowerShell WinRT toast — reliable, persists in notification center
+    _notify_ps(title, message)
+    # Also try pystray balloon (immediate popup, best-effort)
     try:
         icon.notify(message, title)
-        pystray_ok = True
     except Exception:
         pass
-
-    if pystray_ok:
-        return
-
-    # Fallback: PowerShell Windows.UI.Notifications toast (Windows 10/11)
-    _notify_ps(title, message)
 
 
 def _notify_ps(title: str, message: str) -> None:
