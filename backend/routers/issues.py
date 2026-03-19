@@ -1,5 +1,6 @@
 """GitHub Issues proxy — система звернень клієнтів."""
 import json
+from typing import Optional
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.settings import Setting
+from backend.routers.auth import get_current_user
+from backend.models.auth import User
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -23,11 +26,17 @@ def _repo(db: Session) -> str:
 
 
 def _token(db: Session) -> str:
-    row = db.get(Setting, "github_issues_token")
+    """Повертає OAuth токен акаунта пекарні."""
+    row = db.get(Setting, "github_oauth_token")
     token = row.value if row else ""
     if not token:
-        raise HTTPException(503, "GitHub Issues token не налаштовано")
+        raise HTTPException(503, "GitHub не авторизовано. Налаштуйте в Довідники → Налаштування")
     return token
+
+
+def _github_login(db: Session) -> str:
+    row = db.get(Setting, "github_login")
+    return row.value if (row and row.value) else "Пекарня"
 
 
 def _gh(path: str, token: str, method: str = "GET", body: dict | None = None):
@@ -54,10 +63,9 @@ def _gh(path: str, token: str, method: str = "GET", body: dict | None = None):
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class IssueCreate(BaseModel):
-    title:       str
-    body:        str
-    issue_type:  str = "bug"   # bug | suggestion | question
-    sender_name: str = ""      # ім'я оператора (необов'язково)
+    title:      str
+    body:       str
+    issue_type: str = "bug"   # bug | suggestion | question
 
 
 class CommentCreate(BaseModel):
@@ -107,11 +115,19 @@ def list_comments(number: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{number}/comments", status_code=201)
-def add_comment(number: int, payload: CommentCreate, db: Session = Depends(get_db)):
+def add_comment(
+    number:  int,
+    payload: CommentCreate,
+    db:      Session        = Depends(get_db),
+    user:    Optional[User] = Depends(get_current_user),
+):
     """Додати коментар до звернення."""
     tok    = _token(db)
     repo   = _repo(db)
-    result = _gh(f"/repos/{repo}/issues/{number}/comments", tok, method="POST", body={"body": payload.body})
+    gh_login = _github_login(db)
+    sender   = f"{user.full_name} ({gh_login})" if user else gh_login
+    body_with_sender = f"**{sender}:** {payload.body}"
+    result = _gh(f"/repos/{repo}/issues/{number}/comments", tok, method="POST", body={"body": body_with_sender})
     return {"id": result["id"], "created_at": result["created_at"]}
 
 
@@ -147,7 +163,11 @@ async def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_d
 
 
 @router.post("/", status_code=201)
-def create_issue(payload: IssueCreate, db: Session = Depends(get_db)):
+def create_issue(
+    payload: IssueCreate,
+    db:      Session          = Depends(get_db),
+    user:    Optional[User]   = Depends(get_current_user),
+):
     """Створити нове звернення на GitHub."""
     tok  = _token(db)
     repo = _repo(db)
@@ -158,7 +178,12 @@ def create_issue(payload: IssueCreate, db: Session = Depends(get_db)):
         "question":   "question",
     }.get(payload.issue_type, "bug")
 
-    sender = payload.sender_name.strip() or "Пекарня"
+    # Формуємо підпис: "Марія (BrunkovskaO)"
+    gh_login = _github_login(db)
+    if user:
+        sender = f"{user.full_name} ({gh_login})"
+    else:
+        sender = gh_login
     full_body = f"**Від:** {sender}\n\n{payload.body}" if payload.body.strip() else f"**Від:** {sender}"
 
     result = _gh(f"/repos/{repo}/issues", tok, method="POST", body={

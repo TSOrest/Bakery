@@ -1,17 +1,19 @@
 <#
 .SYNOPSIS
-    Генерує інсталятор Bakery-Setup.ps1 з вбудованими токенами.
+    Генерує інсталятор Bakery-Setup.ps1 з вбудованими даними.
     Запускати на машині розробника. Згенерований файл НЕ комітити в git.
 
 .EXAMPLE
     scripts\create-installer.ps1 `
-        -DeployToken "github_pat_xxx" `
-        -IssuesToken "github_pat_yyy" `
-        -InstallDir  "C:\Пекарня"
+        -DeployToken   "github_pat_xxx" `
+        -ClientId      "Ov23livInSt2afY13irB" `
+        -ClientSecret  "859ecfd6d98f6ebb9b388e70639fda7e45ce9b4a" `
+        -InstallDir    "C:\Пекарня"
 #>
 param(
     [Parameter(Mandatory)][string]$DeployToken,
-    [Parameter(Mandatory)][string]$IssuesToken,
+    [Parameter(Mandatory)][string]$ClientId,
+    [Parameter(Mandatory)][string]$ClientSecret,
     [string]$InstallDir  = 'C:\Пекарня',
     [string]$RepoUrl     = 'https://github.com/TSOrest/Bakery.git',
     [string]$OutFile     = 'Bakery-Setup.ps1'
@@ -26,10 +28,11 @@ $content = @"
 <#  Bakery — інсталятор  #>
 Set-StrictMode -Off
 `$ErrorActionPreference = 'Stop'
-`$INSTALL_DIR   = '$InstallDir'
-`$CLONE_URL     = '$cloneUrl'
-`$ISSUES_TOKEN  = '$IssuesToken'
-`$REPO          = 'TSOrest/Bakery'
+`$INSTALL_DIR     = '$InstallDir'
+`$CLONE_URL       = '$cloneUrl'
+`$GITHUB_CLIENT_ID     = '$ClientId'
+`$GITHUB_CLIENT_SECRET = '$ClientSecret'
+`$REPO            = 'TSOrest/Bakery'
 
 function Write-Step(`$msg) { Write-Host "  `$msg" -ForegroundColor Cyan }
 function Write-Ok(`$msg)   { Write-Host "  OK: `$msg" -ForegroundColor Green }
@@ -85,8 +88,8 @@ Write-Step 'Встановлення залежностей (install.bat)...'
 if (`$proc.ExitCode -ne 0) { Write-Err 'install.bat завершився з помилкою' }
 Write-Ok 'Залежності встановлені'
 
-# ── 4. Запис Issues-токену в базу даних ──────────────────────────────────────
-Write-Step 'Налаштування системи звернень...'
+# ── 4. Запис OAuth App credentials в базу даних ──────────────────────────────
+Write-Step 'Налаштування системи звернень (GitHub OAuth)...'
 `$python = Join-Path `$INSTALL_DIR 'backend\venv\Scripts\python.exe'
 `$script = @"
 import sys
@@ -94,14 +97,18 @@ sys.path.insert(0, r'`$INSTALL_DIR')
 from backend.database import engine
 from backend.models.settings import Setting
 from sqlalchemy.orm import Session
+pairs = [
+    ('github_client_id',     r'`$GITHUB_CLIENT_ID',     'GitHub OAuth App Client ID'),
+    ('github_client_secret', r'`$GITHUB_CLIENT_SECRET', 'GitHub OAuth App Client Secret'),
+    ('github_repo',          '$REPO',                   'GitHub репозиторій (owner/repo)'),
+]
 with Session(engine) as db:
-    for key, val in [('github_issues_token', '$IssuesToken'), ('github_repo', '$REPO')]:
+    for key, val, desc in pairs:
         row = db.get(Setting, key)
         if row:
             row.value = val
         else:
-            from backend.models.settings import Setting as S
-            db.add(S(key=key, value=val, description=''))
+            db.add(Setting(key=key, value=val, description=desc))
     db.commit()
 print('OK')
 "@
@@ -110,7 +117,7 @@ print('OK')
 `$result = & `$python `$tmpScript 2>&1
 Remove-Item `$tmpScript -ErrorAction SilentlyContinue
 if (`$result -notmatch 'OK') { Write-Host "  Увага: `$result" -ForegroundColor Yellow }
-else { Write-Ok 'Issues токен збережено' }
+else { Write-Ok 'GitHub OAuth App налаштовано' }
 
 # ── 5. Реєстрація автозапуску та запуск ──────────────────────────────────────
 Write-Step 'Реєстрація автозапуску (install-service.bat)...'
@@ -127,6 +134,10 @@ Write-Host '============================================' -ForegroundColor Green
 Write-Host ''
 Write-Host "  Застосунок: http://localhost:8000"
 Write-Host "  Логи:       `$INSTALL_DIR\logs\bakery.log"
+Write-Host ''
+Write-Host "  НАСТУПНИЙ КРОК: відкрийте браузер → Довідники → Налаштування"
+Write-Host "  і натисніть 'Авторизуватись через GitHub' — увійдіть акаунтом пекарні."
+Write-Host "  Після цього система звернень та оновлення будуть працювати від вашого акаунту."
 Write-Host ''
 Read-Host 'Натисніть Enter для виходу'
 "@

@@ -3,6 +3,7 @@ import {
   fetchIssues, createIssue, fetchComments, addComment, uploadAsset,
   Issue, IssueComment, IssueCreate,
 } from '../api/issues'
+import { getGitHubStatus, GitHubStatus } from '../api/auth_github'
 import styles from './IssuesWidget.module.css'
 
 type Tab = 'new' | 'list'
@@ -186,6 +187,15 @@ function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }
               {LABEL_UA[typeLabel]}
             </span>
           )}
+          <a
+            href={issue.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: '0.75rem', color: '#6e7781', marginLeft: '0.25rem' }}
+            title="Відкрити на GitHub"
+          >
+            GitHub ↗
+          </a>
         </div>
       </div>
 
@@ -281,12 +291,16 @@ export default function IssuesWidget() {
   const [screenshot, setScreenshot] = useState<File | null>(null)
   const [preview,    setPreview]    = useState<string | null>(null)
   const [uploading,  setUploading]  = useState(false)
+  const [ghStatus,   setGhStatus]   = useState<GitHubStatus | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [form, setForm] = useState<IssueCreate>({ title: '', body: '', issue_type: 'bug', sender_name: '' })
+  const [form, setForm] = useState<IssueCreate>({ title: '', body: '', issue_type: 'bug' })
 
   useEffect(() => {
-    if (open && tab === 'list') loadIssues()
+    if (open) {
+      getGitHubStatus().then(setGhStatus).catch(() => {})
+      if (tab === 'list') loadIssues()
+    }
   }, [open, tab])
 
   async function loadIssues() {
@@ -340,7 +354,7 @@ export default function IssuesWidget() {
 
       await createIssue({ ...form, body })
       setSuccess(`Звернення надіслано!${imageWarning}`)
-      setForm(f => ({ title: '', body: '', issue_type: 'bug', sender_name: f.sender_name }))
+      setForm({ title: '', body: '', issue_type: 'bug' })
       removeScreenshot()
     } catch {
       setError('Помилка надсилання. Перевірте підключення до інтернету.')
@@ -369,7 +383,17 @@ export default function IssuesWidget() {
               {activeIssue ? (
                 <button className={styles.backBtn} onClick={() => setActiveNum(null)}>← Назад</button>
               ) : (
-                <h2 className={styles.modalTitle}>Підтримка</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {ghStatus?.authorized && ghStatus.avatar_url && (
+                    <img
+                      src={ghStatus.avatar_url}
+                      alt={ghStatus.login}
+                      title={ghStatus.name || ghStatus.login}
+                      style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid #d0d7de' }}
+                    />
+                  )}
+                  <h2 className={styles.modalTitle}>Підтримка</h2>
+                </div>
               )}
               <button className={styles.closeBtn} onClick={() => { setOpen(false); setActiveNum(null) }}>✕</button>
             </div>
@@ -398,17 +422,6 @@ export default function IssuesWidget() {
                 {/* ── Форма нового звернення ── */}
                 {tab === 'new' && (
                   <form onSubmit={handleSubmit} className={styles.form} onPaste={handlePaste}>
-                    <label className={styles.label}>
-                      Ваше ім'я
-                      <input
-                        className={styles.input}
-                        type="text"
-                        placeholder="Ім'я оператора (необов'язково)"
-                        value={form.sender_name ?? ''}
-                        onChange={e => setForm(f => ({ ...f, sender_name: e.target.value }))}
-                      />
-                    </label>
-
                     <label className={styles.label}>
                       Тип
                       <select

@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, useRef, type FormEvent } from 'react'
+import { startDeviceFlow, pollDeviceFlow, getGitHubStatus, githubLogout, type GitHubStatus } from '../api/auth_github'
 import { api } from '../api/client'
 import type { Client, Product, Route, Unit, Category, Price, ClientPriceOverride, Ingredient, ProductIngredient, MarginRow } from '../types'
 import Modal from '../components/Modal'
@@ -1447,95 +1448,170 @@ function SettingsTab() {
   )
 }
 
-// ─── Блок налаштувань системи звернень ────────────────────────────────────────
+// ─── Блок налаштувань системи звернень (GitHub OAuth) ─────────────────────────
+
+type FlowState = 'idle' | 'waiting' | 'authorized'
 
 function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {
-  settings: SettingsMap
-  inputStyle: React.CSSProperties
-  fieldStyle: React.CSSProperties
-  labelStyle: React.CSSProperties
+  settings:    SettingsMap
+  inputStyle:  React.CSSProperties
+  fieldStyle:  React.CSSProperties
+  labelStyle:  React.CSSProperties
   addBtnStyle: React.CSSProperties
   sectionHead: React.CSSProperties
 }) {
-  const [token,   setToken]   = useState(settings['github_issues_token']?.value ?? '')
-  const [repo,    setRepo]    = useState(settings['github_repo']?.value ?? 'TSOrest/Bakery')
-  const [saving,  setSaving]  = useState(false)
-  const [msg,     setMsg]     = useState('')
-  const [showTok, setShowTok] = useState(false)
+  const [repo,      setRepo]      = useState(settings['github_repo']?.value ?? 'TSOrest/Bakery')
+  const [repoMsg,   setRepoMsg]   = useState('')
+  const [ghStatus,  setGhStatus]  = useState<GitHubStatus | null>(null)
+  const [flowState, setFlowState] = useState<FlowState>('idle')
+  const [userCode,  setUserCode]  = useState('')
+  const [verifyUri, setVerifyUri] = useState('')
+  const [deviceCode,setDeviceCode]= useState('')
+  const [pollInterval, setPollInterval] = useState(5)
+  const [flowMsg,   setFlowMsg]   = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // sync when parent loads settings
   useEffect(() => {
-    setToken(settings['github_issues_token']?.value ?? '')
     setRepo(settings['github_repo']?.value ?? 'TSOrest/Bakery')
   }, [settings])
 
-  const save = async () => {
-    setSaving(true); setMsg('')
+  useEffect(() => {
+    getGitHubStatus().then(s => {
+      setGhStatus(s)
+      if (s.authorized) setFlowState('authorized')
+    }).catch(() => {})
+  }, [])
+
+  // Зупиняємо polling при розмонтуванні
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  const startFlow = async () => {
+    setFlowMsg(''); setFlowState('idle')
     try {
-      await api.put('/settings/github_issues_token', { value: token, description: 'GitHub token для системи звернень' })
-      await api.put('/settings/github_repo',         { value: repo,  description: 'GitHub репозиторій (owner/repo)' })
-      setMsg('✓ Збережено')
-    } catch {
-      setMsg('Помилка збереження')
-    } finally { setSaving(false) }
+      const data = await startDeviceFlow()
+      setUserCode(data.user_code)
+      setVerifyUri(data.verification_uri)
+      setDeviceCode(data.device_code)
+      setPollInterval(data.interval)
+      setFlowState('waiting')
+      // Відкриваємо GitHub у новій вкладці
+      window.open(data.verification_uri, '_blank', 'noopener')
+      // Запускаємо polling
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await pollDeviceFlow(data.device_code)
+          if (res.status === 'authorized') {
+            clearInterval(pollRef.current!)
+            setGhStatus({ authorized: true, login: res.login, name: res.name, avatar_url: res.avatar_url })
+            setFlowState('authorized')
+            setFlowMsg('✓ Авторизовано')
+          } else if (res.status !== 'pending') {
+            clearInterval(pollRef.current!)
+            setFlowState('idle')
+            setFlowMsg(res.status === 'access_denied' ? 'Доступ відхилено' : 'Час вичерпано')
+          }
+        } catch { clearInterval(pollRef.current!); setFlowState('idle'); setFlowMsg('Помилка з\'єднання') }
+      }, pollInterval * 1000)
+    } catch (e: unknown) {
+      setFlowMsg(e instanceof Error ? e.message : 'Помилка запуску авторизації')
+    }
+  }
+
+  const logout = async () => {
+    await githubLogout()
+    setGhStatus({ authorized: false })
+    setFlowState('idle')
+    setFlowMsg('')
+  }
+
+  const saveRepo = async () => {
+    setRepoMsg('')
+    try {
+      await api.put('/settings/github_repo', { value: repo, description: 'GitHub репозиторій (owner/repo)' })
+      setRepoMsg('✓ Збережено')
+    } catch { setRepoMsg('Помилка') }
   }
 
   return (
     <>
       <p style={sectionHead}>Система звернень (💬)</p>
       <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
-        <div style={fieldStyle}>
-          <label style={labelStyle}>GitHub Issues Token</label>
-          <div style={{ display: 'flex', gap: 6, maxWidth: 420 }}>
-            <input
-              type={showTok ? 'text' : 'password'}
-              style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              placeholder="github_pat_..."
-            />
-            <button type="button" onClick={() => setShowTok(v => !v)}
-              style={{ ...addBtnStyle, background: '#6c757d', whiteSpace: 'nowrap' }}>
-              {showTok ? 'Сховати' : 'Показати'}
+
+        {/* Статус авторизації */}
+        {flowState === 'authorized' && ghStatus?.authorized ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            {ghStatus.avatar_url && (
+              <img src={ghStatus.avatar_url} alt={ghStatus.login} style={{ width: 36, height: 36, borderRadius: '50%', border: '1px solid #d0d7de' }} />
+            )}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{ghStatus.name || ghStatus.login}</div>
+              <div style={{ fontSize: 12, color: '#6e7781' }}>@{ghStatus.login}</div>
+            </div>
+            <span style={{ marginLeft: 'auto', fontSize: 12, color: '#27ae60', fontWeight: 600 }}>✓ Авторизовано</span>
+            <button onClick={logout} style={{ ...addBtnStyle, background: '#6c757d', fontSize: 12 }}>
+              Вийти
             </button>
           </div>
-          <span style={{ fontSize: 12, color: '#888' }}>Fine-grained PAT: Issues → Read & Write</span>
-        </div>
+        ) : flowState === 'waiting' ? (
+          <div style={{ marginBottom: 14, padding: '12px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 6 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>Авторизація GitHub</div>
+            <div style={{ fontSize: 13, marginBottom: 10 }}>
+              Відкрийте <strong>{verifyUri}</strong> і введіть код:
+            </div>
+            <div style={{
+              fontSize: 28, fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.2em',
+              textAlign: 'center', padding: '10px 0', color: '#1a3a5c',
+            }}>
+              {userCode}
+            </div>
+            <div style={{ fontSize: 12, color: '#888', textAlign: 'center', marginTop: 6 }}>
+              Очікуємо підтвердження...
+            </div>
+            <button
+              onClick={() => window.open(verifyUri, '_blank', 'noopener')}
+              style={{ ...addBtnStyle, width: '100%', marginTop: 10, textAlign: 'center' }}
+            >
+              Відкрити github.com/login/device ↗
+            </button>
+          </div>
+        ) : (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#e74c3c', display: 'inline-block' }} />
+              <span style={{ fontWeight: 600 }}>Не авторизовано</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 10 }}>
+              Авторизуйте GitHub-акаунт пекарні — від його імені будуть надсилатись звернення та завантажуватись оновлення.
+            </div>
+            <button onClick={startFlow} style={addBtnStyle}>
+              Авторизуватись через GitHub
+            </button>
+          </div>
+        )}
 
+        {flowMsg && (
+          <div style={{ fontSize: 13, color: flowMsg.startsWith('✓') ? '#27ae60' : '#e74c3c', marginBottom: 10 }}>
+            {flowMsg}
+          </div>
+        )}
+
+        {/* Репозиторій */}
         <div style={fieldStyle}>
           <label style={labelStyle}>Репозиторій</label>
-          <input
-            style={{ ...inputStyle }}
-            value={repo}
-            onChange={e => setRepo(e.target.value)}
-            placeholder="owner/repo"
-          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <input
+              style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
+              value={repo}
+              onChange={e => setRepo(e.target.value)}
+              placeholder="owner/repo"
+            />
+            <button onClick={saveRepo} style={{ ...addBtnStyle, whiteSpace: 'nowrap' }}>
+              Зберегти
+            </button>
+          </div>
+          {repoMsg && <span style={{ fontSize: 12, color: repoMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>{repoMsg}</span>}
           <span style={{ fontSize: 12, color: '#888' }}>Формат: owner/repo (напр. TSOrest/Bakery)</span>
         </div>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={save} disabled={saving} style={addBtnStyle}>
-            {saving ? 'Збереження...' : 'Зберегти'}
-          </button>
-          {msg && (
-            <span style={{ fontSize: 13, color: msg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
-              {msg}
-            </span>
-          )}
-        </div>
-
-        <details style={{ marginTop: 14, fontSize: 13, color: '#555' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Як отримати токен GitHub</summary>
-          <ol style={{ marginTop: 8, paddingLeft: 18, lineHeight: 1.8 }}>
-            <li>Зайдіть на <strong>github.com</strong> → свій профіль → <strong>Settings</strong></li>
-            <li>Ліворуч внизу → <strong>Developer settings</strong> → <strong>Fine-grained tokens</strong></li>
-            <li>Натисніть <strong>Generate new token</strong></li>
-            <li>Назва: <code>Bakery Issues</code>, термін дії: 1 рік</li>
-            <li>Repository access: <strong>Only select repositories</strong> → оберіть <code>Bakery</code></li>
-            <li>Permissions → <strong>Issues</strong> → <strong>Read and write</strong></li>
-            <li>Натисніть <strong>Generate token</strong> → скопіюйте у поле вище</li>
-          </ol>
-        </details>
       </div>
     </>
   )

@@ -15,6 +15,7 @@ from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
     auth, cancellations, settings, finances, finances_articles, ingredients, dashboard, issues,
 )
+from backend.routers import auth_github
 
 # Ініціалізуємо таблиці (якщо не існують)
 Base.metadata.create_all(bind=engine)
@@ -48,8 +49,13 @@ DEFAULT_SETTINGS = {
     "bread_reserve_pct":     ("5",              "Резерв для хліба, %"),
     "order_lock_time":       ("22:00",          "Час блокування замовлень"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
-    "github_issues_token":   ("",               "GitHub token для системи звернень"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
+    "github_client_id":      ("",               "GitHub OAuth App Client ID"),
+    "github_client_secret":  ("",               "GitHub OAuth App Client Secret"),
+    "github_oauth_token":    ("",               "OAuth токен акаунта пекарні на GitHub"),
+    "github_login":          ("",               "GitHub логін акаунта пекарні"),
+    "github_name":           ("",               "GitHub ім'я акаунта пекарні"),
+    "github_avatar_url":     ("",               "GitHub аватар акаунта пекарні"),
 }
 
 
@@ -145,6 +151,7 @@ app.include_router(finances_articles.router, prefix=PREFIX)
 app.include_router(ingredients.router,       prefix=PREFIX)
 app.include_router(dashboard.router,     prefix=PREFIX)
 app.include_router(issues.router,        prefix=PREFIX)
+app.include_router(auth_github.router,   prefix=PREFIX)
 
 
 @app.get("/api/health")

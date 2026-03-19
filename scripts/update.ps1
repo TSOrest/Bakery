@@ -47,6 +47,26 @@ Get-CimInstance Win32_Process |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
 
+# Оновлюємо git credentials токеном акаунта пекарні (якщо авторизовано)
+$oauthToken = & $python -c "
+import sys; sys.path.insert(0, r'$ROOT')
+from backend.database import engine
+from backend.models.settings import Setting
+from sqlalchemy.orm import Session
+with Session(engine) as db:
+    row = db.get(Setting, 'github_oauth_token')
+    print(row.value if row and row.value else '', end='')
+" 2>$null
+if ($oauthToken) {
+    [System.IO.File]::WriteAllText(
+        (Join-Path $env:USERPROFILE '.git-credentials'),
+        "https://x-access-token:$oauthToken@github.com`n",
+        [System.Text.Encoding]::UTF8
+    )
+    & git -C $ROOT config credential.helper store | Out-Null
+    Write-Log 'Git credentials updated from OAuth token'
+}
+
 # Git fetch and checkout
 Write-Log 'Fetching from GitHub...'
 $gitResult = & git -C $ROOT fetch origin --tags 2>&1

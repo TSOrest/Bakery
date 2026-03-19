@@ -20,10 +20,9 @@ export interface IssueComment {
 }
 
 export interface IssueCreate {
-  title: string
-  body: string
+  title:      string
+  body:       string
   issue_type: 'bug' | 'suggestion' | 'question'
-  sender_name?: string
 }
 
 export const fetchIssues = (): Promise<Issue[]> =>
