@@ -1,0 +1,218 @@
+/* Floating action button */
+.fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 900;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 22px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+}
+.fab:hover { background: #1d4ed8; transform: scale(1.08); }
+
+/* Modal backdrop */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+/* Modal box */
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 0;
+}
+.modalTitle {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0;
+  color: #1e293b;
+}
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.closeBtn:hover { color: #475569; background: #f1f5f9; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 16px 24px 0;
+  border-bottom: 2px solid #e2e8f0;
+}
+.tabBtn {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #64748b;
+  margin-bottom: -2px;
+  border-bottom: 2px solid transparent;
+}
+.tabActive {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+/* Form */
+.form {
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+.select,
+.input {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  outline: none;
+  transition: border 0.15s;
+}
+.select:focus,
+.input:focus { border-color: #2563eb; }
+.textarea {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  resize: vertical;
+  font-family: inherit;
+  outline: none;
+  transition: border 0.15s;
+}
+.textarea:focus { border-color: #2563eb; }
+
+.submitBtn {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-end;
+  transition: background 0.15s;
+}
+.submitBtn:hover:not(:disabled) { background: #1d4ed8; }
+.submitBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.error   { color: #dc2626; font-size: 0.875rem; margin: 0; }
+.success { color: #16a34a; font-size: 0.875rem; margin: 0; }
+.hint    { color: #94a3b8; font-size: 0.9rem; text-align: center; padding: 24px 0; }
+
+/* Issues list */
+.list {
+  padding: 12px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issueCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.issueHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: #f8fafc;
+  transition: background 0.12s;
+}
+.issueHeader:hover { background: #f1f5f9; }
+
+.badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badgeOpen   { background: #dcfce7; color: #16a34a; }
+.badgeClosed { background: #f1f5f9; color: #64748b; }
+
+.issueTitle {
+  flex: 1;
+  font-size: 0.875rem;
+  color: #1e293b;
+  font-weight: 500;
+}
+.issueDate {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.issueBody {
+  padding: 12px 14px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+.issueBodyText {
+  margin: 0 0 8px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ghLink {
+  font-size: 0.8rem;
+  color: #2563eb;
+  text-decoration: none;
+}
+.ghLink:hover { text-decoration: underline; }

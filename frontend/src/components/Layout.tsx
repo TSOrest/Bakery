@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { useWorkDate } from '../context/DateContext'
 import { useAuth } from '../context/AuthContext'
 import styles from './Layout.module.css'
+import IssuesWidget from './IssuesWidget'
 
 export default function Layout() {
   const { workDate, setWorkDate } = useWorkDate()
@@ -73,6 +74,7 @@ export default function Layout() {
       <main className={styles.main}>
         <Outlet />
       </main>
+      <IssuesWidget />
     </div>
   )
 }

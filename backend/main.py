@@ -13,7 +13,7 @@ import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
-    auth, cancellations, settings, finances, finances_articles, ingredients, dashboard,
+    auth, cancellations, settings, finances, finances_articles, ingredients, dashboard, issues,
 )
 
 # Ініціалізуємо таблиці (якщо не існують)
@@ -48,6 +48,8 @@ DEFAULT_SETTINGS = {
     "bread_reserve_pct":     ("5",              "Резерв для хліба, %"),
     "order_lock_time":       ("22:00",          "Час блокування замовлень"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
+    "github_issues_token":   ("",               "GitHub token для системи звернень"),
+    "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
 }
 
 
@@ -142,6 +144,7 @@ app.include_router(finances.router,          prefix=PREFIX)
 app.include_router(finances_articles.router, prefix=PREFIX)
 app.include_router(ingredients.router,       prefix=PREFIX)
 app.include_router(dashboard.router,     prefix=PREFIX)
+app.include_router(issues.router,        prefix=PREFIX)
 
 
 @app.get("/api/health")
