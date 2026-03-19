@@ -194,10 +194,12 @@ def _notify_ps(title: str, message: str) -> None:
 
 
 def _check_internet() -> bool:
-    """Return True if internet is reachable (DNS to 8.8.8.8)."""
+    """Return True if internet is reachable (TCP connect to 8.8.8.8:53)."""
     try:
-        socket.setdefaulttimeout(3)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("8.8.8.8", 53))
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(3)
+        s.connect(("8.8.8.8", 53))
+        s.close()
         return True
     except Exception:
         return False
@@ -464,14 +466,19 @@ def _poll_status(icon) -> None:
 
 
 def _poll_internet(icon) -> None:
-    """Monitor internet connectivity every 30 s; notify on change.
-    Also drives update checks — only runs them when internet is available."""
+    """Monitor internet connectivity; notify on state change.
+    Starts with optimistic assumption (up=True) so even if the tray launches
+    while offline the very first check fires the DOWN notification."""
     global _internet_up
-    # Initial silent check so we start with the correct state
-    _internet_up = _check_internet()
+    # _internet_up global starts as True — first real check corrects it
+    time.sleep(10)  # brief startup delay before first check
     while True:
-        time.sleep(30)
         up = _check_internet()
+        try:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"[INTERNET] {time.strftime('%H:%M:%S')} {'up' if up else 'DOWN'} (prev={'up' if _internet_up else 'DOWN'})\n")
+        except Exception:
+            pass
         if up != _internet_up:
             _internet_up = up
             if not up:
@@ -480,6 +487,7 @@ def _poll_internet(icon) -> None:
             else:
                 _notify(icon, "Bakery",
                         "Інтернет відновлено. Telegram бот та оновлення знову доступні.")
+        time.sleep(30)
 
 
 def _poll_updates(icon) -> None:
