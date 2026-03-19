@@ -139,8 +139,9 @@ async def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_d
     data         = await file.read()
     content_type = file.content_type or "image/png"
 
+    filename = file.filename or "screenshot.png"
     req = Request(
-        f"{_UPLOADS_API}/repos/{repo}/issues/assets",
+        f"{_UPLOADS_API}/repos/{repo}/issues/assets?name={filename}",
         data=data,
         method="POST",
         headers={
