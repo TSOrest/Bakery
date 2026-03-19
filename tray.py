@@ -506,6 +506,14 @@ def main() -> None:
     threading.Thread(target=_poll_internet, args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_updates,  args=(icon,), daemon=True).start()
 
+    def _startup_notify():
+        time.sleep(3)  # wait for icon to appear in tray
+        if _server_up:
+            _notify(icon, "Bakery", "Сервер працює ✓")
+        else:
+            _notify(icon, "Bakery — увага", "Сервер зупинено!")
+    threading.Thread(target=_startup_notify, daemon=True).start()
+
     icon.run()
 
 
