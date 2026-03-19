@@ -150,10 +150,9 @@ function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }
         try {
           const { markdown } = await uploadAsset(screenshot)
           body = body ? `${body}\n\n${markdown}` : markdown
-        } catch {
-          body = body
-            ? `${body}\n\n> ⚠️ Скріншот не вдалося завантажити`
-            : '> ⚠️ Скріншот не вдалося завантажити'
+        } catch (uploadErr: unknown) {
+          const msg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+          body = body ? `${body}\n\n> ⚠️ Скріншот не завантажено: ${msg}` : `> ⚠️ Скріншот не завантажено: ${msg}`
         } finally {
           setUploading(false)
         }
@@ -344,9 +343,10 @@ export default function IssuesWidget() {
         try {
           const { markdown } = await uploadAsset(screenshot)
           body += `\n\n${markdown}`
-        } catch {
-          imageWarning = ' Скріншот не вдалося завантажити — потрібні права Contents: Write у токені.'
-          body += '\n\n> ⚠️ Скріншот не вдалося завантажити (недостатньо прав токена)'
+        } catch (uploadErr: unknown) {
+          const uploadErrMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+          imageWarning = ` Скріншот не завантажено: ${uploadErrMsg}`
+          body += `\n\n> ⚠️ Скріншот не завантажено: ${uploadErrMsg}`
         } finally {
           setUploading(false)
         }
