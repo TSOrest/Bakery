@@ -1,4 +1,4 @@
-import type { Finance, ClientBalance, FinanceSummary } from '../types'
+import type { Finance, ClientBalance, FinanceSummary, InternalKpi } from '../types'
 
 const BASE = '/api/v1/finances'
 
@@ -27,6 +27,12 @@ export async function fetchBalances(): Promise<ClientBalance[]> {
 export async function fetchSummary(): Promise<FinanceSummary> {
   const res = await fetch(`${BASE}/summary`)
   if (!res.ok) throw new Error('Помилка завантаження зведення')
+  return res.json()
+}
+
+export async function fetchInternalKpi(date: string): Promise<InternalKpi> {
+  const res = await fetch(`${BASE}/internal-kpi?date=${date}`)
+  if (!res.ok) throw new Error('Помилка завантаження KPI')
   return res.json()
 }
 

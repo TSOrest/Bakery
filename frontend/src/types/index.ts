@@ -177,6 +177,12 @@ export interface FinanceSummary {
   clients_with_credit: number
 }
 
+export interface InternalKpi {
+  shop:     { stock_value: number; received_value: number; revenue: number }
+  ration:   { amount: number }
+  writeoff: { amount: number }
+}
+
 export interface Price {
   id: number
   product_id: number

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { ClientBalance, Finance, FinanceSummary } from '../types'
+import type { ClientBalance, Finance, FinanceSummary, InternalKpi } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
-  createFinance, deleteFinance, fetchFinances,
+  createFinance, deleteFinance, fetchFinances, fetchInternalKpi,
 } from '../api/finances'
 import { useWorkDate } from '../context/DateContext'
 import styles from './FinancesPage.module.css'
@@ -255,6 +255,7 @@ export default function FinancesPage() {
   const [tab,           setTab]           = useState<TabId>('balances')
   const [balances,      setBalances]      = useState<ClientBalance[]>([])
   const [summary,       setSummary]       = useState<FinanceSummary | null>(null)
+  const [internalKpi,   setInternalKpi]   = useState<InternalKpi | null>(null)
   const [journal,       setJournal]       = useState<Finance[]>([])
   const [selected,      setSelected]      = useState<ClientBalance | null>(null)
   const [showForm,      setShowForm]      = useState(false)
@@ -273,9 +274,10 @@ export default function FinancesPage() {
   const loadBalances = useCallback(async () => {
     setLoadingBal(true)
     try {
-      const [b, s] = await Promise.all([fetchBalances(), fetchSummary()])
+      const [b, s, kpi] = await Promise.all([fetchBalances(), fetchSummary(), fetchInternalKpi(today)])
       setBalances(b)
       setSummary(s)
+      setInternalKpi(kpi)
       if (selected) {
         const updated = b.find(x => x.client_id === selected.client_id)
         if (updated) setSelected(updated)
@@ -366,6 +368,41 @@ export default function FinancesPage() {
             <span className={`${styles.summaryValue} ${summary.net_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
               {summary.net_balance >= 0 ? '+' : ''}{fmt(summary.net_balance)} грн
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* KPI внутрішніх клієнтів */}
+      {internalKpi && (
+        <div className={styles.internalKpiBar}>
+          <div className={styles.internalKpiCard}>
+            <span className={styles.internalKpiTitle}>🏪 Магазин</span>
+            <div className={styles.internalKpiRows}>
+              <span className={styles.internalKpiLabel}>Залишок на дату</span>
+              <span className={styles.internalKpiVal}>{fmt(internalKpi.shop.stock_value)} грн</span>
+              <span className={styles.internalKpiLabel}>Прийнято товару</span>
+              <span className={styles.internalKpiVal}>{fmt(internalKpi.shop.received_value)} грн</span>
+              <span className={styles.internalKpiLabel}>Оплата пекарні</span>
+              <span className={`${styles.internalKpiVal} ${styles.creditColor}`}>{fmt(internalKpi.shop.revenue)} грн</span>
+            </div>
+          </div>
+          <div className={`${styles.internalKpiCard} ${styles.internalKpiLoss}`}>
+            <span className={styles.internalKpiTitle}>🍞 Пайок</span>
+            <div className={styles.internalKpiRows}>
+              <span className={styles.internalKpiLabel}>Втрати за дату</span>
+              <span className={`${styles.internalKpiVal} ${styles.debtColor}`}>
+                {internalKpi.ration.amount > 0 ? '−' : ''}{fmt(internalKpi.ration.amount)} грн
+              </span>
+            </div>
+          </div>
+          <div className={`${styles.internalKpiCard} ${styles.internalKpiLoss}`}>
+            <span className={styles.internalKpiTitle}>🗑 Списання</span>
+            <div className={styles.internalKpiRows}>
+              <span className={styles.internalKpiLabel}>Втрати за дату</span>
+              <span className={`${styles.internalKpiVal} ${styles.debtColor}`}>
+                {internalKpi.writeoff.amount > 0 ? '−' : ''}{fmt(internalKpi.writeoff.amount)} грн
+              </span>
+            </div>
           </div>
         </div>
       )}
