@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ClientBalance, Finance, FinanceSummary, InternalKpi } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
@@ -258,6 +258,8 @@ export default function FinancesPage() {
   const [internalKpi,   setInternalKpi]   = useState<InternalKpi | null>(null)
   const [journal,       setJournal]       = useState<Finance[]>([])
   const [selected,      setSelected]      = useState<ClientBalance | null>(null)
+  const selectedRef = useRef(selected)
+  useEffect(() => { selectedRef.current = selected }, [selected])
   const [showForm,      setShowForm]      = useState(false)
   const [showInternal,  setShowInternal]  = useState(false)
 
@@ -278,14 +280,14 @@ export default function FinancesPage() {
       setBalances(b)
       setSummary(s)
       setInternalKpi(kpi)
-      if (selected) {
-        const updated = b.find(x => x.client_id === selected.client_id)
+      if (selectedRef.current) {
+        const updated = b.find(x => x.client_id === selectedRef.current!.client_id)
         if (updated) setSelected(updated)
       }
     } finally {
       setLoadingBal(false)
     }
-  }, [selected, today]) // eslint-disable-line
+  }, [today]) // eslint-disable-line
 
   const loadJournal = useCallback(async () => {
     setLoadingJrn(true)
