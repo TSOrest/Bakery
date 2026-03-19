@@ -36,3 +36,11 @@ export const fetchComments = (number: number): Promise<IssueComment[]> =>
 
 export const addComment = (number: number, body: string): Promise<{ id: number }> =>
   api.post(`/issues/${number}/comments`, { body })
+
+export async function uploadAsset(file: File): Promise<{ url: string; markdown: string }> {
+  const form = new FormData()
+  form.append('file', file, file.name || 'screenshot.png')
+  const res = await fetch('/api/v1/issues/assets', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

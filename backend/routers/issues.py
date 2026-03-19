@@ -3,7 +3,7 @@ import json
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,8 +12,9 @@ from backend.models.settings import Setting
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
-_GITHUB_API = "https://api.github.com"
-_LABEL      = "client-report"
+_GITHUB_API   = "https://api.github.com"
+_UPLOADS_API  = "https://uploads.github.com"
+_LABEL        = "client-report"
 
 
 def _repo(db: Session) -> str:
@@ -58,6 +59,10 @@ class IssueCreate(BaseModel):
     issue_type: str = "bug"   # bug | suggestion | question
 
 
+class CommentCreate(BaseModel):
+    body: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/")
@@ -65,7 +70,7 @@ def list_issues(db: Session = Depends(get_db)):
     """Список звернень (всі, з label client-report)."""
     tok  = _token(db)
     repo = _repo(db)
-    raw  = _gh(f"/repos/{repo}/issues?labels={_LABEL}&state=all&per_page=100&sort=created&direction=desc", tok)
+    raw  = _gh(f"/repos/{repo}/issues?labels={_LABEL}&state=all&per_page=100&sort=created&direction=asc", tok)
     return [
         {
             "number":     i["number"],
@@ -79,7 +84,7 @@ def list_issues(db: Session = Depends(get_db)):
             "comments":   i["comments"],
         }
         for i in raw
-        if "pull_request" not in i   # skip PRs
+        if "pull_request" not in i
     ]
 
 
@@ -100,17 +105,44 @@ def list_comments(number: int, db: Session = Depends(get_db)):
     ]
 
 
-class CommentCreate(BaseModel):
-    body: str
-
-
 @router.post("/{number}/comments", status_code=201)
 def add_comment(number: int, payload: CommentCreate, db: Session = Depends(get_db)):
     """Додати коментар до звернення."""
-    tok  = _token(db)
-    repo = _repo(db)
+    tok    = _token(db)
+    repo   = _repo(db)
     result = _gh(f"/repos/{repo}/issues/{number}/comments", tok, method="POST", body={"body": payload.body})
     return {"id": result["id"], "created_at": result["created_at"]}
+
+
+@router.post("/assets", status_code=201)
+async def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Завантажити зображення на GitHub і повернути markdown-посилання."""
+    tok  = _token(db)
+    repo = _repo(db)
+    data         = await file.read()
+    content_type = file.content_type or "image/png"
+
+    req = Request(
+        f"{_UPLOADS_API}/repos/{repo}/issues/assets",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization":        f"Bearer {tok}",
+            "Content-Type":         content_type,
+            "Accept":               "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent":           "BakeryApp/1.0",
+        },
+    )
+    try:
+        with urlopen(req, timeout=30) as r:
+            result = json.loads(r.read())
+        url = result.get("url") or result.get("href", "")
+        return {"url": url, "markdown": f"![screenshot]({url})"}
+    except HTTPError as e:
+        raise HTTPException(e.code, f"GitHub upload: {e.reason}")
+    except URLError as e:
+        raise HTTPException(502, f"Помилка завантаження зображення: {e.reason}")
 
 
 @router.post("/", status_code=201)
