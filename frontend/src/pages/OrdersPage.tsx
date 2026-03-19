@@ -225,8 +225,7 @@ export default function OrdersPage() {
       if (o.parent_order_id != null || o.qty <= 0) return false
       if (selectedRouteId != null) {
         const c = clientMap.get(o.client_id)
-        // Магазин показуємо завжди, решту — тільки якщо маршрут збігається
-        if (!c || (!isShop(c) && c.route_id !== selectedRouteId)) return false
+        if (!c || c.route_id !== selectedRouteId) return false
       }
       if (selectedClientId != null && o.client_id !== selectedClientId) return false
       return true
@@ -341,7 +340,13 @@ export default function OrdersPage() {
                       isSel ? styles.clientSel : '',
                       (client.client_kind === 'shop' || client.is_own_shop) ? styles.clientShop : '',
                     ].join(' ')}
-                    onClick={() => setSelectedClientId(isSel ? null : client.id)}
+                    onClick={() => {
+                      if (isSel) { setSelectedClientId(null) }
+                      else {
+                        setSelectedClientId(client.id)
+                        if (isShop(client)) setSelectedRouteId(null)
+                      }
+                    }}
                   >
                     <span className={styles.ciName}>{client.short_name ?? client.full_name}</span>
                     <span className={`${styles.ciNum} ${numCellClass(bread, bun)}`}>
