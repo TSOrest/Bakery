@@ -11,6 +11,7 @@ from backend.models.invoices import Invoice
 from backend.models.baking import BakingTask
 from backend.models.references import Product
 from backend.models.settings import Setting
+from backend.services.orders import aggregate_for_baking
 
 router = APIRouter(prefix="/print", tags=["Друк"])
 
@@ -340,14 +341,39 @@ def print_invoices(
 
 @router.get("/baking", response_class=HTMLResponse)
 def print_baking(task_date: str, product_type: Optional[str] = None, db: Session = Depends(get_db)):
+    import math
     tasks = (
         db.query(BakingTask)
         .filter(BakingTask.task_date == task_date)
         .order_by(BakingTask.product_id)
         .all()
     )
+
+    # Якщо завдання ще не сформовані — рахуємо з замовлень на льоту (без збереження)
     if not tasks:
-        raise HTTPException(status_code=404, detail="Завдань на цю дату не знайдено")
+        aggregated = aggregate_for_baking(db, task_date)
+        if not aggregated:
+            raise HTTPException(status_code=404, detail="Замовлень на цю дату не знайдено")
+
+        def _setting(key: str, default: str) -> float:
+            row = db.query(Setting).filter(Setting.key == key).first()
+            return float(row.value if row else default)
+
+        bun_reserve   = _setting("bun_reserve_pct",  "5")
+        bread_reserve = _setting("bread_reserve_pct", "5")
+
+        tasks = []
+        for row in aggregated:
+            product = db.get(Product, row["product_id"])
+            if not product:
+                continue
+            reserve_pct = bun_reserve if product.type == "bun" else bread_reserve
+            t = BakingTask.__new__(BakingTask)
+            t.product_id      = row["product_id"]
+            t.ordered_qty     = row["ordered_qty"]
+            t.recommended_qty = math.ceil(row["ordered_qty"] * (1 + reserve_pct / 100))
+            t.baked_qty       = 0
+            tasks.append(t)
 
     cfg         = get_settings(db)
     bakery_name = cfg.get("bakery_name", "Пекарня")
