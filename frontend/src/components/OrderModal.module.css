@@ -142,6 +142,8 @@
 .thWeight { padding: 0.3rem 0.4rem; text-align: center; font-weight: 600; color: #8fa8c0; width: 48px; }
 .thPrice  { padding: 0.3rem 0.6rem; text-align: right;  font-weight: 600; width: 70px; }
 .thQtyH   { padding: 0.3rem 0.6rem; text-align: center; font-weight: 600; width: 82px; }
+.thSum    { padding: 0.3rem 0.6rem; text-align: right;  font-weight: 600; width: 84px; }
+.tdSum    { padding: 0.32rem 0.6rem; text-align: right; font-size: 0.85rem; color: #333; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
 
 .tdName {
   padding: 0.32rem 0.6rem 0.32rem 1rem;

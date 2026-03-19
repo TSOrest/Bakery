@@ -25,8 +25,8 @@ export default function OrderModal({ client, workDate, products, orders, saving,
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
   const [prices,  setPrices]  = useState<Record<number, number>>({})
 
-  const [showRepeat,    setShowRepeat]    = useState(false)
-  const [repeatDate,    setRepeatDate]    = useState('')
+  const yesterday = (() => { const d = new Date(workDate); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) })()
+  const [repeatDate,    setRepeatDate]    = useState(yesterday)
   const [repeatOrders,  setRepeatOrders]  = useState<Order[]>([])
   const [repeatChecked, setRepeatChecked] = useState<Set<number>>(new Set())
   const [repeatLoading, setRepeatLoading] = useState(false)
@@ -112,7 +112,6 @@ export default function OrderModal({ client, workDate, products, orders, saving,
     for (const o of repeatOrders) {
       if (repeatChecked.has(o.product_id)) onQtyChange(client.id, o.product_id, o.qty)
     }
-    setShowRepeat(false)
   }
 
   // ─── Рендер ───────────────────────────────────────────────────────────────
@@ -179,6 +178,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                   <th className={styles.thPrice}>Ціна</th>
                   <th className={styles.thQtyH}>Кількість</th>
                   <th className={styles.thQtyH}>Обмін</th>
+                  <th className={styles.thSum}>Сума</th>
                 </tr>
               </thead>
               <tbody>
@@ -233,6 +233,9 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                           onChange={e => onExchangeQtyChange(client.id, product.id, Number(e.target.value))}
                         />
                       </td>
+                      <td className={styles.tdSum}>
+                        {price != null && qty > 0 ? fmt(qty * price) : '—'}
+                      </td>
                     </tr>
                   )
                 })}
@@ -241,8 +244,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
           </div>
 
           {/* Панель повтору */}
-          {showRepeat && (
-            <div className={styles.repeatCol}>
+          <div className={styles.repeatCol}>
               <div className={styles.repeatTitle}>Повтор замовлення</div>
               <input
                 type="date"
@@ -299,7 +301,6 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                 </>
               )}
             </div>
-          )}
         </div>
 
         {/* Підвал */}
@@ -312,12 +313,6 @@ export default function OrderModal({ client, workDate, products, orders, saving,
             )}
           </div>
           <div className={styles.footerActions}>
-            <button
-              className={`${styles.btnRepeat} ${showRepeat ? styles.btnRepeatOn : ''}`}
-              onClick={() => setShowRepeat(v => !v)}
-            >
-              Повтор
-            </button>
             <button className={styles.btnDone} onClick={onClose}>
               Завершити
             </button>
