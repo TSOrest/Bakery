@@ -16,7 +16,6 @@ from backend.models.auth import User
 router = APIRouter(prefix="/issues", tags=["issues"])
 
 _GITHUB_API   = "https://api.github.com"
-_UPLOADS_API  = "https://uploads.github.com"
 _LABEL        = "client-report"
 
 
@@ -133,34 +132,29 @@ def add_comment(
 
 @router.post("/assets", status_code=201)
 async def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Завантажити зображення на GitHub і повернути markdown-посилання."""
-    tok  = _token(db)
-    repo = _repo(db)
-    data         = await file.read()
-    content_type = file.content_type or "image/png"
+    """Завантажити скріншот у репо (Contents API) і повернути markdown-посилання.
+    GitHub Issues Asset API повертає 422 Bad Size — використовуємо Contents API як обхід."""
+    import base64
+    from datetime import datetime
 
+    tok      = _token(db)
+    repo     = _repo(db)
+    data     = await file.read()
     filename = file.filename or "screenshot.png"
-    req = Request(
-        f"{_UPLOADS_API}/repos/{repo}/issues/assets?name={filename}",
-        data=data,
-        method="POST",
-        headers={
-            "Authorization":        f"Bearer {tok}",
-            "Content-Type":         content_type,
-            "Accept":               "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent":           "BakeryApp/1.0",
-        },
-    )
-    try:
-        with urlopen(req, timeout=30) as r:
-            result = json.loads(r.read())
-        url = result.get("url") or result.get("href", "")
-        return {"url": url, "markdown": f"![screenshot]({url})"}
-    except HTTPError as e:
-        raise HTTPException(e.code, f"GitHub upload: {e.reason}")
-    except URLError as e:
-        raise HTTPException(502, f"Помилка завантаження зображення: {e.reason}")
+
+    # Унікальне ім'я файлу щоб уникнути колізій
+    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = f".github/issue-screenshots/{ts}_{filename}"
+
+    result = _gh(f"/repos/{repo}/contents/{path}", tok, method="PUT", body={
+        "message": f"screenshot: {filename}",
+        "content": base64.b64encode(data).decode(),
+    })
+
+    raw_url = result.get("content", {}).get("download_url", "")
+    if not raw_url:
+        raise HTTPException(500, "GitHub не повернув URL файлу")
+    return {"url": raw_url, "markdown": f"![screenshot]({raw_url})"}
 
 
 @router.post("/", status_code=201)
