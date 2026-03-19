@@ -285,7 +285,7 @@ export default function FinancesPage() {
     } finally {
       setLoadingBal(false)
     }
-  }, [selected]) // eslint-disable-line
+  }, [selected, today]) // eslint-disable-line
 
   const loadJournal = useCallback(async () => {
     setLoadingJrn(true)
@@ -300,7 +300,7 @@ export default function FinancesPage() {
     }
   }, [filterFrom, filterTo, filterType])
 
-  useEffect(() => { loadBalances() }, []) // eslint-disable-line
+  useEffect(() => { loadBalances() }, [loadBalances]) // eslint-disable-line
   useEffect(() => { if (tab === 'journal') loadJournal() }, [tab, loadJournal])
 
   // Фільтровані баланси
