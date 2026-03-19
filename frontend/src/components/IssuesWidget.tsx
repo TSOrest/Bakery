@@ -283,7 +283,7 @@ export default function IssuesWidget() {
   const [uploading,  setUploading]  = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [form, setForm] = useState<IssueCreate>({ title: '', body: '', issue_type: 'bug' })
+  const [form, setForm] = useState<IssueCreate>({ title: '', body: '', issue_type: 'bug', sender_name: '' })
 
   useEffect(() => {
     if (open && tab === 'list') loadIssues()
@@ -340,7 +340,7 @@ export default function IssuesWidget() {
 
       await createIssue({ ...form, body })
       setSuccess(`Звернення надіслано!${imageWarning}`)
-      setForm({ title: '', body: '', issue_type: 'bug' })
+      setForm(f => ({ title: '', body: '', issue_type: 'bug', sender_name: f.sender_name }))
       removeScreenshot()
     } catch {
       setError('Помилка надсилання. Перевірте підключення до інтернету.')
@@ -398,6 +398,17 @@ export default function IssuesWidget() {
                 {/* ── Форма нового звернення ── */}
                 {tab === 'new' && (
                   <form onSubmit={handleSubmit} className={styles.form} onPaste={handlePaste}>
+                    <label className={styles.label}>
+                      Ваше ім'я
+                      <input
+                        className={styles.input}
+                        type="text"
+                        placeholder="Ім'я оператора (необов'язково)"
+                        value={form.sender_name ?? ''}
+                        onChange={e => setForm(f => ({ ...f, sender_name: e.target.value }))}
+                      />
+                    </label>
+
                     <label className={styles.label}>
                       Тип
                       <select

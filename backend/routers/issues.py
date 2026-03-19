@@ -54,9 +54,10 @@ def _gh(path: str, token: str, method: str = "GET", body: dict | None = None):
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class IssueCreate(BaseModel):
-    title:      str
-    body:       str
-    issue_type: str = "bug"   # bug | suggestion | question
+    title:       str
+    body:        str
+    issue_type:  str = "bug"   # bug | suggestion | question
+    sender_name: str = ""      # ім'я оператора (необов'язково)
 
 
 class CommentCreate(BaseModel):
@@ -157,9 +158,12 @@ def create_issue(payload: IssueCreate, db: Session = Depends(get_db)):
         "question":   "question",
     }.get(payload.issue_type, "bug")
 
+    sender = payload.sender_name.strip() or "Пекарня"
+    full_body = f"**Від:** {sender}\n\n{payload.body}" if payload.body.strip() else f"**Від:** {sender}"
+
     result = _gh(f"/repos/{repo}/issues", tok, method="POST", body={
         "title":  payload.title,
-        "body":   payload.body,
+        "body":   full_body,
         "labels": [_LABEL, type_label],
     })
     return {
