@@ -58,14 +58,15 @@ def get_all_balances(db: Session) -> List[ClientBalance]:
             balance           = balance,
             last_payment_date = last_payment,
             last_invoice_date = last_invoice,
+            client_kind       = c.client_kind or "customer",
         ))
 
     return result
 
 
 def get_summary(db: Session) -> FinanceSummary:
-    """Загальна зведена статистика боргів."""
-    balances = get_all_balances(db)
+    """Загальна зведена статистика боргів — тільки по звичайних клієнтах (customer)."""
+    balances = [b for b in get_all_balances(db) if b.client_kind == "customer"]
 
     total_debt   = sum(b.balance for b in balances if b.balance < 0)
     total_credit = sum(b.balance for b in balances if b.balance > 0)

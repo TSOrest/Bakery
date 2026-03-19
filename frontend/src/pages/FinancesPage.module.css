@@ -148,6 +148,34 @@
 .clientName { font-weight: 500; }
 .right { text-align: right; font-variant-numeric: tabular-nums; }
 
+.internalSectionRow {
+  background: #f3f4f6;
+  cursor: pointer;
+  user-select: none;
+}
+.internalSectionRow td {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #6b7280;
+  letter-spacing: 0.03em;
+}
+.internalSectionRow:hover td { background: #e9eaec; }
+.internalHint { font-weight: 400; color: #9ca3af; }
+.internalRow { background: #fafafa; }
+.internalRow:hover { background: #f0f4ff !important; }
+.kindTag {
+  margin-left: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #e5e7eb;
+  color: #6b7280;
+  padding: 1px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* ── Панель клієнта ── */
 .clientPanel {
   width: 360px;

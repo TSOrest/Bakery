@@ -252,12 +252,13 @@ export default function FinancesPage() {
   const { workDate } = useWorkDate()
   const today = workDate ?? new Date().toISOString().slice(0, 10)
 
-  const [tab,      setTab]      = useState<TabId>('balances')
-  const [balances, setBalances] = useState<ClientBalance[]>([])
-  const [summary,  setSummary]  = useState<FinanceSummary | null>(null)
-  const [journal,  setJournal]  = useState<Finance[]>([])
-  const [selected, setSelected] = useState<ClientBalance | null>(null)
-  const [showForm, setShowForm] = useState(false)
+  const [tab,           setTab]           = useState<TabId>('balances')
+  const [balances,      setBalances]      = useState<ClientBalance[]>([])
+  const [summary,       setSummary]       = useState<FinanceSummary | null>(null)
+  const [journal,       setJournal]       = useState<Finance[]>([])
+  const [selected,      setSelected]      = useState<ClientBalance | null>(null)
+  const [showForm,      setShowForm]      = useState(false)
+  const [showInternal,  setShowInternal]  = useState(false)
 
   // Фільтри
   const [search,      setSearch]      = useState('')
@@ -309,8 +310,11 @@ export default function FinancesPage() {
     return matchName && matchRoute
   })
 
+  const regularBalances  = filteredBalances.filter(b => b.client_kind === 'customer')
+  const internalBalances = filteredBalances.filter(b => b.client_kind !== 'customer')
+
   const routes = [...new Map(
-    balances.filter(b => b.route_id).map(b => [b.route_id, b.route_name])
+    balances.filter(b => b.route_id && b.client_kind === 'customer').map(b => [b.route_id, b.route_name])
   ).entries()]
 
   async function handleSaveGlobal(data: Parameters<typeof createFinance>[0]) {
@@ -415,7 +419,7 @@ export default function FinancesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBalances.map(b => {
+                  {regularBalances.map(b => {
                     const isDebt   = b.balance < 0
                     const isCredit = b.balance > 0
                     const isActive = selected?.client_id === b.client_id
@@ -425,25 +429,57 @@ export default function FinancesPage() {
                         className={`${styles.balanceRow}${isActive ? ` ${styles.activeRow}` : ''}`}
                         onClick={() => setSelected(isActive ? null : b)}
                       >
-                        <td className={styles.clientName}>
-                          {b.short_name ?? b.client_name}
-                        </td>
+                        <td className={styles.clientName}>{b.short_name ?? b.client_name}</td>
                         <td>{b.route_name ?? '—'}</td>
                         <td>{b.last_payment_date ?? '—'}</td>
                         <td>{b.last_invoice_date ?? '—'}</td>
-                        <td className={`${styles.right} ${
-                          isDebt ? styles.debtColor : isCredit ? styles.creditColor : ''
-                        }`}>
-                          {isDebt ? '−' : isCredit ? '+' : ''}
-                          {fmt(Math.abs(b.balance))}
+                        <td className={`${styles.right} ${isDebt ? styles.debtColor : isCredit ? styles.creditColor : ''}`}>
+                          {isDebt ? '−' : isCredit ? '+' : ''}{fmt(Math.abs(b.balance))}
                         </td>
                       </tr>
                     )
                   })}
-                  {filteredBalances.length === 0 && !loadingBal && (
-                    <tr>
-                      <td colSpan={5} className={styles.hint}>Клієнтів не знайдено</td>
-                    </tr>
+                  {regularBalances.length === 0 && !loadingBal && (
+                    <tr><td colSpan={5} className={styles.hint}>Клієнтів не знайдено</td></tr>
+                  )}
+
+                  {/* ── Внутрішні клієнти (пайок, списання, магазин) ── */}
+                  {internalBalances.length > 0 && (
+                    <>
+                      <tr
+                        className={styles.internalSectionRow}
+                        onClick={() => setShowInternal(v => !v)}
+                      >
+                        <td colSpan={5}>
+                          {showInternal ? '▾' : '▸'} Внутрішні ({internalBalances.length})
+                          <span className={styles.internalHint}> — пайок, списання, власний магазин</span>
+                        </td>
+                      </tr>
+                      {showInternal && internalBalances.map(b => {
+                        const isDebt   = b.balance < 0
+                        const isCredit = b.balance > 0
+                        const isActive = selected?.client_id === b.client_id
+                        const kindLabel: Record<string, string> = { shop: 'магазин', writeoff: 'списання', ration: 'пайок' }
+                        return (
+                          <tr
+                            key={b.client_id}
+                            className={`${styles.balanceRow} ${styles.internalRow}${isActive ? ` ${styles.activeRow}` : ''}`}
+                            onClick={() => setSelected(isActive ? null : b)}
+                          >
+                            <td className={styles.clientName}>
+                              {b.short_name ?? b.client_name}
+                              <span className={styles.kindTag}>{kindLabel[b.client_kind] ?? b.client_kind}</span>
+                            </td>
+                            <td>{b.route_name ?? '—'}</td>
+                            <td>{b.last_payment_date ?? '—'}</td>
+                            <td>{b.last_invoice_date ?? '—'}</td>
+                            <td className={`${styles.right} ${isDebt ? styles.debtColor : isCredit ? styles.creditColor : ''}`}>
+                              {isDebt ? '−' : isCredit ? '+' : ''}{fmt(Math.abs(b.balance))}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </>
                   )}
                 </tbody>
               </table>

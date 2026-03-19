@@ -166,6 +166,7 @@ export interface ClientBalance {
   balance: number
   last_payment_date: string | null
   last_invoice_date: string | null
+  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
 }
 
 export interface FinanceSummary {
