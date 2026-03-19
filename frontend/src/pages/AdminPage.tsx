@@ -1466,7 +1466,6 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
   const [flowState, setFlowState] = useState<FlowState>('idle')
   const [userCode,  setUserCode]  = useState('')
   const [verifyUri, setVerifyUri] = useState('')
-  const [deviceCode,setDeviceCode]= useState('')
   const [pollInterval, setPollInterval] = useState(5)
   const [flowMsg,   setFlowMsg]   = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1491,7 +1490,6 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
       const data = await startDeviceFlow()
       setUserCode(data.user_code)
       setVerifyUri(data.verification_uri)
-      setDeviceCode(data.device_code)
       setPollInterval(data.interval)
       setFlowState('waiting')
       // Відкриваємо GitHub у новій вкладці
