@@ -48,9 +48,9 @@ PYTHON     = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 PYTHONW    = ROOT / "backend" / "venv" / "Scripts" / "pythonw.exe"
 GITHUB_TAGS_URL = "https://api.github.com/repos/TSOrest/Bakery/tags"
 
-CHECK_INTERVAL  = 5    # server status check, seconds
-UPDATE_INTERVAL = 3600 # update check, seconds
-NO_INTERNET_NOTIFY_INTERVAL = 1800  # notify about no internet at most every 30 min
+CHECK_INTERVAL   = 5    # server status check, seconds
+INTERNET_INTERVAL = 30  # internet connectivity check, seconds
+UPDATE_INTERVAL  = 3600 # update check, seconds
 
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 
@@ -131,10 +131,10 @@ def _has_rollback() -> bool:
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
-_server_up               = False
-_latest_version          = ""     # "" = not checked yet / no update
-_update_lock             = threading.Lock()
-_no_internet_notified_at = 0.0   # timestamp of last "no internet" notification
+_server_up      = False
+_internet_up    = True   # assume connected at startup; poll will correct immediately
+_latest_version = ""     # "" = not checked yet / no update
+_update_lock    = threading.Lock()
 
 
 # ── Windows helpers ────────────────────────────────────────────────────────────
@@ -302,15 +302,11 @@ def action_check_update(icon, _item=None) -> None:
 
 
 def _do_check_update(icon, show_if_none: bool = False) -> None:
-    global _latest_version, _no_internet_notified_at
+    global _latest_version
     current = _read_version()
 
-    if not _check_internet():
-        now = time.time()
-        if now - _no_internet_notified_at > NO_INTERNET_NOTIFY_INTERVAL:
-            _no_internet_notified_at = now
-            _notify(icon, "Bakery — увага",
-                    "Немає інтернету. Перевірка оновлень недоступна.")
+    # _poll_internet handles connectivity notifications; here we just skip if offline
+    if not _internet_up:
         return
 
     latest = _fetch_latest_tag()
@@ -467,11 +463,31 @@ def _poll_status(icon) -> None:
         time.sleep(CHECK_INTERVAL)
 
 
-def _poll_updates(icon) -> None:
-    """Check for updates once at startup (after 30s delay) then every hour."""
-    time.sleep(30)
+def _poll_internet(icon) -> None:
+    """Monitor internet connectivity every 30 s; notify on change.
+    Also drives update checks — only runs them when internet is available."""
+    global _internet_up
+    # Initial silent check so we start with the correct state
+    _internet_up = _check_internet()
     while True:
-        _do_check_update(icon, show_if_none=False)
+        time.sleep(30)
+        up = _check_internet()
+        if up != _internet_up:
+            _internet_up = up
+            if not up:
+                _notify(icon, "Bakery — увага",
+                        "Немає інтернету. Telegram бот та перевірка оновлень недоступні.")
+            else:
+                _notify(icon, "Bakery",
+                        "Інтернет відновлено. Telegram бот та оновлення знову доступні.")
+
+
+def _poll_updates(icon) -> None:
+    """Check for updates once at startup (after 60s delay) then every hour."""
+    time.sleep(60)
+    while True:
+        if _internet_up:
+            _do_check_update(icon, show_if_none=False)
         time.sleep(UPDATE_INTERVAL)
 
 
@@ -489,8 +505,9 @@ def main() -> None:
         menu=_build_menu(up),
     )
 
-    threading.Thread(target=_poll_status,  args=(icon,), daemon=True).start()
-    threading.Thread(target=_poll_updates, args=(icon,), daemon=True).start()
+    threading.Thread(target=_poll_status,   args=(icon,), daemon=True).start()
+    threading.Thread(target=_poll_internet, args=(icon,), daemon=True).start()
+    threading.Thread(target=_poll_updates,  args=(icon,), daemon=True).start()
 
     icon.run()
 
