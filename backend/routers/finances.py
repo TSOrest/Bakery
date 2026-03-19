@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.finances import Finance
-from backend.models.movements import Movement
 from backend.models.shop import ShopCount
 from backend.models.references import Client
+from backend.models.baking import SurplusAllocation
+from backend.services.prices import get_price
 from backend.models.finances import FinanceArticle
 from backend.schemas.finance import (
     FinanceCreate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
@@ -89,20 +90,25 @@ def summary(db: Session = Depends(get_db)):
 @router.get("/internal-kpi")
 def internal_kpi(date: str, db: Session = Depends(get_db)):
     """KPI-картки для внутрішніх клієнтів: магазин, пайок, списання."""
-    # Пайок і списання — рухи товарів за обрану дату
-    movements = db.query(Movement).filter(
-        Movement.move_date == date,
-        Movement.move_type.in_(["ration", "writeoff"]),
-    ).all()
-    ration_amount   = sum((m.price or 0) * m.qty for m in movements if m.move_type == "ration")
-    writeoff_amount = sum((m.price or 0) * m.qty for m in movements if m.move_type == "writeoff")
+    # Пайок і списання — з surplus_allocations (рухи типу ration/writeoff не пишуться в movements)
+    allocs = db.query(SurplusAllocation).filter(SurplusAllocation.alloc_date == date).all()
 
-    # Магазин — залишок і прийнято з shop_counts за дату
+    # Ціни: get_price з таблиці prices за датою (без прив'язки до клієнта)
+    product_ids = {a.product_id for a in allocs}
+    price_map: dict[int, float] = {
+        pid: get_price(db, pid, None, date)
+        for pid in product_ids
+    }
+
+    ration_amount   = sum(price_map.get(a.product_id, 0) * (a.ration_qty  or 0) for a in allocs)
+    writeoff_amount = sum(price_map.get(a.product_id, 0) * (a.written_off or 0) for a in allocs)
+    shop_received   = sum(price_map.get(a.product_id, 0) * (a.to_shop     or 0) for a in allocs)
+
+    # Магазин — залишок зі shop_counts (entered_balance × price)
     shop_counts = db.query(ShopCount).filter(ShopCount.count_date == date).all()
-    stock_value    = sum((sc.entered_balance or 0) * (sc.price or 0) for sc in shop_counts)
-    received_value = sum((sc.received_today   or 0) * (sc.price or 0) for sc in shop_counts)
+    stock_value = sum((sc.entered_balance or 0) * (sc.price or 0) for sc in shop_counts)
 
-    # Магазин — виручка (платежі від власного магазину за дату)
+    # Магазин — виручка (платежі від клієнтів типу shop за дату)
     shop_ids = [
         c.id for c in db.query(Client).filter(
             Client.client_kind == "shop", Client.is_active == 1
@@ -119,7 +125,7 @@ def internal_kpi(date: str, db: Session = Depends(get_db)):
         )
 
     return {
-        "shop":     {"stock_value": round(stock_value, 2), "received_value": round(received_value, 2), "revenue": round(revenue, 2)},
+        "shop":     {"stock_value": round(stock_value, 2), "received_value": round(shop_received, 2), "revenue": round(revenue, 2)},
         "ration":   {"amount": round(ration_amount, 2)},
         "writeoff": {"amount": round(writeoff_amount, 2)},
     }
