@@ -48,7 +48,8 @@ LOG_FILE   = ROOT / "logs" / "bakery.log"
 DB_FILE    = ROOT / "bakery.db"
 PYTHON     = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 PYTHONW    = ROOT / "backend" / "venv" / "Scripts" / "pythonw.exe"
-GITHUB_TAGS_URL = "https://api.github.com/repos/TSOrest/Bakery/tags"
+GITHUB_REPO     = "https://api.github.com/repos/TSOrest/Bakery"
+GITHUB_TAGS_URL = f"{GITHUB_REPO}/tags"
 
 CHECK_INTERVAL    = 5     # server status check, seconds
 INTERNET_INTERVAL = 30    # internet connectivity check, seconds
@@ -115,6 +116,23 @@ def _fetch_latest_tag() -> str:
     except Exception:
         pass
     return ""
+
+
+def _fetch_release_notes(tag: str) -> str:
+    """Fetch release body for a specific tag from GitHub Releases API.
+    Returns empty string if no release found or on network error."""
+    if not tag:
+        return ""
+    try:
+        req = __import__("urllib.request", fromlist=["Request"]).Request(
+            f"{GITHUB_REPO}/releases/tags/{tag}",
+            headers={"User-Agent": "BakeryTray/1.0"},
+        )
+        with urlopen(req, timeout=5) as r:
+            data = json.loads(r.read())
+            return data.get("body", "").strip()
+    except Exception:
+        return ""
 
 
 def _version_tuple(v: str):
@@ -386,9 +404,12 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
 
     if _latest_version:
         if show_if_none:
+            notes = _fetch_release_notes(latest)
+            notes_block = f"\n\nЩо нового:\n{notes}" if notes else ""
             _msgbox(
                 "Bakery — оновлення",
-                f"Доступна нова версія: {latest}\nПоточна версія: {current}\n\n"
+                f"Доступна нова версія: {latest}\nПоточна версія: {current}"
+                f"{notes_block}\n\n"
                 f"Натисніть 'Встановити оновлення' у меню треї.",
                 0,
             )
@@ -406,9 +427,13 @@ def action_install_update(icon, _item=None) -> None:
         _msgbox("Bakery", "Не вдалося отримати інформацію про версію.", 0)
         return
 
+    notes = _fetch_release_notes(latest)
+    notes_block = f"\n\nЩо нового:\n{notes}" if notes else ""
+
     if not _confirm(
         "Bakery — оновлення",
-        f"Встановити оновлення {current} -> {latest}?\n\n"
+        f"Встановити оновлення {current} -> {latest}?"
+        f"{notes_block}\n\n"
         f"Сервер буде тимчасово зупинено.\n"
         f"Резервна копія бази даних буде збережена автоматично.",
     ):
@@ -434,9 +459,13 @@ def action_rollback(icon, _item=None) -> None:
     if not target:
         return  # user cancelled or closed the picker
 
+    notes = _fetch_release_notes(current)
+    notes_block = f"\n\nБуде втрачено ({current}):\n{notes}" if notes else ""
+
     if not _confirm(
         "Bakery — відкат",
-        f"Відкотити {current} -> {target}?\n\n"
+        f"Відкотити {current} -> {target}?"
+        f"{notes_block}\n\n"
         f"Буде створено резервну копію bakery.db.\n"
         f"Після відкату перевірте коректність роботи —\n"
         f"схема бази може не відповідати старому коду.",
