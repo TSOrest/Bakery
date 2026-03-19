@@ -274,7 +274,7 @@ export default function FinancesPage() {
   const loadBalances = useCallback(async () => {
     setLoadingBal(true)
     try {
-      const [b, s, kpi] = await Promise.all([fetchBalances(), fetchSummary(), fetchInternalKpi(today)])
+      const [b, s, kpi] = await Promise.all([fetchBalances(today), fetchSummary(today), fetchInternalKpi(today)])
       setBalances(b)
       setSummary(s)
       setInternalKpi(kpi)
@@ -340,7 +340,14 @@ export default function FinancesPage() {
     <div className={styles.page}>
       {/* Шапка */}
       <div className={styles.header}>
-        <h2>Фінанси</h2>
+        <h2>
+          Фінанси
+          {today !== new Date().toISOString().slice(0, 10) && (
+            <span className={styles.asOfNote}>
+              {' '}(Станом на {today.split('-').reverse().join('.')})
+            </span>
+          )}
+        </h2>
         <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
           + Операція
         </button>

@@ -11,18 +11,17 @@ from backend.models.invoices import Invoice
 from backend.schemas.finance import ClientBalance, FinanceSummary
 
 
-def get_client_balance(db: Session, client_id: int) -> float:
-    """Повертає поточний баланс клієнта: додатне = кредит, від'ємне = борг."""
-    result = (
-        db.query(func.sum(Finance.amount * Finance.sign))
-        .filter(Finance.client_id == client_id)
-        .scalar()
-    )
+def get_client_balance(db: Session, client_id: int, as_of: Optional[str] = None) -> float:
+    """Повертає баланс клієнта станом на дату as_of (включно). Якщо None — всі записи."""
+    q = db.query(func.sum(Finance.amount * Finance.sign)).filter(Finance.client_id == client_id)
+    if as_of:
+        q = q.filter(Finance.finance_date <= as_of)
+    result = q.scalar()
     return round(result or 0.0, 2)
 
 
-def get_all_balances(db: Session) -> List[ClientBalance]:
-    """Баланси всіх активних клієнтів."""
+def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBalance]:
+    """Баланси всіх активних клієнтів станом на дату as_of."""
     from backend.models.references import Route
 
     clients = (
@@ -36,18 +35,17 @@ def get_all_balances(db: Session) -> List[ClientBalance]:
 
     result = []
     for c in clients:
-        balance = get_client_balance(db, c.id)
+        balance = get_client_balance(db, c.id, as_of)
 
-        last_payment = (
-            db.query(func.max(Finance.finance_date))
-            .filter(Finance.client_id == c.id, Finance.finance_type == "payment")
-            .scalar()
+        q_pay = db.query(func.max(Finance.finance_date)).filter(
+            Finance.client_id == c.id, Finance.finance_type == "payment"
         )
-        last_invoice = (
-            db.query(func.max(Finance.finance_date))
-            .filter(Finance.client_id == c.id, Finance.finance_type == "invoice")
-            .scalar()
+        q_inv = db.query(func.max(Finance.finance_date)).filter(
+            Finance.client_id == c.id, Finance.finance_type == "invoice"
         )
+        if as_of:
+            q_pay = q_pay.filter(Finance.finance_date <= as_of)
+            q_inv = q_inv.filter(Finance.finance_date <= as_of)
 
         result.append(ClientBalance(
             client_id         = c.id,
@@ -56,17 +54,17 @@ def get_all_balances(db: Session) -> List[ClientBalance]:
             route_id          = c.route_id,
             route_name        = routes.get(c.route_id) if c.route_id else None,
             balance           = balance,
-            last_payment_date = last_payment,
-            last_invoice_date = last_invoice,
+            last_payment_date = q_pay.scalar(),
+            last_invoice_date = q_inv.scalar(),
             client_kind       = c.client_kind or "customer",
         ))
 
     return result
 
 
-def get_summary(db: Session) -> FinanceSummary:
-    """Загальна зведена статистика боргів — тільки по звичайних клієнтах (customer)."""
-    balances = [b for b in get_all_balances(db) if b.client_kind == "customer"]
+def get_summary(db: Session, as_of: Optional[str] = None) -> FinanceSummary:
+    """Загальна зведена статистика боргів станом на as_of — тільки по звичайних клієнтах."""
+    balances = [b for b in get_all_balances(db, as_of) if b.client_kind == "customer"]
 
     total_debt   = sum(b.balance for b in balances if b.balance < 0)
     total_credit = sum(b.balance for b in balances if b.balance > 0)

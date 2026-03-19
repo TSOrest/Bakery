@@ -18,14 +18,16 @@ export async function fetchFinances(params?: {
   return res.json()
 }
 
-export async function fetchBalances(): Promise<ClientBalance[]> {
-  const res = await fetch(`${BASE}/balances`)
+export async function fetchBalances(date?: string): Promise<ClientBalance[]> {
+  const q = date ? `?date=${date}` : ''
+  const res = await fetch(`${BASE}/balances${q}`)
   if (!res.ok) throw new Error('Помилка завантаження балансів')
   return res.json()
 }
 
-export async function fetchSummary(): Promise<FinanceSummary> {
-  const res = await fetch(`${BASE}/summary`)
+export async function fetchSummary(date?: string): Promise<FinanceSummary> {
+  const q = date ? `?date=${date}` : ''
+  const res = await fetch(`${BASE}/summary${q}`)
   if (!res.ok) throw new Error('Помилка завантаження зведення')
   return res.json()
 }

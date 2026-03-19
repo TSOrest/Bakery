@@ -78,13 +78,13 @@ def list_finances(
 # ── Баланси клієнтів ──────────────────────────────────────────────────────────
 
 @router.get("/balances", response_model=List[ClientBalance])
-def balances(db: Session = Depends(get_db)):
-    return get_all_balances(db)
+def balances(date: Optional[str] = None, db: Session = Depends(get_db)):
+    return get_all_balances(db, as_of=date)
 
 
 @router.get("/summary", response_model=FinanceSummary)
-def summary(db: Session = Depends(get_db)):
-    return get_summary(db)
+def summary(date: Optional[str] = None, db: Session = Depends(get_db)):
+    return get_summary(db, as_of=date)
 
 
 @router.get("/internal-kpi")
