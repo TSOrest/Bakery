@@ -198,21 +198,78 @@
 }
 
 .issueBody {
-  padding: 12px 14px;
   border-top: 1px solid #e2e8f0;
   background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 .issueBodyText {
-  margin: 0 0 8px;
+  margin: 0;
   font-family: inherit;
   font-size: 0.875rem;
   color: #374151;
   white-space: pre-wrap;
   word-break: break-word;
 }
-.ghLink {
-  font-size: 0.8rem;
-  color: #2563eb;
-  text-decoration: none;
+
+/* Блок повідомлення (оригінал або коментар) */
+.messageBlock {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f4f8;
 }
-.ghLink:hover { text-decoration: underline; }
+.messageReply {
+  background: #f0f7ff;
+  border-left: 3px solid #2563eb;
+}
+.messageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.messageAuthor {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+}
+.messageDate {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+/* Форма відповіді */
+.replyForm {
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fafafa;
+}
+.replyBtn {
+  align-self: flex-end;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 7px 18px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.replyBtn:hover:not(:disabled) { background: #1d4ed8; }
+.replyBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Лічильник коментарів і шеврон */
+.commentCount {
+  font-size: 0.75rem;
+  color: #2563eb;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.chevron {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  flex-shrink: 0;
+}

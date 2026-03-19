@@ -12,6 +12,13 @@ export interface Issue {
   comments: number
 }
 
+export interface IssueComment {
+  id: number
+  body: string
+  created_at: string
+  author: string
+}
+
 export interface IssueCreate {
   title: string
   body: string
@@ -23,3 +30,9 @@ export const fetchIssues = (): Promise<Issue[]> =>
 
 export const createIssue = (data: IssueCreate): Promise<Issue> =>
   api.post<Issue>('/issues/', data)
+
+export const fetchComments = (number: number): Promise<IssueComment[]> =>
+  api.get<IssueComment[]>(`/issues/${number}/comments`)
+
+export const addComment = (number: number, body: string): Promise<{ id: number }> =>
+  api.post(`/issues/${number}/comments`, { body })

@@ -83,6 +83,36 @@ def list_issues(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/{number}/comments")
+def list_comments(number: int, db: Session = Depends(get_db)):
+    """Коментарі до звернення."""
+    tok  = _token(db)
+    repo = _repo(db)
+    raw  = _gh(f"/repos/{repo}/issues/{number}/comments?per_page=100", tok)
+    return [
+        {
+            "id":         c["id"],
+            "body":       c.get("body") or "",
+            "created_at": c["created_at"],
+            "author":     c["user"]["login"],
+        }
+        for c in raw
+    ]
+
+
+class CommentCreate(BaseModel):
+    body: str
+
+
+@router.post("/{number}/comments", status_code=201)
+def add_comment(number: int, payload: CommentCreate, db: Session = Depends(get_db)):
+    """Додати коментар до звернення."""
+    tok  = _token(db)
+    repo = _repo(db)
+    result = _gh(f"/repos/{repo}/issues/{number}/comments", tok, method="POST", body={"body": payload.body})
+    return {"id": result["id"], "created_at": result["created_at"]}
+
+
 @router.post("/", status_code=201)
 def create_issue(payload: IssueCreate, db: Session = Depends(get_db)):
     """Створити нове звернення на GitHub."""
