@@ -1466,9 +1466,9 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
   const [flowState, setFlowState] = useState<FlowState>('idle')
   const [userCode,  setUserCode]  = useState('')
   const [verifyUri, setVerifyUri] = useState('')
-  const [pollInterval, setPollInterval] = useState(5)
   const [flowMsg,   setFlowMsg]   = useState('')
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stoppedRef = useRef(false)
 
   useEffect(() => {
     setRepo(settings['github_repo']?.value ?? 'TSOrest/Bakery')
@@ -1482,34 +1482,46 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
   }, [])
 
   // Зупиняємо polling при розмонтуванні
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+  useEffect(() => () => {
+    stoppedRef.current = true
+    if (pollRef.current) clearTimeout(pollRef.current)
+  }, [])
+
+  // Рекурсивний polling — надійніший за setInterval
+  const schedulePoll = (deviceCode: string, interval: number) => {
+    if (stoppedRef.current) return
+    pollRef.current = setTimeout(async () => {
+      if (stoppedRef.current) return
+      try {
+        const res = await pollDeviceFlow(deviceCode)
+        if (res.status === 'authorized') {
+          setGhStatus({ authorized: true, login: res.login, name: res.name, avatar_url: res.avatar_url })
+          setFlowState('authorized')
+          setFlowMsg('✓ Авторизовано')
+        } else if (res.status === 'pending') {
+          schedulePoll(deviceCode, interval)  // наступний крок
+        } else {
+          setFlowState('idle')
+          setFlowMsg(res.status === 'access_denied' ? 'Доступ відхилено' : 'Час очікування вичерпано')
+        }
+      } catch (e: unknown) {
+        setFlowState('idle')
+        setFlowMsg(e instanceof Error ? e.message : 'Помилка polling')
+      }
+    }, interval * 1000)
+  }
 
   const startFlow = async () => {
+    stoppedRef.current = false
+    if (pollRef.current) clearTimeout(pollRef.current)
     setFlowMsg(''); setFlowState('idle')
     try {
       const data = await startDeviceFlow()
       setUserCode(data.user_code)
       setVerifyUri(data.verification_uri)
-      setPollInterval(data.interval)
       setFlowState('waiting')
-      // Відкриваємо GitHub у новій вкладці
       window.open(data.verification_uri, '_blank', 'noopener')
-      // Запускаємо polling
-      pollRef.current = setInterval(async () => {
-        try {
-          const res = await pollDeviceFlow(data.device_code)
-          if (res.status === 'authorized') {
-            clearInterval(pollRef.current!)
-            setGhStatus({ authorized: true, login: res.login, name: res.name, avatar_url: res.avatar_url })
-            setFlowState('authorized')
-            setFlowMsg('✓ Авторизовано')
-          } else if (res.status !== 'pending') {
-            clearInterval(pollRef.current!)
-            setFlowState('idle')
-            setFlowMsg(res.status === 'access_denied' ? 'Доступ відхилено' : 'Час вичерпано')
-          }
-        } catch { clearInterval(pollRef.current!); setFlowState('idle'); setFlowMsg('Помилка з\'єднання') }
-      }, pollInterval * 1000)
+      schedulePoll(data.device_code, data.interval)
     } catch (e: unknown) {
       setFlowMsg(e instanceof Error ? e.message : 'Помилка запуску авторизації')
     }
@@ -1565,12 +1577,21 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
             <div style={{ fontSize: 12, color: '#888', textAlign: 'center', marginTop: 6 }}>
               Очікуємо підтвердження...
             </div>
-            <button
-              onClick={() => window.open(verifyUri, '_blank', 'noopener')}
-              style={{ ...addBtnStyle, width: '100%', marginTop: 10, textAlign: 'center' }}
-            >
-              Відкрити github.com/login/device ↗
-            </button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button
+                onClick={() => window.open(verifyUri, '_blank', 'noopener')}
+                style={{ ...addBtnStyle, flex: 1, textAlign: 'center' }}
+              >
+                Відкрити github.com/login/device ↗
+              </button>
+              <button
+                onClick={startFlow}
+                style={{ ...addBtnStyle, background: '#6c757d', whiteSpace: 'nowrap' }}
+                title="Отримати новий код і почати спочатку"
+              >
+                Почати знову
+              </button>
+            </div>
           </div>
         ) : (
           <div style={{ marginBottom: 14 }}>
