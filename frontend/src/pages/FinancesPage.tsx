@@ -346,7 +346,7 @@ export default function FinancesPage() {
         </button>
       </div>
 
-      {/* Зведення */}
+      {/* Зведення + KPI внутрішніх клієнтів — один рядок */}
       {summary && (
         <div className={styles.summaryBar}>
           <div className={styles.summaryCard}>
@@ -369,38 +369,34 @@ export default function FinancesPage() {
               {summary.net_balance >= 0 ? '+' : ''}{fmt(summary.net_balance)} грн
             </span>
           </div>
-        </div>
-      )}
-
-      {/* KPI внутрішніх клієнтів */}
-      {internalKpi && (
-        <div className={styles.summaryBar}>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Магазин</span>
-            <span className={styles.summaryValue}>
-              {fmt(internalKpi.shop.stock_value)} грн
-            </span>
-            <span className={styles.summaryHint}>
-              Прихід{' '}
-              <span className={styles.debtColor}>{fmt(internalKpi.shop.received_value)} грн</span>
-              {' | '}Виручка{' '}
-              <span className={styles.creditColor}>{fmt(internalKpi.shop.revenue)} грн</span>
-            </span>
-          </div>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Пайок</span>
-            <span className={`${styles.summaryValue} ${styles.debtColor}`}>
-              {internalKpi.ration.amount > 0 ? '−' : ''}{fmt(internalKpi.ration.amount)} грн
-            </span>
-            <span className={styles.summaryHint}>Втрати за дату</span>
-          </div>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Списання</span>
-            <span className={`${styles.summaryValue} ${styles.debtColor}`}>
-              {internalKpi.writeoff.amount > 0 ? '−' : ''}{fmt(internalKpi.writeoff.amount)} грн
-            </span>
-            <span className={styles.summaryHint}>Втрати за дату</span>
-          </div>
+          {internalKpi && (<>
+            <div className={styles.summaryCard}>
+              <span className={styles.summaryLabel}>Магазин</span>
+              <span className={styles.summaryValue}>
+                {fmt(internalKpi.shop.stock_value)} грн
+              </span>
+              <span className={styles.summaryHint}>
+                Прихід{' '}
+                <span className={styles.debtColor}>{fmt(internalKpi.shop.received_value)} грн</span>
+                {' | '}Виручка{' '}
+                <span className={styles.creditColor}>{fmt(internalKpi.shop.revenue)} грн</span>
+              </span>
+            </div>
+            <div className={styles.summaryCard}>
+              <span className={styles.summaryLabel}>Пайок</span>
+              <span className={`${styles.summaryValue} ${styles.debtColor}`}>
+                {internalKpi.ration.amount > 0 ? '−' : ''}{fmt(internalKpi.ration.amount)} грн
+              </span>
+              <span className={styles.summaryHint}>Втрати за дату</span>
+            </div>
+            <div className={styles.summaryCard}>
+              <span className={styles.summaryLabel}>Списання</span>
+              <span className={`${styles.summaryValue} ${styles.debtColor}`}>
+                {internalKpi.writeoff.amount > 0 ? '−' : ''}{fmt(internalKpi.writeoff.amount)} грн
+              </span>
+              <span className={styles.summaryHint}>Втрати за дату</span>
+            </div>
+          </>)}
         </div>
       )}
 
