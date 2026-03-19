@@ -420,6 +420,7 @@ INSERT INTO settings VALUES
     /cancellations     GET, POST — скасування рейсів
     /reports           GET — різні звіти
     /settings          GET, PUT
+    /issues            GET / (список client-report) · POST / (нове звернення → GitHub)
 ```
 
 ### Ключові бізнес-правила для сервісів
@@ -501,6 +502,9 @@ INSERT INTO settings VALUES
   - вибір версії відкату через PowerShell `Out-GridView` (список локальних git-тегів)
   - автоматичний бекап `bakery.db` перед оновленням і відкатом (`bakery.db.bak-VERSION-TIMESTAMP`)
 - [x] Dev-режим: `start-dev.bat` (uvicorn --reload + Vite HMR, polling для мережевого диску)
+- [x] `scripts/release.ps1` — автоматизований реліз: оновлює `VERSION`, комітить, пушить, створює GitHub Release через REST API
+- [x] `scripts/create-installer.ps1` — генерує `Bakery-Setup.ps1` з вбудованими токенами (git clone + install + write ISSUES_TOKEN до БД)
+- [x] Система звернень (Issues): `backend/routers/issues.py` проксує GitHub Issues API; `IssuesWidget.tsx` — плаваюча кнопка 💬 на всіх сторінках; токен зберігається в БД, ніколи не потрапляє у браузер
 
 ### 🔄 Фаза 3 — Фінанси та аналітика
 - [x] Фінансовий модуль (баланси клієнтів, рух коштів, журнал операцій)

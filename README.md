@@ -163,6 +163,7 @@ rollback.bat     ← повертає попередню версію
     /invoices          GET, POST, PUT /status
     /auth              POST /login · GET /public-users · CRUD /users
     /settings          GET, PUT
+    /issues            GET / (список) · POST / (нове звернення)
 ```
 
 ---
@@ -177,6 +178,48 @@ rollback.bat     ← повертає попередню версію
 | owner | read-only дашборд |
 
 Права ролей налаштовуються через вкладку **Довідники → Права ролей**.
+
+---
+
+## Система звернень (Issues)
+
+Кнопка **💬** у правому нижньому куті будь-якої сторінки відкриває модальне вікно підтримки.
+
+- **Нове звернення** — оберіть тип (Помилка / Пропозиція / Питання), введіть заголовок і опис → «Надіслати». Звернення створюється як GitHub Issue з мітками `client-report` + тип.
+- **Всі звернення** — перелік усіх відкритих і вирішених зворотніх зв'язків з датами і статусом.
+
+**Налаштування** (вкладка Довідники → Налаштування):
+| Ключ | Опис |
+|------|------|
+| `github_issues_token` | Fine-grained PAT: `Issues: Read + Write` |
+| `github_repo` | Репозиторій у форматі `owner/repo` (за замовчуванням `TSOrest/Bakery`) |
+
+Токен зберігається в БД і ніколи не передається у браузер — всі запити до GitHub API проксуються через FastAPI.
+
+---
+
+## Встановлення у клієнта (інсталятор)
+
+**На стороні розробника** — генерація одноразового інсталятора:
+
+```powershell
+# Потрібні два Fine-grained PAT:
+#   DEPLOY_TOKEN  — Contents: Read (для git clone)
+#   ISSUES_TOKEN  — Issues: Read + Write (для системи звернень)
+
+powershell scripts/create-installer.ps1 -DeployToken "github_pat_..." -IssuesToken "github_pat_..."
+# Генерує файл Bakery-Setup.ps1 (не зберігається в git)
+```
+
+**На стороні клієнта** — запустити `Bakery-Setup.ps1`:
+
+1. Перевіряє наявність Python 3.11+, Node.js, Git
+2. Клонує репозиторій з вбудованим токеном
+3. Запускає `install.bat` (venv, залежності, SQLite схема)
+4. Записує ISSUES_TOKEN у БД
+5. Запускає `install-service.bat` (Task Scheduler + трей)
+
+Після завершення — програма автоматично доступна на `http://localhost:8000`.
 
 ---
 
