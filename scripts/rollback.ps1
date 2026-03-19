@@ -1,3 +1,7 @@
+param(
+    [string]$TargetTag = ""
+)
+
 $ROOT = Split-Path -Parent $PSScriptRoot
 $TASK = 'BakeryApp'
 $python = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
@@ -7,16 +11,21 @@ if (-not $npm) { $npm = 'C:\Program Files\nodejs\npm.cmd' }
 
 Write-Host '=== Bakery - Rollback ===' -ForegroundColor Cyan
 
-$prevFile = Join-Path $ROOT 'PREVIOUS_VERSION'
-if (-not (Test-Path $prevFile)) {
-    Write-Host 'ERROR: No previous version found. Nothing to roll back to.' -ForegroundColor Red
-    Read-Host 'Press Enter'; exit 1
+# Resolve target version
+if (-not $TargetTag) {
+    $prevFile = Join-Path $ROOT 'PREVIOUS_VERSION'
+    if (-not (Test-Path $prevFile)) {
+        Write-Host 'ERROR: No target version specified and no PREVIOUS_VERSION found.' -ForegroundColor Red
+        Read-Host 'Press Enter'; exit 1
+    }
+    $TargetTag = (Get-Content $prevFile).Trim()
 }
 
-$prevVersion    = (Get-Content $prevFile).Trim()
 $currentVersion = (Get-Content (Join-Path $ROOT 'VERSION') -ErrorAction SilentlyContinue).Trim()
+Write-Host "Rolling back: $currentVersion -> $TargetTag"
 
-Write-Host "Rolling back: $currentVersion -> $prevVersion"
+# Save current as previous (for reference)
+Set-Content -Path (Join-Path $ROOT 'PREVIOUS_VERSION') -Value $currentVersion -Encoding UTF8
 
 # Stop server
 Stop-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue
@@ -25,15 +34,14 @@ Get-CimInstance Win32_Process |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 1
 
-# Checkout previous version
-$gitResult = & git -C $ROOT checkout $prevVersion 2>&1
+# Checkout target version
+$gitResult = & git -C $ROOT checkout $TargetTag 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: git checkout $prevVersion failed: $gitResult" -ForegroundColor Red
+    Write-Host "ERROR: git checkout $TargetTag failed: $gitResult" -ForegroundColor Red
     Read-Host 'Press Enter'; exit 1
 }
 
-Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $prevVersion -Encoding UTF8
-Remove-Item $prevFile -ErrorAction SilentlyContinue
+Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $TargetTag -Encoding UTF8
 
 # Restore dependencies
 & $pip install -r (Join-Path $ROOT 'backend\requirements.txt') --quiet
@@ -60,12 +68,12 @@ if (Get-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue) {
 }
 
 # Relaunch tray
-$pythonw = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
+$pythonw    = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
 $trayScript = Join-Path $ROOT 'tray.py'
 Get-Process -Name pythonw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
 
-Write-Host "Rollback complete: $prevVersion" -ForegroundColor Green
+Write-Host "Rollback complete: $TargetTag" -ForegroundColor Green
 Write-Host ''
 Start-Sleep -Seconds 2
