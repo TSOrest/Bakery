@@ -29,13 +29,7 @@ export default function OrdersPage() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null)
   const [modalClientId,    setModalClientId]    = useState<number | null>(null)
 
-  // Копіювання
-  const [showCopy,     setShowCopy]     = useState(false)
-  const [copyFromDate, setCopyFromDate] = useState('')
-  const [copyLoading,  setCopyLoading]  = useState(false)
-  const [copyResult,   setCopyResult]   = useState<string | null>(null)
-
-  const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const exTimers  = useRef<Record<string,  ReturnType<typeof setTimeout>>>({})
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
@@ -170,18 +164,6 @@ export default function OrdersPage() {
     }, 600)
   }
 
-  // ─── Копіювання ────────────────────────────────────────────────────────────
-
-  const handleCopy = async () => {
-    if (!copyFromDate) return
-    setCopyLoading(true); setCopyResult(null)
-    try {
-      const res = await api.post<{ copied: number }>(`/orders/copy?source_date=${copyFromDate}&target_date=${workDate}`, {})
-      setCopyResult(`Скопійовано: ${res.copied} замовлень`)
-      loadAll(workDate)
-    } catch { setCopyResult('Помилка копіювання') }
-    finally { setCopyLoading(false) }
-  }
 
   // ─── Індекси ──────────────────────────────────────────────────────────────
 
@@ -272,26 +254,12 @@ export default function OrdersPage() {
       {/* ── Toolbar ── */}
       <div className={styles.toolbar}>
         <h2 className={styles.title}>Замовлення — {workDate}</h2>
-        <button className={styles.btnCopy} onClick={() => { setShowCopy(v => !v); setCopyResult(null) }}>
-          Скопіювати з дати
-        </button>
         <div className={styles.bakingBtns}>
           <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>Завдання Хліб</button>
           <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>Завдання Булки</button>
         </div>
       </div>
 
-      {showCopy && (
-        <div className={styles.copyPanel}>
-          <span>Скопіювати з:</span>
-          <input type="date" value={copyFromDate} onChange={e => setCopyFromDate(e.target.value)} className={styles.dateInput} />
-          <button className={styles.btnPrimary} onClick={handleCopy} disabled={!copyFromDate || copyLoading}>
-            {copyLoading ? 'Копіюю...' : 'Копіювати'}
-          </button>
-          <button className={styles.btnSecondary} onClick={() => setShowCopy(false)}>Скасувати</button>
-          {copyResult && <span className={styles.copyResult}>{copyResult}</span>}
-        </div>
-      )}
 
       <div className={styles.layout}>
 
