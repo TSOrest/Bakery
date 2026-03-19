@@ -1433,7 +1433,111 @@ function SettingsTab() {
           </ol>
         </details>
       </div>
+
+      {/* ── Система звернень ── */}
+      <IssuesSettingsSection
+        settings={settings}
+        inputStyle={inputStyle}
+        fieldStyle={fieldStyle}
+        labelStyle={labelStyle}
+        addBtnStyle={addBtnStyle}
+        sectionHead={sectionHead}
+      />
     </section>
+  )
+}
+
+// ─── Блок налаштувань системи звернень ────────────────────────────────────────
+
+function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {
+  settings: SettingsMap
+  inputStyle: React.CSSProperties
+  fieldStyle: React.CSSProperties
+  labelStyle: React.CSSProperties
+  addBtnStyle: React.CSSProperties
+  sectionHead: React.CSSProperties
+}) {
+  const [token,   setToken]   = useState(settings['github_issues_token']?.value ?? '')
+  const [repo,    setRepo]    = useState(settings['github_repo']?.value ?? 'TSOrest/Bakery')
+  const [saving,  setSaving]  = useState(false)
+  const [msg,     setMsg]     = useState('')
+  const [showTok, setShowTok] = useState(false)
+
+  // sync when parent loads settings
+  useEffect(() => {
+    setToken(settings['github_issues_token']?.value ?? '')
+    setRepo(settings['github_repo']?.value ?? 'TSOrest/Bakery')
+  }, [settings])
+
+  const save = async () => {
+    setSaving(true); setMsg('')
+    try {
+      await api.put('/settings/github_issues_token', { value: token, description: 'GitHub token для системи звернень' })
+      await api.put('/settings/github_repo',         { value: repo,  description: 'GitHub репозиторій (owner/repo)' })
+      setMsg('✓ Збережено')
+    } catch {
+      setMsg('Помилка збереження')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <>
+      <p style={sectionHead}>Система звернень (💬)</p>
+      <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
+        <div style={fieldStyle}>
+          <label style={labelStyle}>GitHub Issues Token</label>
+          <div style={{ display: 'flex', gap: 6, maxWidth: 420 }}>
+            <input
+              type={showTok ? 'text' : 'password'}
+              style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder="github_pat_..."
+            />
+            <button type="button" onClick={() => setShowTok(v => !v)}
+              style={{ ...addBtnStyle, background: '#6c757d', whiteSpace: 'nowrap' }}>
+              {showTok ? 'Сховати' : 'Показати'}
+            </button>
+          </div>
+          <span style={{ fontSize: 12, color: '#888' }}>Fine-grained PAT: Issues → Read & Write</span>
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Репозиторій</label>
+          <input
+            style={{ ...inputStyle }}
+            value={repo}
+            onChange={e => setRepo(e.target.value)}
+            placeholder="owner/repo"
+          />
+          <span style={{ fontSize: 12, color: '#888' }}>Формат: owner/repo (напр. TSOrest/Bakery)</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={save} disabled={saving} style={addBtnStyle}>
+            {saving ? 'Збереження...' : 'Зберегти'}
+          </button>
+          {msg && (
+            <span style={{ fontSize: 13, color: msg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
+              {msg}
+            </span>
+          )}
+        </div>
+
+        <details style={{ marginTop: 14, fontSize: 13, color: '#555' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Як отримати токен GitHub</summary>
+          <ol style={{ marginTop: 8, paddingLeft: 18, lineHeight: 1.8 }}>
+            <li>Зайдіть на <strong>github.com</strong> → свій профіль → <strong>Settings</strong></li>
+            <li>Ліворуч внизу → <strong>Developer settings</strong> → <strong>Fine-grained tokens</strong></li>
+            <li>Натисніть <strong>Generate new token</strong></li>
+            <li>Назва: <code>Bakery Issues</code>, термін дії: 1 рік</li>
+            <li>Repository access: <strong>Only select repositories</strong> → оберіть <code>Bakery</code></li>
+            <li>Permissions → <strong>Issues</strong> → <strong>Read and write</strong></li>
+            <li>Натисніть <strong>Generate token</strong> → скопіюйте у поле вище</li>
+          </ol>
+        </details>
+      </div>
+    </>
   )
 }
 
