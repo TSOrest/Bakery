@@ -33,11 +33,15 @@ export default function OrderModal({ client, workDate, products, orders, saving,
 
   const inputRefs = useRef<Record<number, HTMLInputElement | null>>({})
 
-  // Закриття по Escape
+  // Закриття по Escape + блокування скролу сторінки
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
   }, [onClose])
 
   // Завантажуємо ефективні ціни при відкритті
