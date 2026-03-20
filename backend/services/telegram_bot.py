@@ -36,7 +36,7 @@ from backend.models.settings import Setting
 from backend.models.orders import Order
 from backend.models.baking import BakingTask
 from backend.models.references import Client, Product, ClientBotUser
-from backend.services.finance import get_summary, get_all_balances
+from backend.services.finance import get_summary, get_all_balances, get_client_balance
 from backend.services.prices import get_price
 
 log = logging.getLogger("bakery.telegram")
@@ -252,6 +252,7 @@ def _client_keyboard() -> dict:
     return {
         "keyboard": [
             ["📋 Моє замовлення", "➕ Додати товар"],
+            ["📦 Накладна сьогодні"],
             ["❓ Допомога"],
         ],
         "resize_keyboard": True,
@@ -472,6 +473,70 @@ def _client_orders_text(db: Session, client: Client, order_date: str) -> str:
         lines.append(f"{icon} {name}: {o.qty:.0f} шт")
 
     lines.append(f"\n💰 <b>Разом: {total:.2f} грн</b>")
+    return "\n".join(lines)
+
+
+def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str:
+    """Імпровізована накладна на delivery_date: товари + попередній борг = до сплати."""
+    orders = (
+        db.query(Order)
+        .filter(
+            Order.client_id == client.id,
+            Order.order_date == delivery_date,
+            Order.parent_order_id.is_(None),
+            Order.qty > 0,
+        )
+        # Виключаємо відхилені бот-замовлення
+        .filter(~((Order.source == "bot") & (Order.bot_status == "rejected")))
+        .all()
+    )
+    products = {p.id: p for p in db.query(Product).all()}
+
+    if not orders:
+        return (
+            f"📦 <b>Накладна на {delivery_date}</b>\n\n"
+            f"Замовлень на сьогодні немає."
+        )
+
+    SEP = "─" * 28
+    lines = [f"📦 <b>Накладна на {delivery_date}</b>", f"<code>{SEP}</code>"]
+
+    order_sum = 0.0
+    for o in orders:
+        p = products.get(o.product_id)
+        price = get_price(db, o.product_id, client.id, delivery_date) or 0
+        s = o.qty * price
+        order_sum += s
+        name = (p.name if p else f"#{o.product_id}")[:22]
+        qty_str  = f"{o.qty:.0f} шт"
+        sum_str  = f"{s:.2f}"
+        # pending bot-замовлення позначаємо
+        pending = o.source == "bot" and o.bot_status == "pending"
+        flag = " ⏳" if pending else ""
+        lines.append(f"<code>{name:<22} {qty_str:>6}  {sum_str:>8}</code>{flag}")
+
+    lines.append(f"<code>{SEP}</code>")
+    lines.append(f"<code>{'За товар:':<22} {'':>6}  {order_sum:>8.2f}</code>")
+
+    # Попередній борг / переплата (баланс БЕЗ сьогоднішніх накладних)
+    prev_balance = get_client_balance(db, client.id)
+    if prev_balance < 0:
+        lines.append(f"<code>{'Попередній борг:':<22} {'':>6}  {prev_balance:>8.2f}</code>")
+    elif prev_balance > 0:
+        lines.append(f"<code>{'Переплата:':<22} {'':>6}  +{prev_balance:>7.2f}</code>")
+
+    total_due = order_sum - prev_balance  # борг від'ємний → збільшує суму; переплата → зменшує
+    lines.append(f"<code>{SEP}</code>")
+    if total_due > 0:
+        lines.append(f"<code>{'💰 До сплати:':<22} {'':>6}  {total_due:>8.2f}</code>")
+    elif total_due < 0:
+        lines.append(f"<code>{'✅ Ваша переплата:':<22} {'':>6}  {abs(total_due):>8.2f}</code>")
+    else:
+        lines.append("<code>✅ Рахунок нульовий</code>")
+
+    if any(o.source == "bot" and o.bot_status == "pending" for o in orders):
+        lines.append("\n<i>⏳ — позиції очікують підтвердження оператора</i>")
+
     return "\n".join(lines)
 
 
@@ -752,6 +817,13 @@ def _handle_update(token: str, update: dict) -> None:
             with SessionLocal() as db:
                 cl = db.get(Client, client.id)
                 resp = _client_orders_text(db, cl, tomorrow)
+            _send(token, chat_id, resp, _client_keyboard())
+
+        elif text == "📦 Накладна сьогодні":
+            today = date.today().isoformat()
+            with SessionLocal() as db:
+                cl = db.get(Client, client.id)
+                resp = _client_invoice_text(db, cl, today)
             _send(token, chat_id, resp, _client_keyboard())
 
         elif text == "➕ Додати товар":
