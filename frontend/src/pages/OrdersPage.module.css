@@ -436,9 +436,13 @@
 .botBtnModify:hover { background: #ffc107; }
 
 .botExpandRow {
-  padding: 0.4rem 0.7rem;
+  padding: 0.35rem 0.7rem;
   background: #fef9e7;
   border-bottom: 1px solid #fde68a;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
 }
 
 .botInput {
@@ -446,9 +450,46 @@
   border: 1px solid #ccc;
   border-radius: 3px;
   font-size: 0.83rem;
-  margin-right: 0.4rem;
-  min-width: 180px;
+  flex: 1;
+  min-width: 0;
 }
+
+.botInputQty {
+  padding: 0.22rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.83rem;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.botBtnRejectWide {
+  padding: 0.22rem 0.7rem;
+  background: #f5c6cb;
+  color: #721c24;
+  border: 1px solid #e8a0a8;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.83rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.botBtnRejectWide:hover { background: #e8a0a8; }
+
+.botBtnModifyWide {
+  padding: 0.22rem 0.7rem;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.83rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.botBtnModifyWide:hover { background: #ffc107; }
+
+.orderRowPending { opacity: 0.5; }
 
 /* ─── Bot order status ───────────────────────────────────────────────────── */
 

@@ -50,7 +50,7 @@ function BotPendingRow({
               className={styles.botInput}
               autoFocus
             />
-            <button className={styles.botBtnReject}
+            <button className={styles.botBtnRejectWide}
               onClick={() => onVerify(order.id, 'reject', undefined, rejectReason)}>
               Відхилити
             </button>
@@ -60,23 +60,21 @@ function BotPendingRow({
       {mode === 'modify' && (
         <tr>
           <td colSpan={5} className={styles.botExpandRow}>
-            <label style={{ fontSize: '0.83rem' }}>Нова кількість:&nbsp;
-              <input
-                type="number" min={1} step={1}
-                value={newQty}
-                onChange={e => setNewQty(Number(e.target.value))}
-                className={styles.botInput}
-                style={{ width: 70 }}
-                autoFocus
-              />
-            </label>
+            <span style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}>К-сть:</span>
+            <input
+              type="number" min={1} step={1}
+              value={newQty}
+              onChange={e => setNewQty(Number(e.target.value))}
+              className={styles.botInputQty}
+              autoFocus
+            />
             <input
               placeholder="Примітка (необов'язково)"
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               className={styles.botInput}
             />
-            <button className={styles.botBtnModify}
+            <button className={styles.botBtnModifyWide}
               onClick={() => onVerify(order.id, 'modify', newQty, rejectReason)}>
               Підтвердити зі змінами
             </button>
@@ -172,7 +170,11 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     api.get<BotPendingOrder[]>(`/bot/pending-orders?order_date=${workDate}`)
       .then(setPendingBotOrders).catch(() => {})
   }
-  useEffect(() => { loadPending() }, [workDate])
+  useEffect(() => {
+    loadPending()
+    const interval = setInterval(loadPending, 30_000)
+    return () => clearInterval(interval)
+  }, [workDate])
 
   const fetchBotStatus = () => {
     api.get<{ accepting: boolean; closed_until: string | null }>('/bot/order-status')
@@ -575,11 +577,12 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const exQty   = order.exchange_qty ?? 0
                 const total   = order.qty + exQty
                 const sum     = price != null ? order.qty * price : null
-                const isSel   = order.client_id === selectedClientId
+                const isSel    = order.client_id === selectedClientId
+                const isPending = order.source === 'bot' && order.bot_status === 'pending'
                 return (
                   <tr
                     key={order.id}
-                    className={`${styles.orderRow} ${isSel ? styles.orderRowSel : ''}`}
+                    className={`${styles.orderRow} ${isSel ? styles.orderRowSel : ''} ${isPending ? styles.orderRowPending : ''}`}
                   >
                     {showRouteCol  && <td className={styles.tdRoute}>{route?.name ?? '—'}</td>}
                     {showClientCol && (
