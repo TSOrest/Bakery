@@ -343,7 +343,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       route_id:    c.route_id?.toString() ?? '',
       discount_pct: c.discount_pct.toString(),
       client_kind:  c.client_kind ?? 'customer',
-      bot_phones:  (c as any).bot_phones ?? '',
+      bot_phones:  c.bot_phones ?? '',
     })
     api.get<BotUser[]>(`/bot/clients/${c.id}/bot-users`).then(setBotUsers).catch(() => setBotUsers([]))
     setModal(true)
