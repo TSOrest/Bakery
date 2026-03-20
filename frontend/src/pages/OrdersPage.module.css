@@ -293,6 +293,20 @@
   color: #1a3a5c;
 }
 
+.thSrc {
+  width: 2rem;
+  padding: 0.28rem 0.3rem;
+  border-bottom: 2px solid #dde3ea;
+}
+
+.tdSrc {
+  padding: 0.28rem 0.3rem;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .emptyMsg {
   padding: 2rem;
   text-align: center;
@@ -383,37 +397,43 @@
 }
 
 .botBtnConfirm {
-  padding: 0.2rem 0.55rem;
-  background: #d4edda;
+  width: 2rem; height: 2rem;
+  background: #c3e6cb;
   color: #155724;
-  border: 1px solid #c3e6cb;
-  border-radius: 3px;
+  border: 1px solid #a3d4ad;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
 }
-.botBtnConfirm:hover { background: #c3e6cb; }
+.botBtnConfirm:hover { background: #a3d4ad; }
 
 .botBtnReject {
-  padding: 0.2rem 0.55rem;
-  background: #f8d7da;
+  width: 2rem; height: 2rem;
+  background: #f5c6cb;
   color: #721c24;
-  border: 1px solid #f5c6cb;
-  border-radius: 3px;
+  border: 1px solid #e8a0a8;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
 }
-.botBtnReject:hover { background: #f5c6cb; }
+.botBtnReject:hover { background: #e8a0a8; }
 
 .botBtnModify {
-  padding: 0.2rem 0.55rem;
-  background: #e2e3f8;
-  color: #383d9a;
-  border: 1px solid #c8cbf5;
-  border-radius: 3px;
+  width: 2rem; height: 2rem;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
 }
-.botBtnModify:hover { background: #c8cbf5; }
+.botBtnModify:hover { background: #ffc107; }
 
 .botExpandRow {
   padding: 0.4rem 0.7rem;
@@ -428,4 +448,50 @@
   font-size: 0.83rem;
   margin-right: 0.4rem;
   min-width: 180px;
+}
+
+/* ─── Bot order status ───────────────────────────────────────────────────── */
+
+.botStatusOn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1a7a3a;
+  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  background: #d4edda;
+  border: 1px solid #a3d4b0;
+  border-radius: 4px;
+}
+
+.botStatusOff {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #8a1010;
+  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  background: #fde8e8;
+  border: 1px solid #f5aaaa;
+  border-radius: 4px;
+}
+
+.btnBotStop {
+  color: #8a1010 !important;
+  border-color: #f5aaaa !important;
+  background: #fde8e8 !important;
+}
+.btnBotStop:hover { background: #f5aaaa !important; }
+
+.btnBotResume {
+  color: #1a7a3a !important;
+  border-color: #a3d4b0 !important;
+  background: #d4edda !important;
+}
+.btnBotResume:hover { background: #a3d4b0 !important; }
+
+.ciLocked {
+  background: #f0f4f8 !important;
+  color: #888 !important;
+  border-color: #ccc !important;
+  cursor: default;
+  font-size: 0.7rem;
 }

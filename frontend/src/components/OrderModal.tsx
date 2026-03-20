@@ -12,6 +12,7 @@ interface Props {
   products: Product[]
   orders: Order[]
   saving: SavingMap
+  locked?: boolean
   onQtyChange: (clientId: number, productId: number, qty: number) => void
   onExchangeQtyChange: (clientId: number, productId: number, exQty: number) => void
   onClose: () => void
@@ -19,7 +20,7 @@ interface Props {
 
 const fmt = (n: number) => n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function OrderModal({ client, workDate, products, orders, saving, onQtyChange, onExchangeQtyChange, onClose }: Props) {
+export default function OrderModal({ client, workDate, products, orders, saving, locked, onQtyChange, onExchangeQtyChange, onClose }: Props) {
   const [filter,  setFilter]  = useState<'all' | 'bread' | 'bun'>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
@@ -169,6 +170,13 @@ export default function OrderModal({ client, workDate, products, orders, saving,
           </div>
         </div>
 
+        {/* Locked notice */}
+        {locked && (
+          <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4, padding: '0.4rem 0.8rem', fontSize: '0.85rem', color: '#856404', flexShrink: 0 }}>
+            🔒 Накладна сформована — замовлення заблоковані для редагування
+          </div>
+        )}
+
         {/* Тіло */}
         <div className={styles.body}>
 
@@ -214,6 +222,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                           step={1}
                           value={qty || ''}
                           placeholder="—"
+                          disabled={locked}
                           className={
                             styles.qtyInput +
                             (state === 'saving' ? ' ' + styles.saving : '') +
@@ -221,7 +230,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                             (state === 'error'  ? ' ' + styles.error  : '')
                           }
                           onFocus={e => e.target.select()}
-                          onChange={e => onQtyChange(client.id, product.id, Number(e.target.value))}
+                          onChange={e => !locked && onQtyChange(client.id, product.id, Number(e.target.value))}
                           onKeyDown={e => handleKeyDown(e, product.id)}
                         />
                       </td>
@@ -232,9 +241,10 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                           step={1}
                           value={getExQty(product.id) || ''}
                           placeholder="—"
+                          disabled={locked}
                           className={styles.qtyInput}
                           onFocus={e => e.target.select()}
-                          onChange={e => onExchangeQtyChange(client.id, product.id, Number(e.target.value))}
+                          onChange={e => !locked && onExchangeQtyChange(client.id, product.id, Number(e.target.value))}
                         />
                       </td>
                       <td className={styles.tdSum}>
@@ -298,7 +308,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
                   <button
                     className={styles.btnAddRepeat}
                     onClick={handleAddRepeat}
-                    disabled={repeatChecked.size === 0}
+                    disabled={repeatChecked.size === 0 || locked}
                   >
                     Додати відмічені
                   </button>

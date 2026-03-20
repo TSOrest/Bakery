@@ -555,6 +555,21 @@ def _get_products_by_type(product_type: str, client_id: int, order_date: str) ->
         ]
 
 
+def _is_bot_accepting() -> tuple[bool, str]:
+    """Перевіряє чи приймає бот замовлення. Повертає (accepting, start_time)."""
+    from datetime import datetime
+    with SessionLocal() as db:
+        closed_until = _get_setting(db, "bot_orders_closed_until", "")
+        start_time   = _get_setting(db, "bot_order_start_time", "08:00")
+    if closed_until:
+        try:
+            if datetime.now() < datetime.fromisoformat(closed_until):
+                return False, start_time
+        except Exception:
+            pass
+    return True, start_time
+
+
 def _start_add_product(token: str, chat_id: int, client_id: int) -> None:
     """Починає flow додавання товару: показує вибір типу."""
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -823,6 +838,13 @@ def _handle_update(token: str, update: dict) -> None:
             _send(token, chat_id, resp, _client_keyboard())
 
         elif text == "➕ Додати товар":
+            accepting, start_time = _is_bot_accepting()
+            if not accepting:
+                _send(token, chat_id,
+                      f"⛔ Прийом замовлень через бота наразі завершено.\n"
+                      f"Наступний прийом — з <b>{start_time}</b>.",
+                      _client_keyboard())
+                return
             # Скидаємо попередній стан якщо є
             with _state_lock:
                 _client_state.pop(chat_id, None)

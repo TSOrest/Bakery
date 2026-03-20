@@ -30,6 +30,18 @@ def list_invoices(
     return q.order_by(Invoice.invoice_number.desc()).all()
 
 
+@router.get("/locked-clients")
+def get_locked_clients(date: str, db: Session = Depends(get_db)):
+    """Повертає client_ids, для яких є не скасована накладна на дату."""
+    rows = (
+        db.query(Invoice.client_id)
+        .filter(Invoice.invoice_date == date, Invoice.status != "cancelled")
+        .distinct()
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 @router.post("/generate-from-orders")
 def generate_from_orders(
     invoice_date: str,

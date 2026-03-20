@@ -261,6 +261,55 @@ def broadcast_deadline(order_date: Optional[str] = None, db: Session = Depends(g
     return BroadcastResponse(sent=sent, skipped=skipped)
 
 
+# ── Статус прийому замовлень ─────────────────────────────────────────────────
+
+def _bot_accepting(db: Session) -> tuple[bool, str]:
+    """Повертає (accepting, closed_until_iso). Якщо closed_until в майбутньому — не приймаємо."""
+    from datetime import datetime
+    closed_until = _get_setting(db, "bot_orders_closed_until", "")
+    if closed_until:
+        try:
+            if datetime.now() < datetime.fromisoformat(closed_until):
+                return False, closed_until
+        except Exception:
+            pass
+    return True, ""
+
+
+@router.get("/order-status")
+def get_order_status(db: Session = Depends(get_db)):
+    """Чи приймає бот замовлення зараз."""
+    accepting, closed_until = _bot_accepting(db)
+    return {"accepting": accepting, "closed_until": closed_until or None}
+
+
+@router.post("/order-status/stop")
+def stop_order_acceptance(db: Session = Depends(get_db)):
+    """Зупинити прийом до ранку наступного дня (час з налаштувань bot_order_start_time)."""
+    from datetime import date, timedelta
+    start_time = _get_setting(db, "bot_order_start_time", "08:00")
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    closed_until = f"{tomorrow}T{start_time}:00"
+    row = db.get(Setting, "bot_orders_closed_until")
+    if row:
+        row.value = closed_until
+    else:
+        db.add(Setting(key="bot_orders_closed_until", value=closed_until,
+                       description="Бот приймає замовлення до цього часу (ISO datetime)"))
+    db.commit()
+    return {"accepting": False, "closed_until": closed_until}
+
+
+@router.post("/order-status/resume")
+def resume_order_acceptance(db: Session = Depends(get_db)):
+    """Відновити прийом негайно."""
+    row = db.get(Setting, "bot_orders_closed_until")
+    if row:
+        row.value = ""
+        db.commit()
+    return {"accepting": True, "closed_until": None}
+
+
 # ── Управління авторизованими користувачами бота ──────────────────────────────
 
 @router.get("/clients/{client_id}/bot-users")
