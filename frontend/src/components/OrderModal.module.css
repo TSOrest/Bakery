@@ -214,6 +214,7 @@
   flex-direction: column;
   gap: 0.45rem;
   padding: 0.7rem 0.8rem;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -242,6 +243,7 @@
 
 .repeatList {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
