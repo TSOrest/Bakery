@@ -298,14 +298,19 @@ interface ClientFormState {
   full_name: string; short_name: string; address: string
   phone: string; director: string; accountant: string
   route_id: string; discount_pct: string
-  client_kind: string
+  client_kind: string; bot_phones: string
 }
 
 const emptyClient = (): ClientFormState => ({
   full_name: '', short_name: '', address: '', phone: '',
   director: '', accountant: '', route_id: '', discount_pct: '0',
-  client_kind: 'customer',
+  client_kind: 'customer', bot_phones: '',
 })
+
+interface BotUser {
+  id: number; chat_id: string; phone: string | null
+  first_name: string | null; authorized_at: string | null; is_active: number
+}
 
 const CLIENT_KIND_LABELS: Record<string, string> = {
   customer: 'Клієнт',
@@ -320,11 +325,12 @@ function ClientsTab({ routes }: { routes: Route[] }) {
   const [editing, setEditing]   = useState<Client | null>(null)
   const [form, setForm]         = useState<ClientFormState>(emptyClient())
   const [saving, setSaving]     = useState(false)
+  const [botUsers, setBotUsers] = useState<BotUser[]>([])
 
   const load = () => api.get<Client[]>('/clients/?active_only=false').then(setClients)
   useEffect(() => { load() }, [])
 
-  const openNew  = () => { setEditing(null); setForm(emptyClient()); setModal(true) }
+  const openNew  = () => { setEditing(null); setForm(emptyClient()); setBotUsers([]); setModal(true) }
   const openEdit = (c: Client) => {
     setEditing(c)
     setForm({
@@ -337,10 +343,12 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       route_id:    c.route_id?.toString() ?? '',
       discount_pct: c.discount_pct.toString(),
       client_kind:  c.client_kind ?? 'customer',
+      bot_phones:  (c as any).bot_phones ?? '',
     })
+    api.get<BotUser[]>(`/bot/clients/${c.id}/bot-users`).then(setBotUsers).catch(() => setBotUsers([]))
     setModal(true)
   }
-  const closeModal = () => setModal(false)
+  const closeModal = () => { setModal(false); setBotUsers([]) }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -356,6 +364,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       discount_pct: Number(form.discount_pct),
       client_kind: form.client_kind,
       is_own_shop: form.client_kind === 'shop' ? 1 : 0,
+      bot_phones:  form.bot_phones.trim() || null,
     }
     try {
       if (editing) {
@@ -463,6 +472,49 @@ function ClientsTab({ routes }: { routes: Route[] }) {
               <label>Бухгалтер</label>
               <input value={form.accountant} onChange={(e) => setForm({ ...form, accountant: e.target.value })} />
             </div>
+            <div className={formStyles.field}>
+              <label>Телефони для авторизації в боті</label>
+              <input value={form.bot_phones}
+                onChange={(e) => setForm({ ...form, bot_phones: e.target.value })}
+                placeholder="+380501234567, +380671234567" />
+              <span className={formStyles.hint}>Через кому. Клієнт надсилає свій контакт — бот звіряє з цим списком.</span>
+            </div>
+            {editing && botUsers.length > 0 && (
+              <div className={formStyles.field}>
+                <label>Авторизовані користувачі бота</label>
+                <table style={{ width: '100%', fontSize: '0.83rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f0f4f8' }}>
+                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Ім'я</th>
+                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Телефон</th>
+                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Авторизовано</th>
+                      <th style={{ padding: '0.22rem 0.3rem' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {botUsers.map((u) => (
+                      <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5, borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '0.2rem 0.5rem' }}>{u.first_name ?? '—'}</td>
+                        <td style={{ padding: '0.2rem 0.5rem' }}>{u.phone ?? '—'}</td>
+                        <td style={{ padding: '0.2rem 0.5rem', color: '#7090b0' }}>{u.authorized_at?.slice(0, 16) ?? '—'}</td>
+                        <td style={{ padding: '0.2rem 0.3rem' }}>
+                          <button
+                            type="button"
+                            title="Відкликати авторизацію"
+                            onClick={async () => {
+                              if (!confirm(`Відкликати авторизацію ${u.first_name ?? u.chat_id}?`)) return
+                              await api.delete(`/bot/clients/${editing.id}/bot-users/${u.id}`)
+                              setBotUsers((prev) => prev.filter((x) => x.id !== u.id))
+                            }}
+                            style={{ background: '#fde', border: '1px solid #e88', borderRadius: 3, cursor: 'pointer', padding: '0.1rem 0.4rem', color: '#900', fontSize: '0.8rem' }}
+                          >✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className={formStyles.actions}>
               <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
               <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
@@ -1464,9 +1516,9 @@ function SettingsTab() {
 const BOT_TEMPLATES: { key: string; label: string; hint: string }[] = [
   { key: 'bot_tpl_reminder',  label: 'Нагадування про замовлення',       hint: 'Змінні: {date}' },
   { key: 'bot_tpl_deadline',  label: 'Стоп-прийом замовлень',           hint: 'Змінні: {date}' },
-  { key: 'bot_tpl_confirmed', label: 'Підтверджено оператором',          hint: 'Змінні: {date}, {sum}' },
-  { key: 'bot_tpl_rejected',  label: 'Відхилено оператором',             hint: 'Змінні: {date}, {reason}' },
-  { key: 'bot_tpl_modified',  label: 'Підтверджено зі змінами',          hint: 'Змінні: {date}, {sum}, {reason}' },
+  { key: 'bot_tpl_confirmed', label: 'Підтверджено оператором',          hint: 'Змінні: {product}, {qty}, {date}, {sum}' },
+  { key: 'bot_tpl_rejected',  label: 'Відхилено оператором',             hint: 'Змінні: {product}, {qty}, {date}, {reason}' },
+  { key: 'bot_tpl_modified',  label: 'Підтверджено зі змінами',          hint: 'Змінні: {product}, {qty}, {new_qty}, {date}, {sum}, {reason}' },
 ]
 
 function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {

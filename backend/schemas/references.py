@@ -151,6 +151,7 @@ class ClientCreate(BaseModel):
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
     client_kind: str = 'customer'
+    bot_phones: Optional[str] = None
 
 
 class ClientUpdate(BaseModel):
@@ -171,6 +172,7 @@ class ClientUpdate(BaseModel):
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
     client_kind: Optional[str] = None
+    bot_phones: Optional[str] = None
 
 
 class ClientOut(BaseModel):
@@ -191,3 +193,4 @@ class ClientOut(BaseModel):
     delivery_note_date: Optional[str]
     client_group: Optional[str]
     client_kind: str = 'customer'
+    bot_phones: Optional[str] = None
