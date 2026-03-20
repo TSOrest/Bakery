@@ -46,7 +46,7 @@ export default function ShopPage() {
   const [tab, setTab] = useState<Tab>('bread')
 
   return (
-    <div>
+    <div style={{ padding: '1.5rem' }}>
       <h2>Магазин</h2>
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>

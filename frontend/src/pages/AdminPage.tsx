@@ -56,7 +56,7 @@ export default function AdminPage() {
   ]
 
   return (
-    <div>
+    <div style={{ padding: '1.5rem' }}>
       <h2>Довідники</h2>
 
       {/* Перемикачі вкладок */}
