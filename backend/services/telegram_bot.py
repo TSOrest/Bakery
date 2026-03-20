@@ -35,6 +35,7 @@ from backend.database import SessionLocal
 from backend.models.settings import Setting
 from backend.models.orders import Order
 from backend.models.baking import BakingTask
+from backend.models.invoices import Invoice
 from backend.models.references import Client, Product, ClientBotUser
 from backend.services.finance import get_summary, get_all_balances, get_client_balance
 from backend.services.prices import get_price
@@ -162,16 +163,6 @@ def _link_client_chat(db: Session, client: Client, chat_id: int, phone: str = ""
         ))
     db.commit()
 
-
-def _get_all_chat_ids_for_client(db: Session, client_id: int) -> list[str]:
-    """Повертає всі активні chat_id користувачів для клієнта (для розсилки)."""
-    return [
-        bu.chat_id for bu in
-        db.query(ClientBotUser).filter(
-            ClientBotUser.client_id == client_id,
-            ClientBotUser.is_active == 1,
-        ).all()
-    ]
 
 
 # ── Telegram API ─────────────────────────────────────────────────────────────
@@ -477,65 +468,70 @@ def _client_orders_text(db: Session, client: Client, order_date: str) -> str:
 
 
 def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str:
-    """Імпровізована накладна на delivery_date: товари + попередній борг = до сплати."""
-    orders = (
-        db.query(Order)
-        .filter(
-            Order.client_id == client.id,
-            Order.order_date == delivery_date,
-            Order.parent_order_id.is_(None),
-            Order.qty > 0,
-        )
-        # Виключаємо відхилені бот-замовлення
-        .filter(~((Order.source == "bot") & (Order.bot_status == "rejected")))
-        .all()
-    )
-    products = {p.id: p for p in db.query(Product).all()}
+    """Накладна клієнта на delivery_date — дані з таблиці invoices."""
+    STATUS_LABELS = {
+        "draft":     "чернетка",
+        "printed":   "сформовано",
+        "delivered": "відвантажено",
+        "cancelled": "скасовано",
+    }
+    SEP = "─" * 22
 
-    if not orders:
-        return (
-            f"📦 <b>Накладна на {delivery_date}</b>\n\n"
-            f"Замовлень на сьогодні немає."
-        )
-
-    SEP = "─" * 28
-    lines = [f"📦 <b>Накладна на {delivery_date}</b>", f"<code>{SEP}</code>"]
-
-    order_sum = 0.0
-    for o in orders:
-        p = products.get(o.product_id)
-        price = get_price(db, o.product_id, client.id, delivery_date) or 0
-        s = o.qty * price
-        order_sum += s
-        name = (p.name if p else f"#{o.product_id}")[:22]
-        qty_str  = f"{o.qty:.0f} шт"
-        sum_str  = f"{s:.2f}"
-        # pending bot-замовлення позначаємо
-        pending = o.source == "bot" and o.bot_status == "pending"
-        flag = " ⏳" if pending else ""
-        lines.append(f"<code>{name:<22} {qty_str:>6}  {sum_str:>8}</code>{flag}")
-
-    lines.append(f"<code>{SEP}</code>")
-    lines.append(f"<code>{'За товар:':<22} {'':>6}  {order_sum:>8.2f}</code>")
-
-    # Попередній борг / переплата (баланс БЕЗ сьогоднішніх накладних)
+    # Баланс завжди, незалежно від наявності накладної
     prev_balance = get_client_balance(db, client.id)
     if prev_balance < 0:
-        lines.append(f"<code>{'Попередній борг:':<22} {'':>6}  {prev_balance:>8.2f}</code>")
+        balance_line = f"Попередній борг: <b>{abs(prev_balance):.2f} грн</b>"
     elif prev_balance > 0:
-        lines.append(f"<code>{'Переплата:':<22} {'':>6}  +{prev_balance:>7.2f}</code>")
-
-    total_due = order_sum - prev_balance  # борг від'ємний → збільшує суму; переплата → зменшує
-    lines.append(f"<code>{SEP}</code>")
-    if total_due > 0:
-        lines.append(f"<code>{'💰 До сплати:':<22} {'':>6}  {total_due:>8.2f}</code>")
-    elif total_due < 0:
-        lines.append(f"<code>{'✅ Ваша переплата:':<22} {'':>6}  {abs(total_due):>8.2f}</code>")
+        balance_line = f"Переплата: <b>+{prev_balance:.2f} грн</b>"
     else:
-        lines.append("<code>✅ Рахунок нульовий</code>")
+        balance_line = None
 
-    if any(o.source == "bot" and o.bot_status == "pending" for o in orders):
-        lines.append("\n<i>⏳ — позиції очікують підтвердження оператора</i>")
+    # Шукаємо накладну на дату (не скасовану)
+    invoice = (
+        db.query(Invoice)
+        .filter(
+            Invoice.client_id == client.id,
+            Invoice.invoice_date == delivery_date,
+            Invoice.status != "cancelled",
+        )
+        .order_by(Invoice.id.desc())
+        .first()
+    )
+
+    header = f"📦 <b>Накладна на {delivery_date}</b>"
+
+    if not invoice:
+        lines = [header, "", "⏳ Накладна ще не сформована."]
+        if balance_line:
+            lines += ["", SEP, balance_line]
+        return "\n".join(lines)
+
+    status_str = STATUS_LABELS.get(invoice.status, invoice.status)
+    lines = [header, f"№ {invoice.invoice_number}  ({status_str})", ""]
+
+    order_sum = 0.0
+    for ln in invoice.lines:
+        if ln.is_exchange:
+            continue  # обмін не показуємо клієнту окремо
+        name = ln.product.name if ln.product else f"#{ln.product_id}"
+        s = ln.sum
+        order_sum += s
+        lines.append(f"• {name} × {ln.qty:.0f} шт — {s:.2f} грн")
+
+    lines += ["", SEP, f"За товар: <b>{order_sum:.2f} грн</b>"]
+
+    if balance_line:
+        lines.append(balance_line)
+
+    # До сплати = сума накладної + борг або – переплата
+    total_due = order_sum - prev_balance
+    lines.append(SEP)
+    if total_due > 0.005:
+        lines.append(f"💰 <b>До сплати: {total_due:.2f} грн</b>")
+    elif total_due < -0.005:
+        lines.append(f"✅ <b>Переплата складає: {abs(total_due):.2f} грн</b>")
+    else:
+        lines.append("✅ <b>Рахунок нульовий</b>")
 
     return "\n".join(lines)
 
