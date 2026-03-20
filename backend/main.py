@@ -13,7 +13,7 @@ import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
-    auth, cancellations, settings, finances, finances_articles, ingredients, dashboard, issues,
+    auth, cancellations, settings, finances, finances_articles, ingredients, dashboard, issues, bot,
 )
 from backend.routers import auth_github
 
@@ -152,6 +152,7 @@ app.include_router(ingredients.router,       prefix=PREFIX)
 app.include_router(dashboard.router,     prefix=PREFIX)
 app.include_router(issues.router,        prefix=PREFIX)
 app.include_router(auth_github.router,   prefix=PREFIX)
+app.include_router(bot.router,           prefix=PREFIX)
 
 
 @app.get("/api/health")

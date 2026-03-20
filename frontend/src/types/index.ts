@@ -60,7 +60,7 @@ export interface Order {
   qty: number
   order_date: string
   status: 'draft' | 'confirmed' | 'closed'
-  source: 'phone' | 'paper'
+  source: 'phone' | 'paper' | 'bot'
   exchange_type: 'none' | 'pre_order' | 'post_delivery'
   exchange_qty: number
   exchange_price: number | null
@@ -70,6 +70,25 @@ export interface Order {
   created_at: string | null
   parent_order_id: number | null
   delivered_qty: number | null
+  bot_status: 'pending' | 'confirmed' | 'rejected' | 'modified' | null
+  bot_rejection_reason: string | null
+}
+
+export interface BotPendingOrder {
+  id: number
+  client_id: number
+  client_name: string
+  product_id: number
+  product_name: string
+  qty: number
+  price: number
+  sum: number
+  order_date: string
+}
+
+export interface BotBroadcastResult {
+  sent: number
+  skipped: number
 }
 
 export interface BakingTask {

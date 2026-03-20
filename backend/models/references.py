@@ -114,5 +114,6 @@ class Client(Base):
     client_group         = Column(Text)                 # підгрупа в маршруті
     # customer=звичайний, shop=власний магазин, writeoff=списання, ration=пайок
     client_kind          = Column(Text, default='customer')
+    bot_chat_id          = Column(Text)                     # Telegram chat ID клієнта
 
     route = relationship("Route", back_populates="clients")

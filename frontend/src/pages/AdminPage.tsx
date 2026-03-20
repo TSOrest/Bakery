@@ -1435,6 +1435,17 @@ function SettingsTab() {
         </details>
       </div>
 
+      {/* ── Шаблони повідомлень бота ── */}
+      <BotTemplatesSection
+        settings={settings}
+        onReload={load}
+        inputStyle={inputStyle}
+        fieldStyle={fieldStyle}
+        labelStyle={labelStyle}
+        addBtnStyle={addBtnStyle}
+        sectionHead={sectionHead}
+      />
+
       {/* ── Система звернень ── */}
       <IssuesSettingsSection
         settings={settings}
@@ -1445,6 +1456,75 @@ function SettingsTab() {
         sectionHead={sectionHead}
       />
     </section>
+  )
+}
+
+// ─── Шаблони повідомлень Telegram-бота ────────────────────────────────────────
+
+const BOT_TEMPLATES: { key: string; label: string; hint: string }[] = [
+  { key: 'bot_tpl_reminder',  label: 'Нагадування про замовлення',       hint: 'Змінні: {date}' },
+  { key: 'bot_tpl_deadline',  label: 'Стоп-прийом замовлень',           hint: 'Змінні: {date}' },
+  { key: 'bot_tpl_confirmed', label: 'Підтверджено оператором',          hint: 'Змінні: {date}, {sum}' },
+  { key: 'bot_tpl_rejected',  label: 'Відхилено оператором',             hint: 'Змінні: {date}, {reason}' },
+  { key: 'bot_tpl_modified',  label: 'Підтверджено зі змінами',          hint: 'Змінні: {date}, {sum}, {reason}' },
+]
+
+function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {
+  settings: SettingsMap
+  onReload: () => void
+  inputStyle: React.CSSProperties
+  fieldStyle: React.CSSProperties
+  labelStyle: React.CSSProperties
+  addBtnStyle: React.CSSProperties
+  sectionHead: React.CSSProperties
+}) {
+  const [form, setForm] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    const vals: Record<string, string> = {}
+    BOT_TEMPLATES.forEach(({ key }) => { vals[key] = settings[key]?.value ?? '' })
+    setForm(vals)
+  }, [settings])
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true); setSaved(false)
+    try {
+      await Promise.all(
+        BOT_TEMPLATES.map(({ key }) =>
+          api.put(`/settings/${key}`, { value: form[key] ?? '', description: settings[key]?.description ?? '' })
+        )
+      )
+      setSaved(true)
+      onReload()
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <>
+      <p style={sectionHead}>Шаблони повідомлень бота</p>
+      <form onSubmit={handleSave} style={{ maxWidth: 640 }}>
+        {BOT_TEMPLATES.map(({ key, label, hint }) => (
+          <div key={key} style={fieldStyle}>
+            <label style={labelStyle}>{label}</label>
+            <textarea
+              style={{ ...inputStyle, maxWidth: 'none', width: '100%', height: 64, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.83rem' }}
+              value={form[key] ?? ''}
+              onChange={e => setForm({ ...form, [key]: e.target.value })}
+            />
+            <span style={{ fontSize: 11, color: '#888' }}>{hint}</span>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
+          <button type="submit" disabled={saving} style={addBtnStyle}>
+            {saving ? 'Збереження...' : 'Зберегти шаблони'}
+          </button>
+          {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
+        </div>
+      </form>
+    </>
   )
 }
 

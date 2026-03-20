@@ -24,8 +24,10 @@ class Order(Base):
     created_at       = Column(Text)
     created_by       = Column(Text)
     # Split-замовлення: дочірній рядок посилається на батьківський
-    parent_order_id  = Column(Integer, ForeignKey("orders.id"), nullable=True)
-    delivered_qty    = Column(Float, nullable=True)
+    parent_order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)
+    delivered_qty        = Column(Float, nullable=True)
+    bot_status           = Column(Text, nullable=True)   # pending|confirmed|rejected|modified
+    bot_rejection_reason = Column(Text, nullable=True)
 
     client   = relationship("Client")
     product  = relationship("Product")

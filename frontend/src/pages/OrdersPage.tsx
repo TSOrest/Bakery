@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
-import type { Client, Order, Product, Route } from '../types'
+import type { BotBroadcastResult, BotPendingOrder, Client, Order, Product, Route } from '../types'
 import OrderModal from '../components/OrderModal'
 import styles from './OrdersPage.module.css'
 
@@ -13,6 +13,79 @@ type PricesCache = Record<number, Record<number, number>>
 
 const fmt = (n: number) =>
   n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function BotPendingRow({
+  order,
+  onVerify,
+}: {
+  order: BotPendingOrder
+  onVerify: (id: number, action: 'confirm' | 'reject' | 'modify', newQty?: number, reason?: string) => void
+}) {
+  const [rejectReason, setRejectReason] = useState('')
+  const [newQty, setNewQty] = useState(order.qty)
+  const [mode, setMode] = useState<'idle' | 'reject' | 'modify'>('idle')
+
+  return (
+    <>
+      <tr className={styles.botPendingRow}>
+        <td className={styles.botTd}>{order.client_name}</td>
+        <td className={styles.botTd}>{order.product_name}</td>
+        <td className={styles.botTd} style={{ textAlign: 'right' }}>{order.qty}</td>
+        <td className={styles.botTd} style={{ textAlign: 'right' }}>{fmt(order.sum)}</td>
+        <td className={styles.botTd}>
+          <div className={styles.botActions}>
+            <button className={styles.botBtnConfirm} onClick={() => onVerify(order.id, 'confirm')}>✓ Підтвердити</button>
+            <button className={styles.botBtnModify} onClick={() => setMode(mode === 'modify' ? 'idle' : 'modify')}>✏️</button>
+            <button className={styles.botBtnReject} onClick={() => setMode(mode === 'reject' ? 'idle' : 'reject')}>✗</button>
+          </div>
+        </td>
+      </tr>
+      {mode === 'reject' && (
+        <tr>
+          <td colSpan={5} className={styles.botExpandRow}>
+            <input
+              placeholder="Причина відхилення"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              className={styles.botInput}
+              autoFocus
+            />
+            <button className={styles.botBtnReject}
+              onClick={() => onVerify(order.id, 'reject', undefined, rejectReason)}>
+              Відхилити
+            </button>
+          </td>
+        </tr>
+      )}
+      {mode === 'modify' && (
+        <tr>
+          <td colSpan={5} className={styles.botExpandRow}>
+            <label style={{ fontSize: '0.83rem' }}>Нова кількість:&nbsp;
+              <input
+                type="number" min={1} step={1}
+                value={newQty}
+                onChange={e => setNewQty(Number(e.target.value))}
+                className={styles.botInput}
+                style={{ width: 70 }}
+                autoFocus
+              />
+            </label>
+            <input
+              placeholder="Примітка (необов'язково)"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              className={styles.botInput}
+            />
+            <button className={styles.botBtnModify}
+              onClick={() => onVerify(order.id, 'modify', newQty, rejectReason)}>
+              Підтвердити зі змінами
+            </button>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
 
 export default function OrdersPage() {
   const { workDate } = useWorkDate()
@@ -28,6 +101,10 @@ export default function OrdersPage() {
   const [selectedRouteId,  setSelectedRouteId]  = useState<number | null>(null)
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null)
   const [modalClientId,    setModalClientId]    = useState<number | null>(null)
+
+  const [pendingBotOrders,  setPendingBotOrders]  = useState<BotPendingOrder[]>([])
+  const [broadcastMsg,      setBroadcastMsg]      = useState<string | null>(null)
+  const [broadcastLoading,  setBroadcastLoading]  = useState(false)
 
 const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const exTimers  = useRef<Record<string,  ReturnType<typeof setTimeout>>>({})
@@ -85,6 +162,32 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   }
 
   useEffect(() => { loadAll(workDate) }, [workDate])
+
+  const loadPending = () => {
+    api.get<BotPendingOrder[]>(`/bot/pending-orders?order_date=${workDate}`)
+      .then(setPendingBotOrders).catch(() => {})
+  }
+  useEffect(() => { loadPending() }, [workDate])
+
+  const handleVerify = async (orderId: number, action: 'confirm' | 'reject' | 'modify', newQty?: number, reason?: string) => {
+    await api.put(`/bot/orders/${orderId}/verify`, { action, new_qty: newQty, reason })
+    loadPending()
+    loadAll(workDate)
+  }
+
+  const handleBroadcast = async (type: 'reminder' | 'deadline') => {
+    setBroadcastLoading(true)
+    setBroadcastMsg(null)
+    try {
+      const r = await api.post<BotBroadcastResult>(`/bot/broadcast-${type}?order_date=${workDate}`, {})
+      setBroadcastMsg(`Надіслано: ${r.sent}, пропущено (вже є замовлення): ${r.skipped}`)
+    } catch {
+      setBroadcastMsg('Помилка розсилки')
+    } finally {
+      setBroadcastLoading(false)
+      setTimeout(() => setBroadcastMsg(null), 5000)
+    }
+  }
 
   // Якщо відкривається модалка для клієнта без завантажених цін — підвантажуємо
   useEffect(() => {
@@ -257,7 +360,20 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
         <div className={styles.bakingBtns}>
           <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>Завдання Хліб</button>
           <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>Завдання Булки</button>
+          <button
+            className={styles.btnBaking}
+            disabled={broadcastLoading}
+            title="Нагадати клієнтам у боті, що не подали замовлення на вибрану дату"
+            onClick={() => handleBroadcast('reminder')}
+          >🔔 Нагадування</button>
+          <button
+            className={styles.btnBaking}
+            disabled={broadcastLoading}
+            title="Повідомити клієнтів у боті про припинення прийому замовлень"
+            onClick={() => handleBroadcast('deadline')}
+          >🚫 Стоп-прийом</button>
         </div>
+        {broadcastMsg && <span style={{ fontSize: '0.82rem', color: '#1a5c3a' }}>{broadcastMsg}</span>}
       </div>
 
 
@@ -337,6 +453,32 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
         {/* ── Таблиця замовлень ── */}
         <main className={styles.main}>
+
+          {/* ── Pending bot orders ── */}
+          {pendingBotOrders.length > 0 && (
+            <div className={styles.botPendingPanel}>
+              <div className={styles.botPendingTitle}>
+                🤖 Замовлення через бота — очікують підтвердження ({pendingBotOrders.length})
+              </div>
+              <table className={styles.botPendingTable}>
+                <thead>
+                  <tr>
+                    <th>Клієнт</th>
+                    <th>Виріб</th>
+                    <th style={{ textAlign: 'right' }}>К-сть</th>
+                    <th style={{ textAlign: 'right' }}>Сума</th>
+                    <th style={{ width: 200 }}>Дії</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingBotOrders.map(o => (
+                    <BotPendingRow key={o.id} order={o} onVerify={handleVerify} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <table className={styles.ordersTable}>
             <thead>
               <tr>
