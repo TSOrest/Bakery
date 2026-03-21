@@ -506,25 +506,36 @@ export default function IssuesWidget() {
                     {!loading && !error && issues.length === 0 && (
                       <p className={styles.hint}>Звернень поки немає</p>
                     )}
-                    {issues.map(issue => (
-                      <button
-                        key={issue.number}
-                        className={styles.issueRow}
-                        onClick={() => setActiveNum(issue.number)}
-                      >
-                        <span className={`${styles.issueIcon} ${issue.state === 'open' ? styles.iconOpen : styles.iconClosed}`}>
-                          {issue.state === 'open' ? '●' : '✓'}
-                        </span>
-                        <span className={styles.issueRowTitle}>
-                          <span className={styles.issueRowName}>#{issue.number} {issue.title}</span>
-                          <span className={styles.issueRowDate}>{relativeTime(issue.updated_at)}</span>
-                        </span>
-                        {issue.comments > 0 && (
-                          <span className={styles.issueRowComments}>💬 {issue.comments}</span>
-                        )}
-                        <span className={styles.issueRowArrow}>›</span>
-                      </button>
-                    ))}
+                    {[...issues]
+                      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+                      .map(issue => {
+                        const typeKey = issue.labels.find(l => l !== 'client-report') ?? ''
+                        const typeText = LABEL_UA[typeKey]
+                        return (
+                          <button
+                            key={issue.number}
+                            className={styles.issueRow}
+                            onClick={() => setActiveNum(issue.number)}
+                          >
+                            <span className={`${styles.issueIcon} ${issue.state === 'open' ? styles.iconOpen : styles.iconClosed}`}>
+                              {issue.state === 'open' ? '●' : '✓'}
+                            </span>
+                            {typeText && (
+                              <span className={styles.issueTypeBadge} style={{ background: TYPE_COLORS[typeKey] ?? '#6e7781' }}>
+                                {typeText}
+                              </span>
+                            )}
+                            <span className={styles.issueRowTitle}>
+                              <span className={styles.issueRowName}>#{issue.number} {issue.title}</span>
+                              <span className={styles.issueRowDate}>{relativeTime(issue.updated_at)}</span>
+                            </span>
+                            {issue.comments > 0 && (
+                              <span className={styles.issueRowComments}>💬 {issue.comments}</span>
+                            )}
+                            <span className={styles.issueRowArrow}>›</span>
+                          </button>
+                        )
+                      })}
                   </div>
                 )}
               </>
