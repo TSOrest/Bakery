@@ -17,7 +17,7 @@ type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'ingredients' | 'margi
 
 interface TabGroup {
   label: string
-  permKey: string | null  // null = тільки для admin, не конфігурується
+  permKey: string
   tabs: { key: Tab; label: string }[]
 }
 
@@ -51,7 +51,7 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
   },
   {
     label: 'Система',
-    permKey: null,
+    permKey: 'admin_system',
     tabs: [
       { key: 'users',       label: 'Користувачі' },
       { key: 'permissions', label: 'Права ролей' },
@@ -69,10 +69,9 @@ export default function AdminPage() {
   const userPerms: string[] = isAdmin ? [] : (permissions[role] ?? [])
 
   // Які групи доступні цій ролі?
-  const visibleGroups = ADMIN_TAB_GROUPS.filter(g => {
-    if (g.permKey === null) return isAdmin
-    return isAdmin || userPerms.includes(g.permKey)
-  })
+  const visibleGroups = ADMIN_TAB_GROUPS.filter(g =>
+    isAdmin || userPerms.includes(g.permKey as string)
+  )
 
   const allVisibleTabKeys = visibleGroups.flatMap(g => g.tabs.map(t => t.key))
   const defaultTab = allVisibleTabKeys[0] ?? 'products'
@@ -1953,9 +1952,8 @@ const MAIN_PAGE_PERMS = [
   { key: 'finances', label: 'Фінанси' },
 ]
 
-// Підрозділи Довідників (configurable, без Системи)
+// Підрозділи Довідників (всі конфігуруються)
 const ADMIN_SUB_PERMS = ADMIN_TAB_GROUPS
-  .filter(g => g.permKey !== null)
   .map(g => ({ key: g.permKey as string, label: g.label }))
 
 const ALL_ROLES = ['operator', 'accountant', 'admin', 'owner'] as const
@@ -2102,7 +2100,6 @@ function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
       </div>
       <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.75rem' }}>
         Зміни набудуть чинності після наступного входу в систему.
-        Розділ «Система» (користувачі, налаштування) доступний лише адміністратору.
       </p>
     </section>
   )
