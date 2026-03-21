@@ -12,3 +12,4 @@ __pycache__/
 Bakery-Setup.ps1
 Bakery-Setup.bat
 bakery.db.bak-*
+DEV.md
