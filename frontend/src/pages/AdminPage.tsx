@@ -1065,9 +1065,11 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
   const [form,    setForm]    = useState<CategoryFormState>(emptyCategoryForm())
   const [saving,  setSaving]  = useState(false)
   const [newName, setNewName] = useState('')
+  const [error,   setError]   = useState<string | null>(null)
 
   const openEdit = (c: Category) => {
     setEditing(c)
+    setError(null)
     setForm({ name: c.name, is_baked: !!c.is_baked, reserve_pct: String(c.reserve_pct), sort_order: String(c.sort_order) })
     setModal(true)
   }
@@ -1076,15 +1078,20 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
     e.preventDefault()
     if (!editing) return
     setSaving(true)
+    setError(null)
     try {
       await api.put(`/categories/${editing.id}`, {
-        name:       form.name,
-        is_baked:   form.is_baked ? 1 : 0,
+        name:        form.name,
+        is_baked:    form.is_baked ? 1 : 0,
         reserve_pct: Number(form.reserve_pct),
-        sort_order: Number(form.sort_order),
+        sort_order:  Number(form.sort_order),
       })
       onReload()
       setModal(false)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const detail = msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg
+      setError(detail)
     } finally { setSaving(false) }
   }
 
@@ -1092,8 +1099,16 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
     const name = newName.trim()
     if (!name) return
     setSaving(true)
-    try { await api.post('/categories', null, `name=${encodeURIComponent(name)}`); setNewName(''); onReload() }
-    finally { setSaving(false) }
+    setError(null)
+    try {
+      await api.post('/categories', null, `name=${encodeURIComponent(name)}`)
+      setNewName('')
+      onReload()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const detail = msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg
+      setError(detail)
+    } finally { setSaving(false) }
   }
 
   const handleToggle = async (c: Category) => {
@@ -1107,12 +1122,13 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
   return (
     <section>
       <strong>Категорії (відділи) — {categories.filter((c) => c.is_active).length} активних</strong>
-      <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0' }}>
-        <input value={newName} onChange={(e) => setNewName(e.target.value)}
+      <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0', flexWrap: 'wrap' }}>
+        <input value={newName} onChange={(e) => { setNewName(e.target.value); setError(null) }}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="напр. Хліб, Булки, Магазин"
           style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1, maxWidth: '260px' }} />
         <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>+ Додати категорію</button>
+        {error && !modal && <span style={{ color: '#c00', fontSize: '0.85rem', alignSelf: 'center' }}>⚠ {error}</span>}
       </div>
       <table style={tableStyle}>
         <thead>
@@ -1165,6 +1181,7 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
               <input type="number" step="1" value={form.sort_order}
                 onChange={(e) => setForm({ ...form, sort_order: e.target.value })} />
             </div>
+            {error && <div style={{ color: '#c00', fontSize: '0.85rem', marginBottom: '0.5rem' }}>⚠ {error}</div>}
             <div className={formStyles.actions}>
               <button type="button" onClick={() => setModal(false)} className={formStyles.btnSecondary}>Скасувати</button>
               <button type="submit" disabled={saving} className={formStyles.btnPrimary}>{saving ? 'Збереження...' : 'Зберегти'}</button>
