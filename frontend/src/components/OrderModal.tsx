@@ -85,7 +85,8 @@ export default function OrderModal({ client, workDate, products, categories, ord
   const getExQty = (productId: number): number =>
     orders.find(o => o.client_id === client.id && o.product_id === productId && o.parent_order_id == null)?.exchange_qty ?? 0
 
-  const activeProducts = products.filter(p => p.is_active)
+  const bakedCategoryIds = new Set(categories.filter(c => c.is_baked).map(c => c.id))
+  const activeProducts = products.filter(p => p.is_active && bakedCategoryIds.has(p.category_id!))
   const filtered = filter === 'all' ? activeProducts : activeProducts.filter(p => p.category_id === filter)
   const displayed = [...filtered].sort((a, b) => {
     if (sortBy === 'freq') {
@@ -152,7 +153,7 @@ export default function OrderModal({ client, workDate, products, categories, ord
               onClick={() => setFilter('all')}
             >Всі</button>
             {[...categories]
-              .filter(c => c.is_active)
+              .filter(c => c.is_active && c.is_baked)
               .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
               .map(c => (
                 <button
