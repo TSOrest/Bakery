@@ -25,17 +25,6 @@ function AppRoutes() {
 
   if (!user) return <LoginPage />
 
-  // Власник бачить тільки дашборд (без основного лейауту і меню)
-  if (user.role === 'owner') {
-    return (
-      <BrowserRouter>
-        <Routes>
-          <Route path="*" element={<OwnerDashboard />} />
-        </Routes>
-      </BrowserRouter>
-    )
-  }
-
   return (
     <DateProvider>
       <BrowserRouter>
