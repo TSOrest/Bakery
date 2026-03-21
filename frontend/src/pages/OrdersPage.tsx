@@ -577,12 +577,18 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const exQty   = order.exchange_qty ?? 0
                 const total   = order.qty + exQty
                 const sum     = price != null ? order.qty * price : null
-                const isSel    = order.client_id === selectedClientId
-                const isPending = order.source === 'bot' && order.bot_status === 'pending'
+                const isSel      = order.client_id === selectedClientId
+                const isPending  = order.source === 'bot' && order.bot_status === 'pending'
+                const isRejected = order.source === 'bot' && order.bot_status === 'rejected'
                 return (
                   <tr
                     key={order.id}
-                    className={`${styles.orderRow} ${isSel ? styles.orderRowSel : ''} ${isPending ? styles.orderRowPending : ''}`}
+                    className={[
+                      styles.orderRow,
+                      isSel      ? styles.orderRowSel     : '',
+                      isPending  ? styles.orderRowPending  : '',
+                      isRejected ? styles.orderRowRejected : '',
+                    ].join(' ')}
                   >
                     {showRouteCol  && <td className={styles.tdRoute}>{route?.name ?? '—'}</td>}
                     {showClientCol && (

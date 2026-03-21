@@ -489,7 +489,15 @@
 }
 .botBtnModifyWide:hover { background: #ffc107; }
 
-.orderRowPending { opacity: 0.5; }
+/* Бот-замовлення: очікує підтвердження — жовтий фон */
+.orderRowPending { background: #fffbe6 !important; }
+.orderRowPending:hover { background: #fff3c0 !important; }
+.orderRowPending td { color: #7a5c00; }
+
+/* Бот-замовлення: відхилено — сірий текст, disabled-вигляд */
+.orderRowRejected { background: #f8f8f8 !important; }
+.orderRowRejected:hover { background: #f2f2f2 !important; }
+.orderRowRejected td { color: #bbb !important; }
 
 /* ─── Bot order status ───────────────────────────────────────────────────── */
 
