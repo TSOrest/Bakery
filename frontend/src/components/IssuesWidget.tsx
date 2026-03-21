@@ -75,13 +75,13 @@ function Avatar({ name, color, src }: { name: string; color: string; src?: strin
 
 // ─── Один коментар у стилі GitHub ─────────────────────────────────────────────
 function CommentCard({
-  body, createdAt, isAuthor,
-}: { body: string; createdAt: string; isAuthor: boolean }) {
+  body, createdAt, isAuthor, authorName,
+}: { body: string; createdAt: string; isAuthor: boolean; authorName?: string }) {
   return (
     <div className={`${styles.commentCard} ${isAuthor ? styles.commentCardAuthor : styles.commentCardDev}`}>
       <div className={styles.commentHeader}>
         <strong className={styles.commentAuthorName}>
-          {isAuthor ? 'Ви' : 'Розробник'}
+          {isAuthor ? 'Ви' : (authorName ?? 'Розробник')}
         </strong>
         {!isAuthor && <span className={styles.devBadge}>Розробник</span>}
         <span className={styles.commentTime} title={absDate(createdAt)}>
@@ -98,7 +98,7 @@ function CommentCard({
 // ─── Розгорнуте обговорення ────────────────────────────────────────────────────
 const OWNER_LOGIN = 'TSOrest'  // GitHub login розробника
 
-function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }) {
+function IssueThread({ issue, onReload, clientAvatarUrl }: { issue: Issue; onReload: () => void; clientAvatarUrl?: string }) {
   const [comments,   setComments]   = useState<IssueComment[]>([])
   const [loading,    setLoading]    = useState(false)
   const [replyText,  setReplyText]  = useState('')
@@ -203,26 +203,30 @@ function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }
 
       {/* Тіло звернення */}
       <div className={styles.timelineItem}>
-        <Avatar name="В" color="#0969da" />
+        <Avatar name="В" color="#0969da" src={clientAvatarUrl} />
         <CommentCard body={issue.body || '—'} createdAt={issue.created_at} isAuthor={true} />
       </div>
 
       {/* Коментарі */}
       {loading && <p className={styles.loadingHint}>Завантаження відповідей...</p>}
-      {comments.map(c => (
+      {comments.map(c => {
+        const isDev = c.author === OWNER_LOGIN
+        return (
         <div key={c.id} className={styles.timelineItem}>
           <Avatar
-            name={c.author === OWNER_LOGIN ? 'Розробник' : c.author}
-            color={c.author === OWNER_LOGIN ? '#6e40c9' : '#0969da'}
-            src={c.author_avatar}
+            name={isDev ? c.author : c.author}
+            color={isDev ? '#6e40c9' : '#0969da'}
+            src={isDev ? c.author_avatar : (c.author_avatar || clientAvatarUrl)}
           />
           <CommentCard
             body={c.body}
             createdAt={c.created_at}
-            isAuthor={c.author !== OWNER_LOGIN}
+            authorName={isDev ? c.author : undefined}
+            isAuthor={!isDev}
           />
         </div>
-      ))}
+        )
+      })}
 
       {/* Закрито-банер */}
       {issue.state === 'closed' && (
@@ -405,7 +409,7 @@ export default function IssuesWidget() {
             {/* Обговорення конкретного issue */}
             {activeIssue && (
               <div className={styles.threadScroll}>
-                <IssueThread issue={activeIssue} onReload={loadIssues} />
+                <IssueThread issue={activeIssue} onReload={loadIssues} clientAvatarUrl={ghStatus?.avatar_url} />
               </div>
             )}
 
