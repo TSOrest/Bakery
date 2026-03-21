@@ -13,3 +13,4 @@ Bakery-Setup.ps1
 Bakery-Setup.bat
 bakery.db.bak-*
 DEV.md
+scripts/create-installer.ps1
