@@ -71,6 +71,7 @@ function StatRow({ label, value, sub, color }: { label: string; value: string; s
 
 export default function OwnerDashboard() {
   const { user, logout } = useAuth()
+  const isStandalone = user?.role === 'owner'   // власник — без Layout
   const [data, setData]       = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -96,9 +97,19 @@ export default function OwnerDashboard() {
     return () => clearInterval(id)
   }, [load])
 
-  if (loading) return <div className={styles.center}>Завантаження...</div>
-  if (error)   return <div className={styles.center} style={{ color: '#e74c3c' }}>{error}</div>
-  if (!data)   return null
+  if (loading) return (
+    <div className={isStandalone ? styles.center : undefined}
+         style={isStandalone ? undefined : { padding: '2rem', color: '#888' }}>
+      Завантаження...
+    </div>
+  )
+  if (error) return (
+    <div className={isStandalone ? styles.center : undefined}
+         style={{ color: '#e74c3c', ...(isStandalone ? {} : { padding: '2rem' }) }}>
+      {error}
+    </div>
+  )
+  if (!data) return null
 
   const { finance, orders, baking, top_debtors, margin } = data
 
@@ -106,21 +117,35 @@ export default function OwnerDashboard() {
   const bakingOk = baking.fulfillment_pct >= 95
 
   return (
-    <div className={styles.root}>
-      {/* Заголовок */}
-      <div className={styles.header}>
-        <h1 className={styles.headerTitle}>Пекарня</h1>
-        <div className={styles.headerMeta}>
-          <span>{data.date}</span>
-          <span>↻ {lastUpdate}</span>
-          <button onClick={load} className={styles.refreshBtn}>Оновити</button>
-          {user && (
-            <button onClick={logout} className={styles.refreshBtn} style={{ opacity: 0.7 }}>
-              Вийти
-            </button>
-          )}
+    <div className={isStandalone ? styles.root : styles.embedded}>
+      {/* Хедер — лише у standalone-режимі (власник) */}
+      {isStandalone && (
+        <div className={styles.header}>
+          <h1 className={styles.headerTitle}>Пекарня</h1>
+          <div className={styles.headerMeta}>
+            <span>{data.date}</span>
+            <span>↻ {lastUpdate}</span>
+            <button onClick={load} className={styles.refreshBtn}>Оновити</button>
+            {user && (
+              <button onClick={logout} className={styles.refreshBtn} style={{ opacity: 0.7 }}>
+                Вийти
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Маленька панель оновлення у вбудованому режимі */}
+      {!isStandalone && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          {lastUpdate && <span style={{ fontSize: '0.78rem', color: '#aaa' }}>↻ {lastUpdate}</span>}
+          <button onClick={load} style={{
+            background: '#f1f5f9', border: '1px solid #d0d7de',
+            borderRadius: 5, padding: '3px 10px', fontSize: '0.8rem',
+            cursor: 'pointer', color: '#555',
+          }}>Оновити</button>
+        </div>
+      )}
 
       <div className={styles.grid}>
 

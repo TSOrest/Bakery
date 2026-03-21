@@ -4,6 +4,14 @@
   font-family: system-ui, sans-serif;
 }
 
+/* Вбудований режим — всередині Layout (не owner) */
+.embedded {
+  background: #f0f4f8;
+  font-family: system-ui, sans-serif;
+  padding: 1rem 1.25rem 1.5rem;
+  min-height: calc(100vh - 80px);
+}
+
 /* ── Шапка ── */
 .header {
   background: #1a3a5c;

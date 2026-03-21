@@ -41,22 +41,16 @@ function AppRoutes() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Layout />}>
-            {/* Дашборд — головна сторінка для всіх ролей */}
+            {/* Дашборд — головна сторінка */}
             <Route index element={<OwnerDashboard />} />
             <Route path="dashboard" element={<OwnerDashboard />} />
-            <Route path="orders"   element={<OrdersPage />} />
-            <Route path="baking"   element={<BakingPage />} />
-            <Route path="routes"   element={<RoutesPage />} />
-            <Route path="shop"     element={<ShopPage />} />
-            {(user.role === 'accountant' || user.role === 'admin') && (
-              <Route path="finances" element={<FinancesPage />} />
-            )}
-            {user.role === 'admin' && (
-              <Route path="admin"      element={<AdminPage />} />
-            )}
-            {user.role === 'admin' && (
-              <Route path="db-editor" element={<DbEditorPage />} />
-            )}
+            <Route path="orders"    element={<OrdersPage />} />
+            <Route path="baking"    element={<BakingPage />} />
+            <Route path="routes"    element={<RoutesPage />} />
+            <Route path="shop"      element={<ShopPage />} />
+            <Route path="finances"  element={<FinancesPage />} />
+            <Route path="admin"     element={<AdminPage />} />
+            <Route path="db-editor" element={<DbEditorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

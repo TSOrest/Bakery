@@ -1969,11 +1969,12 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
 
 // Основні вкладки (не Довідники)
 const MAIN_PAGE_PERMS = [
-  { key: 'orders',   label: 'Замовлення' },
-  { key: 'baking',   label: 'Випічка' },
-  { key: 'routes',   label: 'Маршрути' },
-  { key: 'shop',     label: 'Магазин' },
-  { key: 'finances', label: 'Фінанси' },
+  { key: 'dashboard', label: 'Дашборд' },
+  { key: 'orders',    label: 'Замовлення' },
+  { key: 'baking',    label: 'Випічка' },
+  { key: 'routes',    label: 'Маршрути' },
+  { key: 'shop',      label: 'Магазин' },
+  { key: 'finances',  label: 'Фінанси' },
 ]
 
 // Підрозділи Довідників (всі конфігуруються)
