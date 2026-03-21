@@ -73,6 +73,7 @@ export interface Order {
   delivered_qty: number | null
   bot_status: 'pending' | 'confirmed' | 'rejected' | 'modified' | null
   bot_rejection_reason: string | null
+  bot_original_qty: number | null
 }
 
 export interface BotPendingOrder {

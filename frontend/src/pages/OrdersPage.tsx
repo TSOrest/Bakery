@@ -600,24 +600,25 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                     <td className={styles.tdSum}>
                       {sum != null ? fmt(sum) : '—'}
                     </td>
-                    <td className={styles.tdSrc} title={
-                      order.source === 'bot'
-                        ? order.bot_status === 'pending'   ? 'Бот — очікує підтвердження'
-                        : order.bot_status === 'confirmed' ? 'Бот — підтверджено'
-                        : order.bot_status === 'modified'  ? 'Бот — підтверджено зі змінами'
-                        : order.bot_status === 'rejected'  ? 'Бот — відхилено'
-                        : 'Бот'
-                        : order.source === 'paper' ? 'Паперове замовлення'
-                        : 'Оператор'
-                    }>
-                      {order.source === 'bot'
-                        ? order.bot_status === 'pending'   ? '🤖⏳'
-                        : order.bot_status === 'confirmed' ? '🤖✅'
-                        : order.bot_status === 'modified'  ? '🤖✏️'
-                        : order.bot_status === 'rejected'  ? '🤖❌'
-                        : '🤖'
-                        : order.source === 'paper' ? '📄'
-                        : null}
+                    <td className={styles.tdSrc} title={(() => {
+                      if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
+                      const lines: string[] = []
+                      if (order.bot_status === 'pending')   lines.push('Очікує підтвердження оператора')
+                      if (order.bot_status === 'confirmed') lines.push('Підтверджено оператором')
+                      if (order.bot_status === 'modified')  lines.push(`Змінено оператором\nБуло: ${order.bot_original_qty ?? '?'} шт → стало: ${order.qty} шт`)
+                      if (order.bot_status === 'rejected')  lines.push('Відхилено оператором')
+                      if (order.bot_rejection_reason)       lines.push(`Примітка: ${order.bot_rejection_reason}`)
+                      return lines.join('\n') || 'Бот'
+                    })()}>
+                      {order.source === 'bot' ? (
+                        <span style={{ display: 'inline-flex', gap: '0.1rem' }}>
+                          <span>🤖</span>
+                          {order.bot_status === 'pending'   && <span>⏳</span>}
+                          {order.bot_status === 'confirmed' && <span>✅</span>}
+                          {order.bot_status === 'modified'  && <span>✏️</span>}
+                          {order.bot_status === 'rejected'  && <span>❌</span>}
+                        </span>
+                      ) : order.source === 'paper' ? '📄' : null}
                     </td>
                   </tr>
                 )

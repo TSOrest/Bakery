@@ -28,6 +28,8 @@ class Order(Base):
     delivered_qty        = Column(Float, nullable=True)
     bot_status           = Column(Text, nullable=True)   # pending|confirmed|rejected|modified
     bot_rejection_reason = Column(Text, nullable=True)
+    bot_original_qty     = Column(Float, nullable=True)  # кількість до модифікації оператором
+    placed_by_chat_id    = Column(Text, nullable=True)   # chat_id користувача який подав через бота
 
     client   = relationship("Client")
     product  = relationship("Product")

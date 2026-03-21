@@ -163,6 +163,7 @@ def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db
         if req.new_qty is None or req.new_qty <= 0:
             raise HTTPException(400, "Потрібно вказати new_qty > 0")
         old_qty = order.qty
+        order.bot_original_qty = old_qty
         order.qty = req.new_qty
         order.bot_status = "modified"
         order.bot_rejection_reason = req.reason or ""

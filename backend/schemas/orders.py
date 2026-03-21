@@ -71,3 +71,6 @@ class OrderOut(BaseModel):
     created_at: Optional[str]
     parent_order_id: Optional[int]
     delivered_qty: Optional[float]
+    bot_status: Optional[str]
+    bot_rejection_reason: Optional[str]
+    bot_original_qty: Optional[float]
