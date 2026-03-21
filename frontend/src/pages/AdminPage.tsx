@@ -12,8 +12,13 @@ import {
   fetchMarginReport, recalculateAllCosts,
 } from '../api/ingredients'
 
-// Тип вкладки довідника
-type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'ingredients' | 'margin' | 'units' | 'categories' | 'users' | 'settings' | 'permissions'
+// Тип вкладки
+type Tab =
+  | 'products' | 'categories' | 'units'
+  | 'clients'  | 'routes'
+  | 'prices'   | 'ingredients' | 'margin'
+  | 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
+  | 'users' | 'permissions'
 
 interface TabGroup {
   label: string
@@ -21,7 +26,6 @@ interface TabGroup {
   tabs: { key: Tab; label: string }[]
 }
 
-// Ключ null = розділ системи, доступний лише admin-ролі
 export const ADMIN_TAB_GROUPS: TabGroup[] = [
   {
     label: 'Виробництво',
@@ -50,12 +54,21 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
     ],
   },
   {
+    label: 'Організація',
+    permKey: 'admin_org',
+    tabs: [
+      { key: 'settings_bakery',  label: 'Параметри пекарні' },
+      { key: 'settings_bot',     label: 'Telegram Бот' },
+      { key: 'settings_bot_tpl', label: 'Шаблони повідомлень' },
+      { key: 'settings_issues',  label: 'Система звернень' },
+    ],
+  },
+  {
     label: 'Система',
     permKey: 'admin_system',
     tabs: [
       { key: 'users',       label: 'Користувачі' },
       { key: 'permissions', label: 'Права ролей' },
-      { key: 'settings',    label: 'Налаштування' },
     ],
   },
 ]
@@ -101,80 +114,86 @@ export default function AdminPage() {
   const reloadCategories = () => api.get<Category[]>('/categories?active_only=false').then(setCategories)
 
   return (
-    <div style={{ padding: '1.5rem' }}>
-      <h2 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Довідники</h2>
+    <div style={{ padding: '1.5rem', display: 'flex', gap: 0, minHeight: 'calc(100vh - 80px)' }}>
 
-      {/* Згруповані вкладки */}
-      <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-end', borderBottom: '1px solid #e0e0e0', paddingBottom: '0.75rem' }}>
+      {/* ── Вертикальний сайдбар ────────────────────────────────────────────── */}
+      <nav style={{
+        width: 210, flexShrink: 0,
+        borderRight: '1px solid #e2e8f0',
+        paddingRight: '0.75rem',
+        marginRight: '1.75rem',
+        paddingTop: '0.25rem',
+      }}>
         {visibleGroups.map(group => (
-          <div key={group.label}>
-            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>
+          <div key={group.label} style={{ marginBottom: '1.1rem' }}>
+            <div style={{
+              fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase',
+              letterSpacing: '0.09em', color: '#b0bec5',
+              padding: '0 0.5rem', marginBottom: '0.25rem',
+              userSelect: 'none',
+            }}>
               {group.label}
             </div>
-            <div style={{ display: 'flex', gap: '0.3rem' }}>
-              {group.tabs.map(t => (
+            {group.tabs.map(t => {
+              const isActive = activeTab === t.key
+              return (
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
                   style={{
-                    padding: '0.35rem 0.85rem',
-                    borderRadius: '4px',
-                    border: '1px solid',
-                    borderColor: activeTab === t.key ? '#1a3a5c' : '#d0d7de',
-                    background: activeTab === t.key ? '#1a3a5c' : '#fff',
-                    color: activeTab === t.key ? '#fff' : '#444',
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '0.38rem 0.65rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: isActive ? '#1a3a5c' : 'transparent',
+                    color: isActive ? '#fff' : '#374151',
                     cursor: 'pointer',
-                    fontWeight: activeTab === t.key ? 600 : 400,
                     fontSize: '0.875rem',
-                    transition: 'background 0.12s, border-color 0.12s',
+                    fontWeight: isActive ? 600 : 400,
+                    marginBottom: '0.1rem',
+                    transition: 'background 0.1s, color 0.1s',
                   }}
+                  onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = '#f1f5f9' }}
+                  onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
                   {t.label}
                 </button>
-              ))}
-            </div>
+              )
+            })}
           </div>
         ))}
-      </div>
+      </nav>
 
-      {activeTab === 'products' && (
-        <ProductsTab
-          products={products}
-          units={units}
-          categories={categories}
-          onReload={reloadProducts}
-        />
-      )}
-      {activeTab === 'clients' && (
-        <ClientsTab routes={routes} />
-      )}
-      {activeTab === 'routes' && (
-        <RoutesTab routes={routes} onReload={reloadRoutes} />
-      )}
-      {activeTab === 'prices' && (
-        <PricesTab products={products} clients={clients} />
-      )}
-      {activeTab === 'units' && (
-        <SimpleListTab
-          title="Одиниці виміру"
-          items={units}
-          addLabel="+ Додати одиницю"
-          placeholder="напр. буханка, шт, кг"
-          onAdd={(name) => api.post('/units', null, `name=${encodeURIComponent(name)}`).then(reloadUnits)}
-          onUpdate={(id, patch) => api.put(`/units/${id}`, patch).then(reloadUnits)}
-        />
-      )}
-      {activeTab === 'categories' && (
-        <CategoriesTab
-          categories={categories}
-          onReload={reloadCategories}
-        />
-      )}
-      {activeTab === 'ingredients' && <IngredientsTab units={units} products={products} />}
-      {activeTab === 'margin'      && <MarginTab products={products} />}
-      {activeTab === 'users'       && <UsersTab />}
-      {activeTab === 'settings'    && <SettingsTab />}
-      {activeTab === 'permissions' && <RolePermissionsTab onSaved={reloadPermissions} />}
+      {/* ── Контент ─────────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {activeTab === 'products' && (
+          <ProductsTab products={products} units={units} categories={categories} onReload={reloadProducts} />
+        )}
+        {activeTab === 'clients'     && <ClientsTab routes={routes} />}
+        {activeTab === 'routes'      && <RoutesTab routes={routes} onReload={reloadRoutes} />}
+        {activeTab === 'prices'      && <PricesTab products={products} clients={clients} />}
+        {activeTab === 'units'       && (
+          <SimpleListTab
+            title="Одиниці виміру"
+            items={units}
+            addLabel="+ Додати одиницю"
+            placeholder="напр. буханка, шт, кг"
+            onAdd={(name) => api.post('/units', null, `name=${encodeURIComponent(name)}`).then(reloadUnits)}
+            onUpdate={(id, patch) => api.put(`/units/${id}`, patch).then(reloadUnits)}
+          />
+        )}
+        {activeTab === 'categories'  && <CategoriesTab categories={categories} onReload={reloadCategories} />}
+        {activeTab === 'ingredients' && <IngredientsTab units={units} products={products} />}
+        {activeTab === 'margin'      && <MarginTab products={products} />}
+        {activeTab === 'users'       && <UsersTab />}
+        {activeTab === 'permissions' && <RolePermissionsTab onSaved={reloadPermissions} />}
+        {(activeTab === 'settings_bakery'  ||
+          activeTab === 'settings_bot'     ||
+          activeTab === 'settings_bot_tpl' ||
+          activeTab === 'settings_issues') && (
+          <SettingsTab section={activeTab} />
+        )}
+      </div>
     </div>
   )
 }
@@ -1439,7 +1458,9 @@ const SETTINGS_LABELS: Record<string, string> = {
   order_lock_time:   'Час блокування замовлень',
 }
 
-function SettingsTab() {
+type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
+
+function SettingsTab({ section }: { section: SettingsSection }) {
   const [settings, setSettings] = useState<SettingsMap>({})
   const [form,     setForm]     = useState<Record<string, string>>({})
   const [saving,   setSaving]   = useState(false)
@@ -1538,148 +1559,153 @@ function SettingsTab() {
   return (
     <section>
       {/* ── Параметри пекарні ── */}
-      <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Параметри пекарні</h3>
-      <form onSubmit={handleSave}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 2rem', maxWidth: '860px' }}>
-          {Object.entries(SETTINGS_LABELS).map(([key, label]) => (
-            <div key={key} style={fieldStyle}>
-              <label style={labelStyle}>{label}</label>
-              <input
-                style={inputStyle}
-                value={form[key] ?? ''}
-                onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-              />
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
-          <button type="submit" disabled={saving} style={addBtnStyle}>
-            {saving ? 'Збереження...' : 'Зберегти'}
-          </button>
-          {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
-        </div>
-      </form>
-
-      {/* ── Telegram-бот ── */}
-      <p style={sectionHead}>Telegram-бот</p>
-
-      <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
-
-        {/* Статус */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <span style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: tgRunning ? '#27ae60' : '#e74c3c', display: 'inline-block',
-          }} />
-          <span style={{ fontWeight: 600 }}>{tgRunning ? 'Бот запущено' : 'Бот зупинено'}</span>
-          {tgRunning && (
-            <button onClick={stopBot} style={{ ...delBtnStyle, marginLeft: 'auto' }}>Зупинити</button>
-          )}
-        </div>
-
-        {/* Токен */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Bot Token (від @BotFather)</label>
-          <div style={{ display: 'flex', gap: 6, maxWidth: 420 }}>
-            <input
-              type={showToken ? 'text' : 'password'}
-              style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
-              value={tgToken}
-              onChange={e => setTgToken(e.target.value)}
-              placeholder="1234567890:AAF..."
-            />
-            <button type="button" onClick={() => setShowToken(v => !v)}
-              style={{ ...editBtnStyle, whiteSpace: 'nowrap' }}>
-              {showToken ? 'Сховати' : 'Показати'}
+      {section === 'settings_bakery' && <>
+        <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Параметри пекарні</h3>
+        <form onSubmit={handleSave}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 2rem', maxWidth: '860px' }}>
+            {Object.entries(SETTINGS_LABELS).map(([key, label]) => (
+              <div key={key} style={fieldStyle}>
+                <label style={labelStyle}>{label}</label>
+                <input
+                  style={inputStyle}
+                  value={form[key] ?? ''}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
+            <button type="submit" disabled={saving} style={addBtnStyle}>
+              {saving ? 'Збереження...' : 'Зберегти'}
             </button>
+            {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
           </div>
-        </div>
+        </form>
+      </>}
 
-        {/* Дозволені телефони */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Дозволені номери телефонів</label>
-          <textarea
-            style={{ ...inputStyle, maxWidth: 'none', width: '100%', height: 70, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }}
-            value={tgPhones}
-            onChange={e => setTgPhones(e.target.value)}
-            placeholder="+380501234567, +380671234567"
-          />
-          <span style={{ fontSize: 12, color: '#888' }}>Через кому. Формат: +380XXXXXXXXX</span>
-        </div>
+      {/* ── Telegram Бот ── */}
+      {section === 'settings_bot' && <>
+        <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Telegram Бот</h3>
+        <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button onClick={saveTgSettings} disabled={tgSaving} style={addBtnStyle}>
-            {tgSaving ? 'Збереження...' : 'Зберегти і перезапустити'}
-          </button>
-          {tgMsg && (
-            <span style={{ fontSize: 13, color: tgMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
-              {tgMsg}
-            </span>
-          )}
-        </div>
+          {/* Статус */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: tgRunning ? '#27ae60' : '#e74c3c', display: 'inline-block',
+            }} />
+            <span style={{ fontWeight: 600 }}>{tgRunning ? 'Бот запущено' : 'Бот зупинено'}</span>
+            {tgRunning && (
+              <button onClick={stopBot} style={{ ...delBtnStyle, marginLeft: 'auto' }}>Зупинити</button>
+            )}
+          </div>
 
-        {/* Авторизовані користувачі */}
-        {tgChats.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ ...sectionHead, margin: '0 0 8px' }}>Авторизовані користувачі</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: '#e8eef5' }}>
-                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Chat ID</th>
-                  <th style={{ padding: '5px 8px', textAlign: 'left' }}>Телефон</th>
-                  <th style={{ width: 60 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {tgChats.map(c => (
-                  <tr key={c.chat_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>{c.chat_id}</td>
-                    <td style={{ padding: '5px 8px' }}>{c.phone}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                      <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
-                        title="Відкликати доступ">✕</button>
-                    </td>
+          {/* Токен */}
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Bot Token (від @BotFather)</label>
+            <div style={{ display: 'flex', gap: 6, maxWidth: 420 }}>
+              <input
+                type={showToken ? 'text' : 'password'}
+                style={{ ...inputStyle, flex: 1, maxWidth: 'none' }}
+                value={tgToken}
+                onChange={e => setTgToken(e.target.value)}
+                placeholder="1234567890:AAF..."
+              />
+              <button type="button" onClick={() => setShowToken(v => !v)}
+                style={{ ...editBtnStyle, whiteSpace: 'nowrap' }}>
+                {showToken ? 'Сховати' : 'Показати'}
+              </button>
+            </div>
+          </div>
+
+          {/* Дозволені телефони */}
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Дозволені номери телефонів</label>
+            <textarea
+              style={{ ...inputStyle, maxWidth: 'none', width: '100%', height: 70, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.85rem' }}
+              value={tgPhones}
+              onChange={e => setTgPhones(e.target.value)}
+              placeholder="+380501234567, +380671234567"
+            />
+            <span style={{ fontSize: 12, color: '#888' }}>Через кому. Формат: +380XXXXXXXXX</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={saveTgSettings} disabled={tgSaving} style={addBtnStyle}>
+              {tgSaving ? 'Збереження...' : 'Зберегти і перезапустити'}
+            </button>
+            {tgMsg && (
+              <span style={{ fontSize: 13, color: tgMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
+                {tgMsg}
+              </span>
+            )}
+          </div>
+
+          {/* Авторизовані користувачі */}
+          {tgChats.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ ...sectionHead, margin: '0 0 8px' }}>Авторизовані користувачі</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#e8eef5' }}>
+                    <th style={{ padding: '5px 8px', textAlign: 'left' }}>Chat ID</th>
+                    <th style={{ padding: '5px 8px', textAlign: 'left' }}>Телефон</th>
+                    <th style={{ width: 60 }}></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {tgChats.map(c => (
+                    <tr key={c.chat_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>{c.chat_id}</td>
+                      <td style={{ padding: '5px 8px' }}>{c.phone}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                        <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
+                          title="Відкликати доступ">✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-        {/* Інструкція */}
-        <details style={{ marginTop: 14, fontSize: 13, color: '#555' }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Як налаштувати бота</summary>
-          <ol style={{ marginTop: 8, paddingLeft: 18, lineHeight: 1.7 }}>
-            <li>Напишіть <code>@BotFather</code> в Telegram → <code>/newbot</code></li>
-            <li>Введіть назву та username бота (напр. <code>MyBakeryBot</code>)</li>
-            <li>Скопіюйте токен у поле вище</li>
-            <li>Додайте свій номер телефону в список дозволених</li>
-            <li>Натисніть "Зберегти і перезапустити"</li>
-            <li>Знайдіть бота в Telegram → <code>/start</code> → поділіться номером</li>
-          </ol>
-        </details>
-      </div>
+          {/* Інструкція */}
+          <details style={{ marginTop: 14, fontSize: 13, color: '#555' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Як налаштувати бота</summary>
+            <ol style={{ marginTop: 8, paddingLeft: 18, lineHeight: 1.7 }}>
+              <li>Напишіть <code>@BotFather</code> в Telegram → <code>/newbot</code></li>
+              <li>Введіть назву та username бота (напр. <code>MyBakeryBot</code>)</li>
+              <li>Скопіюйте токен у поле вище</li>
+              <li>Додайте свій номер телефону в список дозволених</li>
+              <li>Натисніть "Зберегти і перезапустити"</li>
+              <li>Знайдіть бота в Telegram → <code>/start</code> → поділіться номером</li>
+            </ol>
+          </details>
+        </div>
+      </>}
 
       {/* ── Шаблони повідомлень бота ── */}
-      <BotTemplatesSection
-        settings={settings}
-        onReload={load}
-        inputStyle={inputStyle}
-        fieldStyle={fieldStyle}
-        labelStyle={labelStyle}
-        addBtnStyle={addBtnStyle}
-        sectionHead={sectionHead}
-      />
+      {section === 'settings_bot_tpl' && (
+        <BotTemplatesSection
+          settings={settings}
+          onReload={load}
+          inputStyle={inputStyle}
+          fieldStyle={fieldStyle}
+          labelStyle={labelStyle}
+          addBtnStyle={addBtnStyle}
+        />
+      )}
 
       {/* ── Система звернень ── */}
-      <IssuesSettingsSection
-        settings={settings}
-        inputStyle={inputStyle}
-        fieldStyle={fieldStyle}
-        labelStyle={labelStyle}
-        addBtnStyle={addBtnStyle}
-        sectionHead={sectionHead}
-      />
+      {section === 'settings_issues' && (
+        <IssuesSettingsSection
+          settings={settings}
+          inputStyle={inputStyle}
+          fieldStyle={fieldStyle}
+          labelStyle={labelStyle}
+          addBtnStyle={addBtnStyle}
+        />
+      )}
     </section>
   )
 }
@@ -1694,14 +1720,13 @@ const BOT_TEMPLATES: { key: string; label: string; hint: string }[] = [
   { key: 'bot_tpl_modified',  label: 'Підтверджено зі змінами',          hint: 'Змінні: {product}, {qty}, {new_qty}, {date}, {sum}, {reason}' },
 ]
 
-function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {
+function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, labelStyle, addBtnStyle }: {
   settings: SettingsMap
   onReload: () => void
   inputStyle: React.CSSProperties
   fieldStyle: React.CSSProperties
   labelStyle: React.CSSProperties
   addBtnStyle: React.CSSProperties
-  sectionHead: React.CSSProperties
 }) {
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -1729,7 +1754,7 @@ function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, label
 
   return (
     <>
-      <p style={sectionHead}>Шаблони повідомлень бота</p>
+      <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Шаблони повідомлень бота</h3>
       <form onSubmit={handleSave} style={{ maxWidth: 640 }}>
         {BOT_TEMPLATES.map(({ key, label, hint }) => (
           <div key={key} style={fieldStyle}>
@@ -1757,13 +1782,12 @@ function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, label
 
 type FlowState = 'idle' | 'waiting' | 'authorized'
 
-function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, addBtnStyle, sectionHead }: {
+function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, addBtnStyle }: {
   settings:    SettingsMap
   inputStyle:  React.CSSProperties
   fieldStyle:  React.CSSProperties
   labelStyle:  React.CSSProperties
   addBtnStyle: React.CSSProperties
-  sectionHead: React.CSSProperties
 }) {
   const [repo,      setRepo]      = useState(settings['github_repo']?.value ?? 'TSOrest/Bakery')
   const [repoMsg,   setRepoMsg]   = useState('')
@@ -1849,7 +1873,7 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
 
   return (
     <>
-      <p style={sectionHead}>Система звернень (💬)</p>
+      <h3 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Система звернень</h3>
       <div style={{ maxWidth: 520, background: '#f8fafc', border: '1px solid #dde3ea', borderRadius: 8, padding: '1rem 1.25rem' }}>
 
         {/* Статус авторизації */}
