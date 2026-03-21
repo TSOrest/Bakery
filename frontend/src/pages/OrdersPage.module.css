@@ -497,7 +497,7 @@
 /* Бот-замовлення: відхилено — сірий текст, disabled-вигляд */
 .orderRowRejected { background: #f8f8f8 !important; }
 .orderRowRejected:hover { background: #f2f2f2 !important; }
-.orderRowRejected td { color: #bbb !important; }
+.orderRowRejected td { color: #ccc !important; font-size: 0.82rem; }
 
 /* ─── Bot order status ───────────────────────────────────────────────────── */
 

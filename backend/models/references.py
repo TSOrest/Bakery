@@ -114,6 +114,25 @@ class Client(Base):
     client_group         = Column(Text)                 # підгрупа в маршруті
     # customer=звичайний, shop=власний магазин, writeoff=списання, ration=пайок
     client_kind          = Column(Text, default='customer')
-    bot_chat_id          = Column(Text)                     # Telegram chat ID клієнта
+    bot_chat_id          = Column(Text)           # застаріле, залишено для сумісності
+    bot_phones           = Column(Text)           # телефони для авторизації в боті (через кому)
 
-    route = relationship("Route", back_populates="clients")
+    route     = relationship("Route", back_populates="clients")
+    bot_users = relationship("ClientBotUser", back_populates="client",
+                             cascade="all, delete-orphan")
+
+
+class ClientBotUser(Base):
+    """Авторизований користувач Telegram-бота для клієнта."""
+    __tablename__ = "client_bot_users"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    client_id     = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    chat_id       = Column(Text, nullable=False, unique=True)
+    phone         = Column(Text)
+    first_name    = Column(Text)
+    authorized_at = Column(Text)
+    is_active     = Column(Integer, default=1)
+
+    client = relationship("Client", back_populates="bot_users")
+

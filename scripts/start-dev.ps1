@@ -2,10 +2,8 @@ $ROOT = Split-Path -Parent $PSScriptRoot
 
 Write-Host '=== Bakery — Dev Mode ===' -ForegroundColor Magenta
 
-# Kill old uvicorn processes
-Get-CimInstance Win32_Process |
-    Where-Object { $_.Name -like 'python*' -and $_.CommandLine -like '*uvicorn*' } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+# Вбиваємо всі Python процеси (і venv, і системні — щоб не лишались зомбі від попередніх запусків)
+Get-Process -Name python, pythonw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # Kill Vite node processes
 Get-Process -Name node -ErrorAction SilentlyContinue |
@@ -15,7 +13,7 @@ Get-Process -Name node -ErrorAction SilentlyContinue |
     } |
     ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
 
-Start-Sleep -Seconds 1
+Start-Sleep -Seconds 2
 
 $python = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
 if (-not (Test-Path $python)) {

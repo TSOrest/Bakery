@@ -1,12 +1,21 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { useAuth } from '../context/AuthContext'
+import { api } from '../api/client'
 import styles from './Layout.module.css'
 import IssuesWidget from './IssuesWidget'
 
 export default function Layout() {
   const { workDate, setWorkDate } = useWorkDate()
   const { user, logout, permissions } = useAuth()
+  const [bakeryName, setBakeryName] = useState('Пекарня')
+
+  useEffect(() => {
+    api.get<Record<string, { value: string }>>('/settings/')
+      .then(s => { if (s.bakery_name?.value) setBakeryName(s.bakery_name.value) })
+      .catch(() => {})
+  }, [])
   const role = user?.role ?? 'operator'
 
   // Усі вкладки з ключем що відповідає role_permissions
@@ -36,7 +45,7 @@ export default function Layout() {
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <span className={styles.logo}>🍞 Пекарня</span>
+        <span className={styles.logo}>🍞 {bakeryName}</span>
         <nav className={styles.nav}>
           {visibleTabs.map((t) => (
             <NavLink

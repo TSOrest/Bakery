@@ -22,6 +22,16 @@
   margin-top: 1rem;
 }
 
+.printNotice {
+  margin: 0.5rem 0;
+  padding: 0.6rem 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 0.95rem;
+}
+
 /* ─── Секції ──────────────────────────────────────────────── */
 
 .section { margin-bottom: 2rem; }

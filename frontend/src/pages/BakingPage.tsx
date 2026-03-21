@@ -298,6 +298,7 @@ export default function BakingPage() {
   const [loading,      setLoading]      = useState(true)
   const [generating,   setGenerating]   = useState(false)
   const [showRec,      setShowRec]      = useState(false)  // показувати "Рекомендовано"
+  const [printNotice,  setPrintNotice]  = useState<string | null>(null)
 
   const bakedTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
   const [bakedMap,  setBakedMap]  = useState<Record<number, number>>({})
@@ -326,9 +327,26 @@ export default function BakingPage() {
 
   useEffect(() => { load(workDate) }, [workDate])
 
+  // ─── Перевірка непідтверджених bot-замовлень ──────────────────────────────
+
+  const checkPendingAndConfirm = async (): Promise<boolean> => {
+    try {
+      const pending = await api.get<{ id: number }[]>(`/bot/pending-orders?order_date=${workDate}`)
+      if (pending.length > 0) {
+        return window.confirm(
+          `⚠️ Є ${pending.length} непідтверджених замовлень через бота.\n\n` +
+          `Вони будуть проігноровані при формуванні/друку.\n\n` +
+          `Продовжити?`
+        )
+      }
+    } catch {}
+    return true
+  }
+
   // ─── Генерація ────────────────────────────────────────────────────────────
 
   const handleGenerate = async () => {
+    if (!(await checkPendingAndConfirm())) return
     setGenerating(true)
     await api.post(`/baking/tasks/generate?task_date=${workDate}`, {})
     await load(workDate)
@@ -406,13 +424,28 @@ export default function BakingPage() {
             </button>
             <button
               className={styles.btnPrint}
-              onClick={() => window.open(`/api/v1/print/baking?task_date=${workDate}`, '_blank')}
+              onClick={async () => {
+                if (!(await checkPendingAndConfirm())) return
+                const url = `/api/v1/print/baking?task_date=${workDate}`
+                const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bakery_token')}` } })
+                if (!res.ok) {
+                  const data = await res.json().catch(() => ({}))
+                  setPrintNotice(data.detail ?? 'Немає даних для друку')
+                  setTimeout(() => setPrintNotice(null), 4000)
+                } else {
+                  window.open(url, '_blank')
+                }
+              }}
             >
               🖨 Завдання пекарям
             </button>
           </>
         )}
       </div>
+
+      {printNotice && (
+        <div className={styles.printNotice}>⚠️ {printNotice}</div>
+      )}
 
       {tasks.length === 0 ? (
         <div className={styles.empty}>

@@ -57,7 +57,12 @@ def aggregate_for_baking(db: Session, date: str) -> List[dict]:
     from sqlalchemy import func
     rows = (
         db.query(Order.product_id, func.sum(Order.qty).label("total_qty"))
-        .filter(Order.order_date == date, Order.status.in_(["confirmed", "draft"]))
+        .filter(
+            Order.order_date == date,
+            Order.status.in_(["confirmed", "draft"]),
+            # Виключаємо bot-замовлення які ще не підтверджені оператором
+            ~((Order.source == "bot") & (Order.bot_status == "pending")),
+        )
         .group_by(Order.product_id)
         .all()
     )

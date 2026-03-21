@@ -385,6 +385,12 @@ def print_baking(task_date: str, product_type: Optional[str] = None, db: Session
         groups.setdefault(ptype, []).append(task)
 
     types_to_render = [product_type] if product_type in ("bread", "bun", "other") else ["bread", "bun", "other"]
+
+    # Якщо для вибраного типу нема жодного завдання — повертаємо 404
+    if product_type in ("bread", "bun", "other") and not groups.get(product_type):
+        label = TYPE_LABELS.get(product_type, product_type)
+        raise HTTPException(status_code=404, detail=f"Завдань на випічку ({label}) на {task_date} немає")
+
     groups_html = ""
     for ptype in types_to_render:
         group = groups.get(ptype, [])
