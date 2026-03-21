@@ -105,6 +105,8 @@ export default function OrdersPage() {
   const [broadcastMsg,      setBroadcastMsg]      = useState<string | null>(null)
   const [broadcastLoading,  setBroadcastLoading]  = useState(false)
   const [printNotice,       setPrintNotice]       = useState<string | null>(null)
+  const [printDropdownOpen, setPrintDropdownOpen] = useState(false)
+  const printDropdownRef = useRef<HTMLDivElement>(null)
 
   const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
@@ -378,6 +380,17 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const showClientCol = selectedClientId == null
   const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 6
 
+  // Закриття дропдауну при кліку поза ним
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (printDropdownRef.current && !printDropdownRef.current.contains(e.target as Node)) {
+        setPrintDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
   const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
       const ok = window.confirm(
@@ -404,11 +417,30 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       <div className={styles.toolbar}>
         <h2 className={styles.title}>Замовлення — {workDate}</h2>
         <div className={styles.bakingBtns}>
-          {bakedCategories.map(cat => (
-            <button key={cat.id} className={styles.btnBaking} onClick={() => openBakingPrint(cat.id)}>
-              Завдання {cat.name}
-            </button>
-          ))}
+          {/* Дропдаун друку завдань */}
+          {bakedCategories.length > 0 && (
+            <div className={styles.printDropdown} ref={printDropdownRef}>
+              <button
+                className={styles.btnBaking}
+                onClick={() => setPrintDropdownOpen(v => !v)}
+              >
+                Друк завдання ▾
+              </button>
+              {printDropdownOpen && (
+                <div className={styles.printDropdownMenu}>
+                  {bakedCategories.map(cat => (
+                    <button
+                      key={cat.id}
+                      className={styles.printDropdownItem}
+                      onClick={() => { openBakingPrint(cat.id); setPrintDropdownOpen(false) }}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
             className={styles.btnBaking}
             disabled={broadcastLoading}

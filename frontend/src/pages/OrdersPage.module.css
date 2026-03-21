@@ -45,6 +45,36 @@
 }
 .btnBaking:hover { background: #e0ebf5; }
 
+/* ─── Dropdown друку завдань ─────────────────────────────────── */
+.printDropdown {
+  position: relative;
+}
+.printDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  background: #fff;
+  border: 1px solid #aac0d8;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  min-width: 160px;
+  overflow: hidden;
+}
+.printDropdownItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.42rem 0.85rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #1a3a5c;
+  white-space: nowrap;
+}
+.printDropdownItem:hover { background: #e8f0f9; }
+
 /* ─── Панель копіювання ──────────────────────────────────────── */
 
 .copyPanel {
