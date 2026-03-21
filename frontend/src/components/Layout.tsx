@@ -41,7 +41,13 @@ export default function Layout() {
   const allowed = role === 'admin'
     ? ADMIN_KEYS
     : (permissions[role] ?? FALLBACK[role] ?? []) as string[]
-  const visibleTabs = ALL_TABS.filter((t) => allowed.includes(t.key))
+  const visibleTabs = ALL_TABS.filter((t) => {
+    if (t.key === 'admin') {
+      // Показувати Довідники якщо є 'admin' АБО будь-який 'admin_*' дозвіл
+      return allowed.includes('admin') || allowed.some(k => k.startsWith('admin_'))
+    }
+    return allowed.includes(t.key)
+  })
 
   return (
     <div className={styles.root}>

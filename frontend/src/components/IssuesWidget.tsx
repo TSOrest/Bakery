@@ -13,8 +13,10 @@ const TYPE_OPTIONS = [
   { value: 'suggestion', label: '💡 Пропозиція' },
   { value: 'question',   label: '❓ Питання' },
 ]
-const TYPE_COLORS: Record<string, string> = {
-  bug: '#cf222e', enhancement: '#0969da', question: '#8250df',
+const TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  bug:         { bg: '#ffebe9', text: '#a8200d', border: '#ffc1ba' },
+  enhancement: { bg: '#ddf4ff', text: '#0550ae', border: '#b6e3ff' },
+  question:    { bg: '#fbefff', text: '#6e40c9', border: '#e2c5ff' },
 }
 const LABEL_UA: Record<string, string> = {
   'client-report': '', bug: 'Помилка', enhancement: 'Пропозиція', question: 'Питання',
@@ -185,7 +187,7 @@ function IssueThread({ issue, onReload, clientAvatarUrl }: { issue: Issue; onRel
             {issue.state === 'open' ? '● Відкрито' : '✓ Вирішено'}
           </span>
           {typeLabel && LABEL_UA[typeLabel] && (
-            <span className={styles.typeLabel} style={{ background: TYPE_COLORS[typeLabel] ?? '#6e7781' }}>
+            <span className={styles.typeLabel} style={{ background: TYPE_COLORS[typeLabel]?.bg ?? '#f6f8fa', color: TYPE_COLORS[typeLabel]?.text ?? '#57606a', borderColor: TYPE_COLORS[typeLabel]?.border ?? '#d0d7de' }}>
               {LABEL_UA[typeLabel]}
             </span>
           )}
@@ -529,7 +531,7 @@ export default function IssuesWidget() {
                               {issue.state === 'open' ? '●' : '✓'}
                             </span>
                             {typeText && (
-                              <span className={styles.issueTypeBadge} style={{ background: TYPE_COLORS[typeKey] ?? '#6e7781' }}>
+                              <span className={styles.issueTypeBadge} style={{ background: TYPE_COLORS[typeKey]?.bg ?? '#f6f8fa', color: TYPE_COLORS[typeKey]?.text ?? '#57606a', borderColor: TYPE_COLORS[typeKey]?.border ?? '#d0d7de' }}>
                                 {typeText}
                               </span>
                             )}

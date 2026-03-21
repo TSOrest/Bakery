@@ -15,11 +15,71 @@ import {
 // Тип вкладки довідника
 type Tab = 'products' | 'clients' | 'routes' | 'prices' | 'ingredients' | 'margin' | 'units' | 'categories' | 'users' | 'settings' | 'permissions'
 
+interface TabGroup {
+  label: string
+  permKey: string | null  // null = тільки для admin, не конфігурується
+  tabs: { key: Tab; label: string }[]
+}
+
+// Ключ null = розділ системи, доступний лише admin-ролі
+export const ADMIN_TAB_GROUPS: TabGroup[] = [
+  {
+    label: 'Виробництво',
+    permKey: 'admin_goods',
+    tabs: [
+      { key: 'products',   label: 'Вироби' },
+      { key: 'categories', label: 'Категорії' },
+      { key: 'units',      label: 'Одиниці виміру' },
+    ],
+  },
+  {
+    label: 'Клієнти',
+    permKey: 'admin_clients',
+    tabs: [
+      { key: 'clients', label: 'Клієнти' },
+      { key: 'routes',  label: 'Маршрути' },
+    ],
+  },
+  {
+    label: 'Ціни та собівартість',
+    permKey: 'admin_prices',
+    tabs: [
+      { key: 'prices',      label: 'Ціни' },
+      { key: 'ingredients', label: 'Інгредієнти' },
+      { key: 'margin',      label: 'Маржа' },
+    ],
+  },
+  {
+    label: 'Система',
+    permKey: null,
+    tabs: [
+      { key: 'users',       label: 'Користувачі' },
+      { key: 'permissions', label: 'Права ролей' },
+      { key: 'settings',    label: 'Налаштування' },
+    ],
+  },
+]
+
 // ─── Головний компонент ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const { reloadPermissions } = useAuth()
-  const [tab, setTab] = useState<Tab>('products')
+  const { user, permissions, reloadPermissions } = useAuth()
+  const role    = user?.role ?? 'operator'
+  const isAdmin = role === 'admin'
+  const userPerms: string[] = isAdmin ? [] : (permissions[role] ?? [])
+
+  // Які групи доступні цій ролі?
+  const visibleGroups = ADMIN_TAB_GROUPS.filter(g => {
+    if (g.permKey === null) return isAdmin
+    return isAdmin || userPerms.includes(g.permKey)
+  })
+
+  const allVisibleTabKeys = visibleGroups.flatMap(g => g.tabs.map(t => t.key))
+  const defaultTab = allVisibleTabKeys[0] ?? 'products'
+  const [tab, setTab] = useState<Tab>(defaultTab)
+
+  // Якщо поточна вкладка недоступна — переключити на першу доступну
+  const activeTab: Tab = allVisibleTabKeys.includes(tab) ? tab : defaultTab
 
   // Спільні довідники, потрібні у кількох формах
   const [units, setUnits]           = useState<Unit[]>([])
@@ -41,46 +101,44 @@ export default function AdminPage() {
   const reloadUnits      = () => api.get<Unit[]>('/units?active_only=false').then(setUnits)
   const reloadCategories = () => api.get<Category[]>('/categories?active_only=false').then(setCategories)
 
-  const TABS: { key: Tab; label: string }[] = [
-    { key: 'products',   label: 'Вироби' },
-    { key: 'clients',    label: 'Клієнти' },
-    { key: 'routes',     label: 'Маршрути' },
-    { key: 'prices',      label: 'Ціни' },
-    { key: 'ingredients', label: 'Інгредієнти' },
-    { key: 'margin',      label: 'Маржа' },
-    { key: 'units',       label: 'Одиниці виміру' },
-    { key: 'categories', label: 'Категорії' },
-    { key: 'users',       label: 'Користувачі' },
-    { key: 'settings',    label: 'Налаштування' },
-    { key: 'permissions', label: 'Права ролей' },
-  ]
-
   return (
     <div style={{ padding: '1.5rem' }}>
-      <h2>Довідники</h2>
+      <h2 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Довідники</h2>
 
-      {/* Перемикачі вкладок */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem' }}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{
-              padding: '0.4rem 1.1rem',
-              borderRadius: '4px',
-              border: '1px solid #ccc',
-              background: tab === t.key ? '#1a3a5c' : '#fff',
-              color: tab === t.key ? '#fff' : '#333',
-              cursor: 'pointer',
-              fontWeight: tab === t.key ? 600 : 400,
-            }}
-          >
-            {t.label}
-          </button>
+      {/* Згруповані вкладки */}
+      <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'flex-end', borderBottom: '1px solid #e0e0e0', paddingBottom: '0.75rem' }}>
+        {visibleGroups.map(group => (
+          <div key={group.label}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>
+              {group.label}
+            </div>
+            <div style={{ display: 'flex', gap: '0.3rem' }}>
+              {group.tabs.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  style={{
+                    padding: '0.35rem 0.85rem',
+                    borderRadius: '4px',
+                    border: '1px solid',
+                    borderColor: activeTab === t.key ? '#1a3a5c' : '#d0d7de',
+                    background: activeTab === t.key ? '#1a3a5c' : '#fff',
+                    color: activeTab === t.key ? '#fff' : '#444',
+                    cursor: 'pointer',
+                    fontWeight: activeTab === t.key ? 600 : 400,
+                    fontSize: '0.875rem',
+                    transition: 'background 0.12s, border-color 0.12s',
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 
-      {tab === 'products' && (
+      {activeTab === 'products' && (
         <ProductsTab
           products={products}
           units={units}
@@ -88,16 +146,16 @@ export default function AdminPage() {
           onReload={reloadProducts}
         />
       )}
-      {tab === 'clients' && (
+      {activeTab === 'clients' && (
         <ClientsTab routes={routes} />
       )}
-      {tab === 'routes' && (
+      {activeTab === 'routes' && (
         <RoutesTab routes={routes} onReload={reloadRoutes} />
       )}
-      {tab === 'prices' && (
+      {activeTab === 'prices' && (
         <PricesTab products={products} clients={clients} />
       )}
-      {tab === 'units' && (
+      {activeTab === 'units' && (
         <SimpleListTab
           title="Одиниці виміру"
           items={units}
@@ -107,17 +165,17 @@ export default function AdminPage() {
           onUpdate={(id, patch) => api.put(`/units/${id}`, patch).then(reloadUnits)}
         />
       )}
-      {tab === 'categories' && (
+      {activeTab === 'categories' && (
         <CategoriesTab
           categories={categories}
           onReload={reloadCategories}
         />
       )}
-      {tab === 'ingredients' && <IngredientsTab units={units} products={products} />}
-      {tab === 'margin'      && <MarginTab products={products} />}
-      {tab === 'users'       && <UsersTab />}
-      {tab === 'settings'    && <SettingsTab />}
-      {tab === 'permissions' && <RolePermissionsTab onSaved={reloadPermissions} />}
+      {activeTab === 'ingredients' && <IngredientsTab units={units} products={products} />}
+      {activeTab === 'margin'      && <MarginTab products={products} />}
+      {activeTab === 'users'       && <UsersTab />}
+      {activeTab === 'settings'    && <SettingsTab />}
+      {activeTab === 'permissions' && <RolePermissionsTab onSaved={reloadPermissions} />}
     </div>
   )
 }
@@ -1886,14 +1944,19 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
 
 // ─── Права ролей ──────────────────────────────────────────────────────────────
 
-const PERMISSION_TABS = [
+// Основні вкладки (не Довідники)
+const MAIN_PAGE_PERMS = [
   { key: 'orders',   label: 'Замовлення' },
   { key: 'baking',   label: 'Випічка' },
   { key: 'routes',   label: 'Маршрути' },
   { key: 'shop',     label: 'Магазин' },
   { key: 'finances', label: 'Фінанси' },
-  { key: 'admin',    label: 'Довідники' },
 ]
+
+// Підрозділи Довідників (configurable, без Системи)
+const ADMIN_SUB_PERMS = ADMIN_TAB_GROUPS
+  .filter(g => g.permKey !== null)
+  .map(g => ({ key: g.permKey as string, label: g.label }))
 
 const ALL_ROLES = ['operator', 'accountant', 'admin', 'owner'] as const
 const ROLE_LABELS_MAP: Record<string, string> = {
@@ -1904,7 +1967,6 @@ const ROLE_LABELS_MAP: Record<string, string> = {
 }
 
 function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
-  // perms[role] = Set<tabKey>
   const [perms,  setPerms]  = useState<Record<string, Set<string>>>({})
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
@@ -1946,54 +2008,92 @@ function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
   }
 
   const thStyle: React.CSSProperties = {
-    padding: '0.5rem 0.85rem', textAlign: 'center', fontWeight: 600,
-    fontSize: '0.875rem', background: '#e8eef5',
+    padding: '0.5rem 0.75rem', textAlign: 'center', fontWeight: 600,
+    fontSize: '0.8rem', background: '#e8eef5', whiteSpace: 'nowrap',
+  }
+  const thGroupStyle: React.CSSProperties = {
+    padding: '0.3rem 0.75rem', textAlign: 'center', fontWeight: 700,
+    fontSize: '0.68rem', background: '#dde6f0', color: '#555',
+    textTransform: 'uppercase', letterSpacing: '0.05em',
   }
   const tdStyle: React.CSSProperties = {
-    padding: '0.45rem 0.85rem', textAlign: 'center',
+    padding: '0.45rem 0.75rem', textAlign: 'center',
     borderBottom: '1px solid #f0f0f0',
+  }
+  const tdSepStyle: React.CSSProperties = {
+    ...tdStyle, borderLeft: '2px solid #c8d6e5', background: '#f7f9fc',
   }
 
   return (
     <section>
-      <h3 style={{ marginTop: 0, marginBottom: '1rem' }}>Доступ ролей до вкладок</h3>
-      <table style={{ ...tableStyle, maxWidth: '640px' }}>
-        <thead>
-          <tr>
-            <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
-            {PERMISSION_TABS.map((t) => (
-              <th key={t.key} style={thStyle}>{t.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {ALL_ROLES.map((role) => {
-            const isAdmin = role === 'admin'
-            return (
-              <tr key={role} style={isAdmin ? { background: '#f0f4f8' } : undefined}>
-                <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500 }}>
-                  {ROLE_LABELS_MAP[role]}
-                  {isAdmin && <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>(завжди всі)</span>}
-                </td>
-                {PERMISSION_TABS.map((t) => (
-                  <td key={t.key} style={tdStyle}>
-                    {isAdmin ? (
-                      <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
-                    ) : (
-                      <input
-                        type="checkbox"
-                        checked={perms[role]?.has(t.key) ?? false}
-                        onChange={() => toggle(role, t.key)}
-                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                      />
-                    )}
+      <h3 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Доступ ролей до розділів</h3>
+      <p style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1rem' }}>
+        Оператори та бухгалтери бачать лише дозволені розділи. Адміністратор завжди має повний доступ.
+      </p>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ ...tableStyle, width: 'auto' }}>
+          <thead>
+            {/* Рядок групових заголовків */}
+            <tr>
+              <th style={{ ...thGroupStyle, textAlign: 'left', background: '#e8eef5' }} rowSpan={2}>Роль</th>
+              <th style={{ ...thGroupStyle }} colSpan={MAIN_PAGE_PERMS.length}>Основні розділи</th>
+              <th style={{ ...thGroupStyle, borderLeft: '2px solid #c8d6e5' }} colSpan={ADMIN_SUB_PERMS.length}>Довідники</th>
+            </tr>
+            {/* Рядок конкретних колонок */}
+            <tr>
+              {MAIN_PAGE_PERMS.map(t => (
+                <th key={t.key} style={thStyle}>{t.label}</th>
+              ))}
+              {ADMIN_SUB_PERMS.map((t, i) => (
+                <th key={t.key} style={{ ...thStyle, ...(i === 0 ? { borderLeft: '2px solid #c8d6e5' } : {}) }}>
+                  {t.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ALL_ROLES.map((role) => {
+              const isAdmin = role === 'admin'
+              return (
+                <tr key={role} style={isAdmin ? { background: '#f0f4f8' } : undefined}>
+                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {ROLE_LABELS_MAP[role]}
+                    {isAdmin && <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>(завжди всі)</span>}
                   </td>
-                ))}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+                  {MAIN_PAGE_PERMS.map(t => (
+                    <td key={t.key} style={tdStyle}>
+                      {isAdmin ? (
+                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={perms[role]?.has(t.key) ?? false}
+                          onChange={() => toggle(role, t.key)}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      )}
+                    </td>
+                  ))}
+                  {ADMIN_SUB_PERMS.map((t, i) => (
+                    <td key={t.key} style={i === 0 ? tdSepStyle : tdStyle}>
+                      {isAdmin ? (
+                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={perms[role]?.has(t.key) ?? false}
+                          onChange={() => toggle(role, t.key)}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1rem' }}>
         <button onClick={handleSave} disabled={saving} style={addBtnStyle}>
           {saving ? 'Збереження...' : 'Зберегти права'}
@@ -2002,6 +2102,7 @@ function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
       </div>
       <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.75rem' }}>
         Зміни набудуть чинності після наступного входу в систему.
+        Розділ «Система» (користувачі, налаштування) доступний лише адміністратору.
       </p>
     </section>
   )
