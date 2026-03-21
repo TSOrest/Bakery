@@ -106,7 +106,6 @@ export default function OrdersPage() {
   const [broadcastLoading,  setBroadcastLoading]  = useState(false)
   const [printNotice,       setPrintNotice]       = useState<string | null>(null)
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false)
-  const printDropdownRef = useRef<HTMLDivElement>(null)
 
   const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
@@ -380,17 +379,6 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const showClientCol = selectedClientId == null
   const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 6
 
-  // Закриття дропдауну при кліку поза ним
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (printDropdownRef.current && !printDropdownRef.current.contains(e.target as Node)) {
-        setPrintDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
   const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
       const ok = window.confirm(
@@ -419,7 +407,14 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
         <div className={styles.bakingBtns}>
           {/* Дропдаун друку завдань */}
           {bakedCategories.length > 0 && (
-            <div className={styles.printDropdown} ref={printDropdownRef}>
+            <div className={styles.printDropdown}>
+              {/* Прозорий backdrop — закриває дропдаун при кліку поза ним */}
+              {printDropdownOpen && (
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                  onClick={() => setPrintDropdownOpen(false)}
+                />
+              )}
               <button
                 className={styles.btnBaking}
                 onClick={() => setPrintDropdownOpen(v => !v)}
