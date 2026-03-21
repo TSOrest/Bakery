@@ -15,7 +15,7 @@ from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
     auth, cancellations, settings, finances, finances_articles, ingredients, dashboard, issues, bot,
 )
-from backend.routers import auth_github
+from backend.routers import auth_github, db_editor
 
 # Ініціалізуємо таблиці (якщо не існують)
 Base.metadata.create_all(bind=engine)
@@ -153,6 +153,7 @@ app.include_router(dashboard.router,     prefix=PREFIX)
 app.include_router(issues.router,        prefix=PREFIX)
 app.include_router(auth_github.router,   prefix=PREFIX)
 app.include_router(bot.router,           prefix=PREFIX)
+app.include_router(db_editor.router,     prefix=PREFIX)
 
 
 @app.get("/api/health")

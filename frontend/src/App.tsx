@@ -10,6 +10,7 @@ import ShopPage from './pages/ShopPage'
 import FinancesPage from './pages/FinancesPage'
 import AdminPage from './pages/AdminPage'
 import OwnerDashboard from './pages/OwnerDashboard'
+import DbEditorPage from './pages/DbEditorPage'
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -51,7 +52,10 @@ function AppRoutes() {
               <Route path="finances" element={<FinancesPage />} />
             )}
             {user.role === 'admin' && (
-              <Route path="admin" element={<AdminPage />} />
+              <Route path="admin"      element={<AdminPage />} />
+            )}
+            {user.role === 'admin' && (
+              <Route path="db-editor" element={<DbEditorPage />} />
             )}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

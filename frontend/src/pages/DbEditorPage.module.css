@@ -1,0 +1,529 @@
+/* ─── Root ───────────────────────────────────────────────────────────────── */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  font-size: 0.875rem;
+}
+
+/* ─── Warning banner ────────────────────────────────────────────────────── */
+
+.banner {
+  background: #fff3cd;
+  border-bottom: 2px solid #ffc107;
+  color: #856404;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+/* ─── 3-column layout ───────────────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ─── Left sidebar: table list ──────────────────────────────────────────── */
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  background: #f9f9f9;
+  overflow: hidden;
+}
+
+.sidebarTitle {
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  padding: 0.6rem 0.75rem 0.3rem;
+}
+
+.searchBox {
+  margin: 0 0.5rem 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  width: calc(100% - 1rem);
+  box-sizing: border-box;
+}
+
+.tableList {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tableItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background 0.1s;
+  gap: 0.3rem;
+}
+
+.tableItem:hover {
+  background: #eef;
+}
+
+.tableItemActive {
+  background: #e8eeff;
+  border-left-color: #4f6ef7;
+}
+
+.tableName {
+  font-size: 0.8rem;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableCount {
+  font-size: 0.7rem;
+  background: #ddd;
+  color: #555;
+  padding: 0.1rem 0.35rem;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+/* ─── Center: data table ─────────────────────────────────────────────────── */
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.tableHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.tableTitleText {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.rowCount {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.error {
+  background: #fde8e8;
+  border: 1px solid #f5c6c6;
+  color: #c0392b;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  margin: 0.4rem 0.75rem;
+  border-radius: 4px;
+}
+
+.tableWrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8rem;
+}
+
+.th {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.tr:hover {
+  background: #f0f4ff;
+}
+
+.td {
+  border: 1px solid #e8e8e8;
+  padding: 0.3rem 0.5rem;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.null {
+  color: #bbb;
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+.btnEdit {
+  background: none;
+  border: 1px solid #b0b8e0;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8rem;
+  margin-right: 0.25rem;
+}
+
+.btnEdit:hover { background: #e8eeff; }
+
+.btnDel {
+  background: none;
+  border: 1px solid #e0b0b0;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8rem;
+}
+
+.btnDel:hover { background: #fee; }
+.btnDel:disabled { opacity: 0.4; cursor: default; }
+
+/* ─── Pagination ─────────────────────────────────────────────────────────── */
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  border-top: 1px solid #ddd;
+  flex-shrink: 0;
+  background: #f9f9f9;
+  font-size: 0.8rem;
+}
+
+.pagination button {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #fff;
+  font-size: 0.8rem;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ─── Right: schema panel ────────────────────────────────────────────────── */
+
+.schemaPanel {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+  background: #fafafa;
+  font-size: 0.78rem;
+}
+
+.schemaTitle {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.3rem;
+  color: #222;
+}
+
+.schemaDesc {
+  color: #555;
+  font-size: 0.76rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.schemaSectionTitle {
+  font-weight: 700;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  margin: 0.75rem 0 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.colRow {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.colName {
+  font-weight: 600;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+
+.colType {
+  color: #7c5cbf;
+  font-size: 0.72rem;
+  font-family: monospace;
+  margin-top: 0.1rem;
+}
+
+.colAttrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  margin-top: 0.15rem;
+}
+
+.badge {
+  background: #4f6ef7;
+  color: #fff;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.badgeFk {
+  background: #e67e22;
+  color: #fff;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.badgeUniq {
+  background: #27ae60;
+  color: #fff;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.attrChip {
+  background: #eee;
+  color: #555;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+}
+
+.attrFk {
+  color: #e67e22;
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+.fkRow {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eee;
+  font-size: 0.76rem;
+}
+
+.fkFrom { font-weight: 600; color: #333; }
+.fkArrow { color: #888; }
+.fkTo { color: #4f6ef7; }
+.fkAction { color: #999; font-size: 0.7rem; }
+
+.idxRow {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  color: #444;
+}
+
+.btnToggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.ddl {
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.68rem;
+  font-family: monospace;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #333;
+}
+
+/* ─── Empty state ────────────────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+/* ─── Edit modal ─────────────────────────────────────────────────────────── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+  width: 520px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modalTitle {
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #eee;
+  background: #f8f8f8;
+  flex-shrink: 0;
+}
+
+.modalFields {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 1rem;
+}
+
+.fieldRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fieldLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #333;
+}
+
+.fieldType {
+  color: #7c5cbf;
+  font-family: monospace;
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.fieldInput {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.fieldInput:disabled {
+  background: #f5f5f5;
+  color: #999;
+}
+
+.fieldSelect {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+}
+
+.modalActions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid #eee;
+  flex-shrink: 0;
+  background: #f8f8f8;
+}
+
+.btnSave {
+  padding: 0.4rem 1rem;
+  background: #4f6ef7;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.btnSave:hover:not(:disabled) { background: #3a56d4; }
+.btnSave:disabled { opacity: 0.6; cursor: default; }
+
+.btnCancel {
+  padding: 0.4rem 1rem;
+  background: #fff;
+  color: #555;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.btnCancel:hover { background: #f0f0f0; }

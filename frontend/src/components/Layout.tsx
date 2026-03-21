@@ -26,7 +26,8 @@ export default function Layout() {
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
     { path: '/shop',     label: 'Магазин',    key: 'shop'     },
     { path: '/finances', label: 'Фінанси',    key: 'finances' },
-    { path: '/admin',    label: 'Довідники',  key: 'admin'    },
+    { path: '/admin',     label: 'Довідники',  key: 'admin'     },
+    { path: '/db-editor', label: '🗄 БД',      key: 'db-editor' },
   ]
 
   // Адмін завжди має всі права — ігноруємо permissions для нього
