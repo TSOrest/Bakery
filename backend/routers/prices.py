@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
 
@@ -229,7 +230,11 @@ def list_overrides(
 def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_db)):
     o = ClientPriceOverride(**data.model_dump())
     db.add(o)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Індивідуальна ціна для цього клієнта, виробу і дати вже існує")
     db.refresh(o)
     return o
 

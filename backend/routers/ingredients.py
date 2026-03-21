@@ -3,6 +3,7 @@
 from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -140,7 +141,11 @@ def add_product_ingredient(
         qty_per_unit  = data.qty_per_unit,
     )
     db.add(pi)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Цей інгредієнт вже є у складі виробу")
     db.refresh(pi)
 
     calculate_cost(db, product_id)

@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -196,7 +197,11 @@ def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Sess
         role=body.role,
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Користувач з логіном «{body.username}» вже існує")
     db.refresh(user)
     return {"id": user.id, "username": user.username, "role": user.role}
 

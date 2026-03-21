@@ -29,6 +29,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 import requests as rq
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
@@ -161,7 +162,11 @@ def _link_client_chat(db: Session, client: Client, chat_id: int, phone: str = ""
             first_name=first_name or None,
             authorized_at=now,
         ))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        log.warning("_link_client_chat: chat_id %s already linked (race condition)", chat_id)
 
 
 

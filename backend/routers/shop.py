@@ -3,6 +3,7 @@
 from datetime import date as date_type, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -125,7 +126,11 @@ def init_counts(count_date: str, db: Session = Depends(get_db)):
         db.add(sc)
         rows.append(sc)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Звірка на цю дату вже існує. Оновіть сторінку.")
     for r in rows:
         db.refresh(r)
     return rows
