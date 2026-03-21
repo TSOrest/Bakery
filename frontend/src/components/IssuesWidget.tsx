@@ -62,7 +62,10 @@ function renderMarkdown(text: string) {
 }
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
-function Avatar({ name, color }: { name: string; color: string }) {
+function Avatar({ name, color, src }: { name: string; color: string; src?: string }) {
+  if (src) {
+    return <img className={styles.avatarImg} src={src} alt={name} title={name} />
+  }
   return (
     <div className={styles.avatar} style={{ background: color }}>
       {name[0].toUpperCase()}
@@ -209,8 +212,9 @@ function IssueThread({ issue, onReload }: { issue: Issue; onReload: () => void }
       {comments.map(c => (
         <div key={c.id} className={styles.timelineItem}>
           <Avatar
-            name={c.author === OWNER_LOGIN ? 'Р' : c.author[0]}
+            name={c.author === OWNER_LOGIN ? 'Розробник' : c.author}
             color={c.author === OWNER_LOGIN ? '#6e40c9' : '#0969da'}
+            src={c.author_avatar}
           />
           <CommentCard
             body={c.body}

@@ -104,10 +104,11 @@ def list_comments(number: int, db: Session = Depends(get_db)):
     raw  = _gh(f"/repos/{repo}/issues/{number}/comments?per_page=100", tok)
     return [
         {
-            "id":         c["id"],
-            "body":       c.get("body") or "",
-            "created_at": c["created_at"],
-            "author":     c["user"]["login"],
+            "id":           c["id"],
+            "body":         c.get("body") or "",
+            "created_at":   c["created_at"],
+            "author":       c["user"]["login"],
+            "author_avatar": c["user"].get("avatar_url", ""),
         }
         for c in raw
     ]

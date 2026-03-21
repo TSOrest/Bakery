@@ -17,6 +17,7 @@ export interface IssueComment {
   body: string
   created_at: string
   author: string
+  author_avatar?: string
 }
 
 export interface IssueCreate {
