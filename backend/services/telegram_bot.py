@@ -570,6 +570,15 @@ def _is_bot_accepting() -> tuple[bool, str]:
     return True, start_time
 
 
+def _client_has_invoice(db: Session, client_id: int, order_date: str) -> bool:
+    """Чи є вже сформована (не скасована) накладна клієнту на дату."""
+    return db.query(Invoice).filter(
+        Invoice.client_id == client_id,
+        Invoice.invoice_date == order_date,
+        Invoice.status != "cancelled",
+    ).first() is not None
+
+
 def _start_add_product(token: str, chat_id: int, client_id: int) -> None:
     """Починає flow додавання товару: показує вибір типу."""
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -675,6 +684,14 @@ def _save_order_item(token: str, chat_id: int, qty: float) -> None:
     with SessionLocal() as db:
         from datetime import datetime
         now = datetime.now().isoformat(timespec="seconds")
+
+        # Перевірка: якщо накладна вже сформована — відхиляємо
+        if _client_has_invoice(db, client_id, order_date):
+            _send(token, chat_id,
+                  f"🔒 Накладна на {order_date} вже сформована.\n"
+                  f"Додавати нові замовлення неможливо.",
+                  _client_keyboard())
+            return
 
         # Якщо вже є pending-запис на цей товар від цього ж користувача — оновлюємо кількість
         existing = db.query(Order).filter(
@@ -845,6 +862,14 @@ def _handle_update(token: str, update: dict) -> None:
                       f"Наступний прийом — з <b>{start_time}</b>.",
                       _client_keyboard())
                 return
+            tomorrow = (date.today() + timedelta(days=1)).isoformat()
+            with SessionLocal() as db:
+                if _client_has_invoice(db, client.id, tomorrow):
+                    _send(token, chat_id,
+                          f"🔒 Накладна на {tomorrow} вже сформована.\n"
+                          f"Додавати нові замовлення неможливо.",
+                          _client_keyboard())
+                    return
             # Скидаємо попередній стан якщо є
             with _state_lock:
                 _client_state.pop(chat_id, None)
