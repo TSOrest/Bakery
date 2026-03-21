@@ -12,13 +12,15 @@ export interface Category {
   id: number
   name: string
   is_active: number
+  is_baked: number
+  reserve_pct: number
+  sort_order: number
 }
 
 export interface Product {
   id: number
   name: string
   short_name: string | null
-  type: 'bread' | 'bun' | 'other'
   weight: number | null
   unit_id: number | null
   category_id: number | null

@@ -108,13 +108,9 @@ export default function AdminPage() {
         />
       )}
       {tab === 'categories' && (
-        <SimpleListTab
-          title="Категорії"
-          items={categories}
-          addLabel="+ Додати категорію"
-          placeholder="напр. Хліб, Булки, Магазин"
-          onAdd={(name) => api.post('/categories', null, `name=${encodeURIComponent(name)}`).then(reloadCategories)}
-          onUpdate={(id, patch) => api.put(`/categories/${id}`, patch).then(reloadCategories)}
+        <CategoriesTab
+          categories={categories}
+          onReload={reloadCategories}
         />
       )}
       {tab === 'ingredients' && <IngredientsTab units={units} products={products} />}
@@ -128,23 +124,16 @@ export default function AdminPage() {
 
 // ─── Вироби ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_TYPE_LABELS: Record<string, string> = {
-  bread: 'Хліб',
-  bun:   'Булки',
-  other: 'Інше',
-}
-
 interface ProductFormState {
   name: string
   short_name: string
-  type: string
   weight: string
   unit_id: string
   category_id: string
 }
 
 const emptyProduct = (): ProductFormState => ({
-  name: '', short_name: '', type: 'bread', weight: '', unit_id: '', category_id: '',
+  name: '', short_name: '', weight: '', unit_id: '', category_id: '',
 })
 
 function ProductsTab({
@@ -166,7 +155,6 @@ function ProductsTab({
     setForm({
       name:        p.name,
       short_name:  p.short_name ?? '',
-      type:        p.type,
       weight:      p.weight?.toString() ?? '',
       unit_id:     p.unit_id?.toString() ?? '',
       category_id: p.category_id?.toString() ?? '',
@@ -181,7 +169,6 @@ function ProductsTab({
     const body = {
       name:        form.name,
       short_name:  form.short_name || null,
-      type:        form.type,
       weight:      form.weight ? Number(form.weight) : null,
       unit_id:     form.unit_id ? Number(form.unit_id) : null,
       category_id: form.category_id ? Number(form.category_id) : null,
@@ -215,7 +202,7 @@ function ProductsTab({
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Скорочена</Th><Th>Тип</Th>
+            <Th>Назва</Th><Th>Скорочена</Th><Th>Категорія</Th>
             <Th>Вага, кг</Th><Th>Активний</Th><Th>Дії</Th>
           </tr>
         </thead>
@@ -224,7 +211,7 @@ function ProductsTab({
             <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.45 }}>
               <Td>{p.name}</Td>
               <Td>{p.short_name ?? '—'}</Td>
-              <Td>{PRODUCT_TYPE_LABELS[p.type] ?? p.type}</Td>
+              <Td>{categories.find((c) => c.id === p.category_id)?.name ?? '—'}</Td>
               <Td>{p.weight ?? '—'}</Td>
               <Td>{p.is_active ? '✓' : '✗'}</Td>
               <Td>
@@ -251,14 +238,6 @@ function ProductsTab({
               <label>Скорочена назва</label>
               <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
               <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
-            </div>
-            <div className={formStyles.field}>
-              <label>Тип *</label>
-              <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                <option value="bread">Хліб</option>
-                <option value="bun">Булки</option>
-                <option value="other">Інше</option>
-              </select>
             </div>
             <div className={formStyles.field}>
               <label>Вага (кг)</label>
@@ -1075,6 +1054,128 @@ function PricesTab({ products, clients }: {
   )
 }
 
+// ─── Категорії (відділи) ─────────────────────────────────────────────────────
+
+interface CategoryFormState { name: string; is_baked: boolean; reserve_pct: string; sort_order: string }
+const emptyCategoryForm = (): CategoryFormState => ({ name: '', is_baked: true, reserve_pct: '5', sort_order: '0' })
+
+function CategoriesTab({ categories, onReload }: { categories: Category[]; onReload: () => void }) {
+  const [modal,   setModal]   = useState(false)
+  const [editing, setEditing] = useState<Category | null>(null)
+  const [form,    setForm]    = useState<CategoryFormState>(emptyCategoryForm())
+  const [saving,  setSaving]  = useState(false)
+  const [newName, setNewName] = useState('')
+
+  const openEdit = (c: Category) => {
+    setEditing(c)
+    setForm({ name: c.name, is_baked: !!c.is_baked, reserve_pct: String(c.reserve_pct), sort_order: String(c.sort_order) })
+    setModal(true)
+  }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editing) return
+    setSaving(true)
+    try {
+      await api.put(`/categories/${editing.id}`, {
+        name:       form.name,
+        is_baked:   form.is_baked ? 1 : 0,
+        reserve_pct: Number(form.reserve_pct),
+        sort_order: Number(form.sort_order),
+      })
+      onReload()
+      setModal(false)
+    } finally { setSaving(false) }
+  }
+
+  const handleAdd = async () => {
+    const name = newName.trim()
+    if (!name) return
+    setSaving(true)
+    try { await api.post('/categories', null, `name=${encodeURIComponent(name)}`); setNewName(''); onReload() }
+    finally { setSaving(false) }
+  }
+
+  const handleToggle = async (c: Category) => {
+    if (!confirm(`${c.is_active ? 'Приховати' : 'Відновити'} категорію "${c.name}"?`)) return
+    await api.put(`/categories/${c.id}`, { is_active: c.is_active ? 0 : 1 })
+    onReload()
+  }
+
+  const sorted = [...categories].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+
+  return (
+    <section>
+      <strong>Категорії (відділи) — {categories.filter((c) => c.is_active).length} активних</strong>
+      <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0' }}>
+        <input value={newName} onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          placeholder="напр. Хліб, Булки, Магазин"
+          style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1, maxWidth: '260px' }} />
+        <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>+ Додати категорію</button>
+      </div>
+      <table style={tableStyle}>
+        <thead>
+          <tr style={{ background: '#e8eef5' }}>
+            <Th>Порядок</Th><Th>Назва</Th><Th>Відділ випічки</Th><Th>Резерв, %</Th><Th>Активна</Th><Th>Дії</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((c) => (
+            <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
+              <Td>{c.sort_order}</Td>
+              <Td>{c.name}</Td>
+              <Td>{c.is_baked ? '✓ Випікається' : '—'}</Td>
+              <Td>{c.is_baked ? `${c.reserve_pct}%` : '—'}</Td>
+              <Td>{c.is_active ? '✓' : '✗'}</Td>
+              <Td>
+                <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+                <button onClick={() => handleToggle(c)} style={c.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}>
+                  {c.is_active ? 'Приховати' : 'Відновити'}
+                </button>
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {modal && editing && (
+        <Modal title={`Редагувати категорію: ${editing.name}`} onClose={() => setModal(false)}>
+          <form onSubmit={handleSave} className={formStyles.form}>
+            <div className={formStyles.field}>
+              <label>Назва *</label>
+              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div className={formStyles.field}>
+              <label>
+                <input type="checkbox" checked={form.is_baked} onChange={(e) => setForm({ ...form, is_baked: e.target.checked })} />
+                {' '}Відділ випічки (товари цієї категорії випікаються)
+              </label>
+            </div>
+            {form.is_baked && (
+              <div className={formStyles.field}>
+                <label>Резерв, %</label>
+                <input type="number" min="0" max="100" step="0.1" value={form.reserve_pct}
+                  onChange={(e) => setForm({ ...form, reserve_pct: e.target.value })} />
+                <span className={formStyles.hint}>Додаток до замовленої кількості при формуванні завдання на випічку</span>
+              </div>
+            )}
+            <div className={formStyles.field}>
+              <label>Порядок сортування</label>
+              <input type="number" step="1" value={form.sort_order}
+                onChange={(e) => setForm({ ...form, sort_order: e.target.value })} />
+            </div>
+            <div className={formStyles.actions}>
+              <button type="button" onClick={() => setModal(false)} className={formStyles.btnSecondary}>Скасувати</button>
+              <button type="submit" disabled={saving} className={formStyles.btnPrimary}>{saving ? 'Збереження...' : 'Зберегти'}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </section>
+  )
+}
+
 // ─── Універсальна вкладка для простих довідників (одиниці, категорії) ────────
 
 interface SimpleItem { id: number; name: string; is_active: number }
@@ -1261,8 +1362,6 @@ const SETTINGS_LABELS: Record<string, string> = {
   edrpou:            'Код ЄДРПОУ',
   iban:              'IBAN рахунок',
   bank:              'Банк',
-  bun_reserve_pct:   'Резерв булок, %',
-  bread_reserve_pct: 'Резерв хліба, %',
   order_lock_time:   'Час блокування замовлень',
 }
 

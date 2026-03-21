@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import styles from './DbEditorPage.module.css'
+import ErdView from './DbEditorErd'
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,164 @@ const TABLE_DESCRIPTIONS: Record<string, string> = {
   other_stock_in:         'Надходження товарів групи Інше на склад магазину.',
 }
 
+// ── Column hints (human-readable per table.column) ─────────────────────────
+
+const COLUMN_HINTS: Record<string, Record<string, string>> = {
+  products: {
+    type:           "Тип виробу: 'bread' (хліб), 'bun' (булка), 'other' (інше). Визначає логіку резервів і залишків.",
+    cost_per_unit:  'Розрахункова собівартість одиниці на основі рецептури (product_ingredients).',
+    is_active:      '1 = активний (відображається в замовленнях), 0 = архівний.',
+    initial_stock:  'Початковий залишок для seed при першому запуску. Не відображається як поточний залишок.',
+    unit_id:        'Одиниця виміру (кг, шт, буханка тощо) з таблиці units.',
+    category_id:    'Категорія виробу. Впливає на застосування цінових правил.',
+  },
+  clients: {
+    discount_pct:         'Відсоток знижки від базової ціни (0..100). Застосовується якщо немає індивідуального прайсу.',
+    route_id:             'Маршрут доставки. Клієнт закріплений за одним маршрутом.',
+    is_active:            '1 = активний, 0 = архівний (не відображається в замовленнях).',
+    is_own_shop:          '1 = власний магазин пекарні. Товар передається без виставлення рахунку.',
+    print_invoice:        '1 = друкувати накладну для цього клієнта, 0 = не друкувати.',
+    bot_phones:           'Телефони для авторизації в Telegram-боті (через кому). Клієнт може авторизуватися з цих номерів.',
+    client_group:         'Підгрупа в межах маршруту (наприклад: назва населеного пункту). Впливає на сортування накладних.',
+    receiver_name:        "ПІБ особи що приймає товар ('Прийняв' у накладній).",
+    delivery_agent:       "Через кого відправляється товар ('ВідпЧерез' у старій системі).",
+    delivery_note_number: 'Номер доручення.',
+    delivery_note_date:   'Дата доручення.',
+  },
+  orders: {
+    status:             "Статус: 'draft' (чернетка), 'confirmed' (підтверджено), 'closed' (закрито).",
+    source:             "Джерело: 'phone' (по телефону), 'paper' (паперове), 'bot' (через Telegram-бота).",
+    exchange_type:      "Тип обміну: 'none', 'pre_order' (заздалегідь), 'post_delivery' (після доставки).",
+    exchange_qty:       'Кількість несвіжого товару для обміну.',
+    exchange_price:     'Ціна несвіжого товару при обміні.',
+    exchange_notes:     "Обов'язкова нотатка для post_delivery обміну — умови передачі.",
+    price_override:     'Ціна-override для цього рядка. NULL = ціна береться автоматично за пріоритетом.',
+    bot_status:         "Статус обробки через бота: 'pending', 'confirmed', 'rejected', 'modified'.",
+    bot_original_qty:   'Оригінальна кількість до зміни оператором (зберігається при модифікації замовлення).',
+    placed_by_chat_id:  'Telegram chat_id користувача що подав замовлення через бота.',
+    parent_order_id:    'ID батьківського рядка замовлення (для дочірніх рядків переміщення/повернення).',
+    delivered_qty:      'Фактично передана кількість. Може відрізнятися від замовленої qty.',
+  },
+  invoices: {
+    invoice_number: "Унікальний номер у форматі YYYYMMDD-NNN. Лічильник NNN скидається щодня.",
+    status:         "Статус: 'draft', 'printed' (роздруковано), 'delivered' (доставлено), 'cancelled'.",
+    total_sum:      'Загальна сума накладної — сума всіх рядків invoice_lines.',
+  },
+  invoice_lines: {
+    price:          'Базова ціна рядка на момент формування накладної.',
+    price_override: 'Ціна-override для цього рядка. NULL = використовується price.',
+    is_exchange:    '1 = рядок обміну (несвіжий товар замінюється свіжим).',
+    is_stale:       '1 = несвіжий товар.',
+    sum:            'Підсумок рядка = qty × COALESCE(price_override, price).',
+  },
+  prices: {
+    category_id: 'NULL = ціна для всіх категорій клієнтів. Якщо заповнено = тільки для цієї категорії.',
+    valid_from:  'Дата початку дії ціни (YYYY-MM-DD).',
+    valid_to:    'Дата закінчення дії. NULL = ціна безстрокова (діє до появи нової).',
+    is_active:   '1 = ціна активна.',
+    created_by:  'Логін користувача що вніс ціну.',
+  },
+  client_price_overrides: {
+    price:      'Індивідуальна ціна — пріоритет над базовою ціною зі знижкою.',
+    valid_from: 'Дата початку дії індивідуальної ціни.',
+    valid_to:   'Дата закінчення. NULL = безстрокова.',
+  },
+  baking_tasks: {
+    ordered_qty:     'Сумарна кількість з підтверджених замовлень клієнтів на цю дату.',
+    recommended_qty: 'Рекомендована кількість = ordered_qty + резерв % (з налаштувань bun/bread_reserve_pct).',
+    baked_qty:       'Фактично спечена кількість — вводить пекар.',
+  },
+  surplus_allocations: {
+    to_shop:     'Надлишок переданий у власний магазин.',
+    to_route:    'Надлишок переданий на маршрут (додаткові замовлення).',
+    ration_qty:  'Пайок персоналу — вводиться вручну.',
+    written_off: 'Списано.',
+  },
+  shop_counts: {
+    product_type:       "Тип: 'bread' (свіже), 'stale' (несвіже), 'other' (товари групи Інше).",
+    yesterday_balance:  'Залишок з попереднього дня — авто-перенос.',
+    received_today:     'Надходження сьогодні з випічки + повернення від водіїв.',
+    entered_balance:    'Фактичний залишок введений оператором під час щоденної звірки.',
+    written_off_entered:'Списання введене оператором при звірці.',
+    calculated_sold:    'Авторозрахунок продажів = вчора + надійшло − введений − списано.',
+    saved:              '1 = звірку підтверджено і заблоковано редагування.',
+    price:              'Ціна продажу на момент звірки.',
+  },
+  movements: {
+    move_type:    "Тип руху: 'in' (надходження), 'sold' (продаж), 'writeoff' (списання), 'ration' (пайок), 'return_stale', 'exchange_out/in', 'cancel_to_shop'.",
+    is_stale:     '1 = несвіжий товар.',
+    source_table: "Таблиця-джерело події ('orders', 'invoices', 'baking_tasks' тощо).",
+    source_id:    'ID запису в таблиці-джерелі.',
+    route_id:     'Маршрут, якщо рух пов\'язаний з рейсом.',
+  },
+  daily_balances: {
+    is_stale:     '1 = запис для несвіжого товару.',
+    start_balance:'Залишок на початок дня.',
+    received:     'Надходження за день (з baking_tasks, повернення).',
+    sold:         'Продано за день.',
+    written_off:  'Списано за день.',
+    end_balance:  'Залишок на кінець дня = start + received − sold − written_off.',
+    computed_at:  'Час останнього перерахунку. Каскадний перерахунок запускається при змінах.',
+  },
+  finances: {
+    sign:       '+1 = надходження (збільшує баланс клієнта), -1 = витрата (зменшує баланс).',
+    article_id: 'Стаття фінансової операції з таблиці finance_articles.',
+    client_id:  'NULL = загальна касова операція не прив\'язана до клієнта.',
+    amount:     'Завжди позитивне число. Напрямок визначається полем sign.',
+    created_by: 'Логін користувача що вніс операцію.',
+  },
+  finance_articles: {
+    direction:  "'income' = надходження, 'expense' = витрата.",
+    is_system:  '1 = системна стаття (не можна видалити, можна лише перейменувати).',
+  },
+  settings: {
+    key:         'Унікальний ідентифікатор налаштування.',
+    value:       'Поточне значення (текстовий рядок).',
+    description: 'Пояснення призначення налаштування.',
+    updated_at:  'Дата останньої зміни значення.',
+  },
+  client_bot_users: {
+    chat_id:       'Telegram chat ID авторизованого користувача — унікальний ідентифікатор.',
+    is_active:     '1 = авторизація активна, 0 = відкликана оператором.',
+    authorized_at: 'Дата і час авторизації через /start.',
+    phone:         'Телефон з якого була авторизація (отримується від Telegram).',
+  },
+  users: {
+    role:          "Роль: 'operator', 'accountant', 'admin', 'owner'.",
+    password_hash: 'SHA-256 хеш пароля (salt + password).',
+    salt:          'Рандомна сіль для хешування пароля.',
+    role_label:    'Відображувана назва ролі в інтерфейсі.',
+  },
+  auth_sessions: {
+    token:      'Bearer-токен сесії — передається в Authorization заголовку.',
+    expires_at: 'TTL токена. Після цього часу токен більше не прийматиметься.',
+  },
+  cancellation_lines: {
+    disposition:          "'to_shop' (в магазин), 'to_next_day' (перенести), 'writeoff' (списати).",
+    next_day_price_override: 'Знижена ціна при перенесенні товару на наступний день.',
+  },
+  route_cancellations: {
+    cancel_date:  'Дата скасованого рейсу.',
+    cancelled_by: 'Логін оператора що скасував рейс.',
+  },
+  other_products: {
+    purchase_price: 'Закупівельна ціна — собівартість.',
+    sell_price:     'Ціна продажу в магазині.',
+    is_active:      '1 = активний товар, 0 = архівний.',
+  },
+  other_stock_in: {
+    qty:            'Кількість товару що надійшла на склад.',
+    purchase_price: 'Закупівельна ціна на момент надходження.',
+  },
+  product_ingredients: {
+    qty_per_unit: 'Кількість інгредієнта на одну одиницю виробу (використовується для розрахунку собівартості).',
+  },
+  ingredients: {
+    price_per_unit:   'Ціна за одиницю інгредієнта — використовується для розрахунку cost_per_unit виробу.',
+    price_updated_at: 'Дата останнього оновлення ціни інгредієнта.',
+  },
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 export default function DbEditorPage() {
@@ -94,26 +253,49 @@ export default function DbEditorPage() {
   const [deleting,     setDeleting]     = useState<string | null>(null)
   const [loadingData,  setLoadingData]  = useState(false)
   const [error,        setError]        = useState<string | null>(null)
+  const [loadError,    setLoadError]    = useState<string | null>(null)
   const [showDdl,      setShowDdl]      = useState(false)
+  const [showErd,      setShowErd]      = useState(false)
 
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  }
+  // Parse CHECK(col IN ('v1','v2',...)) from DDL for enum dropdowns in edit modal
+  const checkEnums = useMemo<Record<string, string[]>>(() => {
+    if (!schema) return {}
+    const result: Record<string, string[]> = {}
+    const re = /CHECK\s*\(\s*(\w+)\s+IN\s*\(([^)]+)\)/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(schema.ddl)) !== null) {
+      const col = m[1]
+      const vals = Array.from(m[2].matchAll(/'([^']+)'/g)).map(v => v[1])
+      if (vals.length > 0) result[col] = vals
+    }
+    return result
+  }, [schema])
+
 
   const apiFetch = useCallback(async (path: string, opts?: RequestInit) => {
-    const res = await fetch(`/api/v1/db-editor${path}`, { ...opts, headers })
+    const res = await fetch(`/api/v1/db-editor${path}`, {
+      ...opts,
+      headers: {
+        'Authorization': `Bearer ${token ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+    })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error(body.detail ?? `HTTP ${res.status}`)
     }
     return res.json()
-  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token])
 
   // Load tables list
-  useEffect(() => {
-    apiFetch('/tables').then(setTables).catch(() => {})
+  const loadTables = useCallback(() => {
+    setLoadError(null)
+    apiFetch('/tables')
+      .then(setTables)
+      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : 'Помилка завантаження таблиць'))
   }, [apiFetch])
+
+  useEffect(() => { loadTables() }, [loadTables])
 
   // Load schema + first page when table selected
   useEffect(() => {
@@ -181,7 +363,7 @@ export default function DbEditorPage() {
       })
       setEditRow(null)
       // Refresh table list counts
-      apiFetch('/tables').then(setTables).catch(() => {})
+      loadTables()
       await loadPage(page)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Помилка збереження')
@@ -196,7 +378,7 @@ export default function DbEditorPage() {
     setError(null)
     try {
       await apiFetch(`/tables/${selected}/row/${pkVal}`, { method: 'DELETE' })
-      apiFetch('/tables').then(setTables).catch(() => {})
+      loadTables()
       await loadPage(page)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Помилка видалення')
@@ -223,7 +405,16 @@ export default function DbEditorPage() {
 
         {/* ── Left: table list ─────────────────────────────────────────── */}
         <div className={styles.sidebar}>
-          <div className={styles.sidebarTitle}>Таблиці ({tables.length})</div>
+          <div className={styles.sidebarTitle}>
+            Таблиці ({tables.length})
+            <button className={styles.btnToggle} onClick={loadTables} title="Оновити список">⟳</button>
+            <button className={styles.btnErd} onClick={() => setShowErd(true)} title="Відкрити схему БД">Схема БД</button>
+          </div>
+          {loadError && (
+            <div style={{ color: '#c0392b', fontSize: '0.75rem', padding: '0.3rem 0.5rem', background: '#fde8e8' }}>
+              {loadError}
+            </div>
+          )}
           <input
             className={styles.searchBox}
             placeholder="Пошук таблиці..."
@@ -346,6 +537,9 @@ export default function DbEditorPage() {
                       {col.default != null && <span className={styles.attrChip}>DEFAULT: {col.default}</span>}
                       {fk && <span className={styles.attrFk}>→ {fk.to_table}.{fk.to_col}</span>}
                     </div>
+                    {COLUMN_HINTS[schema.table]?.[col.name] && (
+                      <div className={styles.colHint}>{COLUMN_HINTS[schema.table][col.name]}</div>
+                    )}
                   </div>
                 )
               })}
@@ -390,6 +584,9 @@ export default function DbEditorPage() {
         </div>
       </div>
 
+      {/* ── ERD overlay ─────────────────────────────────────────────────── */}
+      {showErd && <ErdView onClose={() => setShowErd(false)} />}
+
       {/* ── Edit modal ──────────────────────────────────────────────────── */}
       {editRow && schema && (
         <div
@@ -431,8 +628,22 @@ export default function DbEditorPage() {
                         {!col.not_null && <option value="">— NULL —</option>}
                         {opts.map(o => (
                           <option key={String(o.value)} value={String(o.value)}>
-                            {o.label} (#{o.value})
+                            {o.label} (#{String(o.value)})
                           </option>
+                        ))}
+                      </select>
+                    ) : checkEnums[col.name] ? (
+                      <select
+                        className={styles.fieldSelect}
+                        value={val != null ? String(val) : ''}
+                        onChange={e => setEditVals(v => ({
+                          ...v,
+                          [col.name]: e.target.value === '' ? null : e.target.value,
+                        }))}
+                      >
+                        {!col.not_null && <option value="">— NULL —</option>}
+                        {checkEnums[col.name].map(v => (
+                          <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
                     ) : (

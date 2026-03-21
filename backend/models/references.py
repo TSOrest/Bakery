@@ -16,9 +16,13 @@ class Unit(Base):
 class Category(Base):
     __tablename__ = "categories"
 
-    id        = Column(Integer, primary_key=True, autoincrement=True)
-    name      = Column(Text, nullable=False, unique=True)
-    is_active = Column(Integer, default=1)
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(Text, nullable=False, unique=True)
+    is_active  = Column(Integer, default=1)
+    # Відділ випічки
+    is_baked   = Column(Integer, default=1)    # 1 = відділ печеть вироби; 0 = тільки магазин/інше
+    reserve_pct = Column(Float, default=5.0)   # % резерву для рекомендованої кількості
+    sort_order = Column(Integer, default=0)    # порядок відображення і друку завдань
 
 
 class Product(Base):
@@ -27,7 +31,6 @@ class Product(Base):
     id            = Column(Integer, primary_key=True, autoincrement=True)
     name          = Column(Text, nullable=False)
     short_name    = Column(Text)
-    type          = Column(Text, nullable=False)   # bread | bun | other
     weight        = Column(Float)
     unit_id       = Column(Integer, ForeignKey("units.id"))
     category_id   = Column(Integer, ForeignKey("categories.id"))

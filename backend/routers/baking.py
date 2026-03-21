@@ -32,15 +32,7 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
     Резерв (bun_reserve_pct / bread_reserve_pct) додається і заокруглюється вгору
     до цілого — не можна спекти пів-буханки.
     """
-    from backend.models.references import Product
-    from backend.models.settings import Setting
-
-    def _setting(key: str, default: str) -> float:
-        row = db.query(Setting).filter(Setting.key == key).first()
-        return float(row.value if row else default)
-
-    bun_reserve   = _setting("bun_reserve_pct",   "5")
-    bread_reserve = _setting("bread_reserve_pct",  "5")
+    from backend.models.references import Product, Category
 
     aggregated = aggregate_for_baking(db, task_date)
     created = updated = 0
@@ -49,8 +41,11 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
         product = db.get(Product, row["product_id"])
         if not product:
             continue
-
-        reserve_pct = bun_reserve if product.type == "bun" else bread_reserve
+        category = db.get(Category, product.category_id) if product.category_id else None
+        # Пропускаємо вироби категорій що не випікаються (магазин/інше)
+        if category and not category.is_baked:
+            continue
+        reserve_pct = category.reserve_pct if category else 5.0
         # math.ceil — результат завжди ціле число
         recommended = math.ceil(row["ordered_qty"] * (1 + reserve_pct / 100))
 

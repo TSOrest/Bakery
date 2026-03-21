@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { Client, Order, Product } from '../types'
+import type { Category, Client, Order, Product } from '../types'
 import styles from './OrderModal.module.css'
 
 type CellKey = `${number}-${number}`
@@ -10,6 +10,7 @@ interface Props {
   client: Client
   workDate: string
   products: Product[]
+  categories: Category[]
   orders: Order[]
   saving: SavingMap
   locked?: boolean
@@ -20,8 +21,8 @@ interface Props {
 
 const fmt = (n: number) => n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function OrderModal({ client, workDate, products, orders, saving, locked, onQtyChange, onExchangeQtyChange, onClose }: Props) {
-  const [filter,  setFilter]  = useState<'all' | 'bread' | 'bun'>('all')
+export default function OrderModal({ client, workDate, products, categories, orders, saving, locked, onQtyChange, onExchangeQtyChange, onClose }: Props) {
+  const [filter,  setFilter]  = useState<'all' | number>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
   const [prices,  setPrices]  = useState<Record<number, number>>({})
@@ -85,7 +86,7 @@ export default function OrderModal({ client, workDate, products, orders, saving,
     orders.find(o => o.client_id === client.id && o.product_id === productId && o.parent_order_id == null)?.exchange_qty ?? 0
 
   const activeProducts = products.filter(p => p.is_active)
-  const filtered = filter === 'all' ? activeProducts : activeProducts.filter(p => p.type === filter)
+  const filtered = filter === 'all' ? activeProducts : activeProducts.filter(p => p.category_id === filter)
   const displayed = [...filtered].sort((a, b) => {
     if (sortBy === 'freq') {
       const diff = (freqs[b.id] ?? 0) - (freqs[a.id] ?? 0)
@@ -146,15 +147,20 @@ export default function OrderModal({ client, workDate, products, orders, saving,
         {/* Фільтр + сортування */}
         <div className={styles.filterBar}>
           <div className={styles.filterGroup}>
-            {(['all', 'bread', 'bun'] as const).map(f => (
-              <button
-                key={f}
-                className={`${styles.filterBtn} ${filter === f ? styles.active : ''}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === 'all' ? 'Всі' : f === 'bread' ? 'Хліб' : 'Булки'}
-              </button>
-            ))}
+            <button
+              className={`${styles.filterBtn} ${filter === 'all' ? styles.active : ''}`}
+              onClick={() => setFilter('all')}
+            >Всі</button>
+            {[...categories]
+              .filter(c => c.is_active)
+              .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+              .map(c => (
+                <button
+                  key={c.id}
+                  className={`${styles.filterBtn} ${filter === c.id ? styles.active : ''}`}
+                  onClick={() => setFilter(c.id)}
+                >{c.name}</button>
+              ))}
           </div>
           <div className={styles.sortGroup}>
             <button

@@ -36,6 +36,12 @@ def update_category(category_id: int, body: CategoryUpdate, db: Session = Depend
         c.name = body.name
     if body.is_active is not None:
         c.is_active = body.is_active
+    if body.is_baked is not None:
+        c.is_baked = body.is_baked
+    if body.reserve_pct is not None:
+        c.reserve_pct = body.reserve_pct
+    if body.sort_order is not None:
+        c.sort_order = body.sort_order
     db.commit()
     db.refresh(c)
     return c

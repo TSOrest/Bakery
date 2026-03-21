@@ -45,8 +45,6 @@ DEFAULT_SETTINGS = {
     "edrpou":                ("",               "Код ЄДРПОУ"),
     "iban":                  ("",               "IBAN рахунок"),
     "bank":                  ("",               "Банк"),
-    "bun_reserve_pct":       ("5",              "Резерв для булок, %"),
-    "bread_reserve_pct":     ("5",              "Резерв для хліба, %"),
     "order_lock_time":       ("22:00",          "Час блокування замовлень"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),

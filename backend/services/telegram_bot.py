@@ -255,16 +255,19 @@ def _remove_keyboard() -> dict:
     return {"remove_keyboard": True}
 
 
-def _type_inline_kb() -> dict:
-    """Inline-клавіатура для вибору типу товару."""
-    return {
-        "inline_keyboard": [
-            [{"text": "🍞 Хліб",  "callback_data": "type:bread"}],
-            [{"text": "🥐 Булки", "callback_data": "type:bun"}],
-            [{"text": "🛍 Інше",  "callback_data": "type:other"}],
-            [{"text": "❌ Скасувати", "callback_data": "cancel"}],
-        ]
-    }
+def _category_inline_kb() -> dict:
+    """Inline-клавіатура для вибору категорії товару (відділу) — динамічна з БД."""
+    from backend.models.references import Category as CategoryModel
+    with SessionLocal() as db:
+        cats = (
+            db.query(CategoryModel)
+            .filter(CategoryModel.is_active == 1, CategoryModel.is_baked == 1)
+            .order_by(CategoryModel.sort_order, CategoryModel.name)
+            .all()
+        )
+        rows = [[{"text": c.name, "callback_data": f"cat:{c.id}:{c.name}"}] for c in cats]
+    rows.append([{"text": "❌ Скасувати", "callback_data": "cancel"}])
+    return {"inline_keyboard": rows}
 
 
 def _products_inline_kb(products: list, page: int) -> dict:
@@ -292,7 +295,7 @@ def _products_inline_kb(products: list, page: int) -> dict:
     if nav:
         rows.append(nav)
 
-    rows.append([{"text": "🔙 До типів", "callback_data": "back:types"}])
+    rows.append([{"text": "🔙 До категорій", "callback_data": "back:categories"}])
 
     return {"inline_keyboard": rows}
 
@@ -536,12 +539,12 @@ def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str
     return "\n".join(lines)
 
 
-def _get_products_by_type(product_type: str, client_id: int, order_date: str) -> list[dict]:
-    """Повертає активні вироби заданого типу з ціною для клієнта."""
+def _get_products_by_category(category_id: int, client_id: int, order_date: str) -> list[dict]:
+    """Повертає активні вироби заданої категорії (відділу) з ціною для клієнта."""
     with SessionLocal() as db:
         products = (
             db.query(Product)
-            .filter(Product.is_active == 1, Product.type == product_type)
+            .filter(Product.is_active == 1, Product.category_id == category_id)
             .order_by(Product.name)
             .all()
         )
@@ -584,7 +587,7 @@ def _start_add_product(token: str, chat_id: int, client_id: int) -> None:
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     result = _send(token, chat_id,
                    "Оберіть тип товару:",
-                   _type_inline_kb())
+                   _category_inline_kb())
 
     msg_id = result.get("result", {}).get("message_id")
     with _state_lock:
@@ -596,14 +599,12 @@ def _start_add_product(token: str, chat_id: int, client_id: int) -> None:
         }
 
 
-def _show_products_page(token: str, chat_id: int, products: list, page: int, product_type: str) -> None:
+def _show_products_page(token: str, chat_id: int, products: list, page: int, category_name: str) -> None:
     """Показує (або оновлює) сторінку зі списком товарів."""
-    type_labels = {"bread": "🍞 Хліб", "bun": "🥐 Булки", "other": "🛍 Інше"}
-    label = type_labels.get(product_type, product_type)
     total = len(products)
     start = page * PAGE_SIZE + 1
     end = min((page + 1) * PAGE_SIZE, total)
-    text = f"<b>{label}</b> — оберіть товар ({start}–{end} з {total}):"
+    text = f"<b>{category_name}</b> — оберіть товар ({start}–{end} з {total}):"
 
     with _state_lock:
         state = _client_state.get(chat_id)
@@ -626,7 +627,7 @@ def _show_products_page(token: str, chat_id: int, products: list, page: int, pro
                 "step": "selecting_product",
                 "products": products,
                 "page": page,
-                "product_type": product_type,
+                "category_name": category_name,
             })
 
 
@@ -913,40 +914,40 @@ def _handle_callback(token: str, callback: dict) -> None:
         _send(token, chat_id, "Скасовано.", _client_keyboard())
         return
 
-    # ── Повернення до вибору типу ──
-    if data == "back:types":
+    # ── Повернення до вибору категорії ──
+    if data == "back:categories":
         msg_id = state.get("msg_id")
         if msg_id:
-            _edit_inline(token, chat_id, msg_id, "Оберіть тип товару:", _type_inline_kb())
+            _edit_inline(token, chat_id, msg_id, "Оберіть категорію товару:", _category_inline_kb())
         with _state_lock:
             if chat_id in _client_state:
                 _client_state[chat_id]["step"] = "selecting_type"
         return
 
-    # ── Вибір типу товару ──
-    if data.startswith("type:"):
-        product_type = data.split(":", 1)[1]
-        products = _get_products_by_type(
-            product_type,
+    # ── Вибір категорії товару ──
+    if data.startswith("cat:"):
+        parts = data.split(":", 2)
+        category_id = int(parts[1])
+        category_name = parts[2] if len(parts) > 2 else f"Категорія #{category_id}"
+        products = _get_products_by_category(
+            category_id,
             state["client_id"],
             state["order_date"],
         )
 
         if not products:
-            type_labels = {"bread": "Хліб", "bun": "Булки", "other": "Інше"}
-            _answer_callback(token, cb_id,
-                             f"Немає активних товарів: {type_labels.get(product_type, product_type)}")
+            _answer_callback(token, cb_id, f"Немає активних товарів: {category_name}")
             return
 
-        _show_products_page(token, chat_id, products, 0, product_type)
+        _show_products_page(token, chat_id, products, 0, category_name)
         return
 
     # ── Пагінація ──
     if data.startswith("page:"):
         page = int(data.split(":", 1)[1])
         products = state.get("products", [])
-        product_type = state.get("product_type", "bread")
-        _show_products_page(token, chat_id, products, page, product_type)
+        category_name = state.get("category_name", "")
+        _show_products_page(token, chat_id, products, page, category_name)
         return
 
     # ── Вибір конкретного товару ──

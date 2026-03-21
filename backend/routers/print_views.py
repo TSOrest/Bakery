@@ -9,7 +9,7 @@ from datetime import date as date_type
 from backend.database import get_db
 from backend.models.invoices import Invoice
 from backend.models.baking import BakingTask
-from backend.models.references import Product
+from backend.models.references import Product, Category
 from backend.models.settings import Setting
 from backend.services.orders import aggregate_for_baking
 
@@ -20,7 +20,6 @@ MONTHS_UK = [
     "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
 ]
 
-TYPE_LABELS = {"bread": "Хліб", "bun": "Булки", "other": "Інше"}
 
 
 def ua_date(iso: str) -> str:
@@ -67,22 +66,32 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     client_addr = (client.address or "") if client else ""
     route_name  = (client.route.name if client and client.route else "") if client else ""
 
-    # Групуємо рядки по типу виробу
-    groups: dict[str, list] = {}
+    # Групуємо рядки по категорії виробу (відділу)
+    # cat_id → [(line, product)]
+    groups: dict[int | None, list] = {}
+    cat_order: list[int | None] = []
     for line in inv.lines:
         product = db.get(Product, line.product_id)
-        ptype   = product.type if product else "other"
-        groups.setdefault(ptype, []).append((line, product))
+        cid = product.category_id if product else None
+        if cid not in groups:
+            groups[cid] = []
+            cat_order.append(cid)
+        groups[cid].append((line, product))
+
+    # Завантажуємо категорії для відображення назв і сортування
+    all_cats: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
+
+    # Сортуємо групи за sort_order категорії
+    cat_order.sort(key=lambda cid: all_cats[cid].sort_order if cid and cid in all_cats else 999)
 
     rows_html   = ""
-    group_totals = {}
+    group_totals: dict[int | None, float] = {}
     total_qty   = 0
     total_names = 0
 
-    for ptype in ["bread", "bun", "other"]:
-        group = groups.get(ptype, [])
-        if not group:
-            continue
+    for cid in cat_order:
+        group = groups[cid]
+        cat_label = all_cats[cid].name if cid and cid in all_cats else "Інше"
         g_sum = 0.0
         for line, product in group:
             p_name  = product.name if product else f"#{line.product_id}"
@@ -101,11 +110,10 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
         <td class="r">{fmt(eff_price)}</td>
         <td class="r">{fmt(line.sum)}</td>
       </tr>"""
-        group_totals[ptype] = g_sum
-        label = TYPE_LABELS.get(ptype, ptype)
+        group_totals[cid] = g_sum
         rows_html += f"""
       <tr class="subtotal">
-        <td colspan="5" class="r">Сума по &nbsp;<b>{label}</b></td>
+        <td colspan="5" class="r">Сума по &nbsp;<b>{cat_label}</b></td>
         <td class="r"><b>{fmt(g_sum)}</b></td>
       </tr>"""
 
@@ -340,7 +348,7 @@ def print_invoices(
 # ─── Завдання пекарям ─────────────────────────────────────────────────────────
 
 @router.get("/baking", response_class=HTMLResponse)
-def print_baking(task_date: str, product_type: Optional[str] = None, db: Session = Depends(get_db)):
+def print_baking(task_date: str, category_id: Optional[int] = None, db: Session = Depends(get_db)):
     import math
     tasks = (
         db.query(BakingTask)
@@ -349,25 +357,26 @@ def print_baking(task_date: str, product_type: Optional[str] = None, db: Session
         .all()
     )
 
+    # Всі категорії-відділи що випікають (is_baked=1), відсортовані
+    all_cats: dict[int, Category] = {
+        c.id: c for c in db.query(Category).filter(Category.is_baked == 1).order_by(Category.sort_order, Category.name).all()
+    }
+
     # Якщо завдання ще не сформовані — рахуємо з замовлень на льоту (без збереження)
     if not tasks:
         aggregated = aggregate_for_baking(db, task_date)
         if not aggregated:
             raise HTTPException(status_code=404, detail="Замовлень на цю дату не знайдено")
 
-        def _setting(key: str, default: str) -> float:
-            row = db.query(Setting).filter(Setting.key == key).first()
-            return float(row.value if row else default)
-
-        bun_reserve   = _setting("bun_reserve_pct",  "5")
-        bread_reserve = _setting("bread_reserve_pct", "5")
-
         tasks = []
         for row in aggregated:
             product = db.get(Product, row["product_id"])
             if not product:
                 continue
-            reserve_pct = bun_reserve if product.type == "bun" else bread_reserve
+            cat = all_cats.get(product.category_id) if product.category_id else None
+            if not cat:
+                continue  # пропускаємо невипечені категорії
+            reserve_pct = cat.reserve_pct
             t = BakingTask.__new__(BakingTask)
             t.product_id      = row["product_id"]
             t.ordered_qty     = row["ordered_qty"]
@@ -378,22 +387,27 @@ def print_baking(task_date: str, product_type: Optional[str] = None, db: Session
     cfg         = get_settings(db)
     bakery_name = cfg.get("bakery_name", "Пекарня")
 
-    groups: dict[str, list[BakingTask]] = {"bread": [], "bun": [], "other": []}
+    # Групуємо завдання по category_id (тільки is_baked категорії)
+    groups: dict[int, list[BakingTask]] = {}
     for task in tasks:
         product = db.get(Product, task.product_id)
-        ptype   = product.type if product else "other"
-        groups.setdefault(ptype, []).append(task)
+        if not product or not product.category_id:
+            continue
+        cid = product.category_id
+        if cid not in all_cats:
+            continue  # пропускаємо невипечені
+        groups.setdefault(cid, []).append(task)
 
-    types_to_render = [product_type] if product_type in ("bread", "bun", "other") else ["bread", "bun", "other"]
+    # Які категорії друкувати
+    cats_to_render = [all_cats[category_id]] if category_id and category_id in all_cats else list(all_cats.values())
 
-    # Якщо для вибраного типу нема жодного завдання — повертаємо 404
-    if product_type in ("bread", "bun", "other") and not groups.get(product_type):
-        label = TYPE_LABELS.get(product_type, product_type)
-        raise HTTPException(status_code=404, detail=f"Завдань на випічку ({label}) на {task_date} немає")
+    if category_id and category_id not in groups:
+        cat_name = all_cats[category_id].name if category_id in all_cats else str(category_id)
+        raise HTTPException(status_code=404, detail=f"Завдань на випічку ({cat_name}) на {task_date} немає")
 
     groups_html = ""
-    for ptype in types_to_render:
-        group = groups.get(ptype, [])
+    for cat in cats_to_render:
+        group = groups.get(cat.id, [])
         if not group:
             continue
         rows_html = ""
@@ -411,7 +425,7 @@ def print_baking(task_date: str, product_type: Optional[str] = None, db: Session
               <td></td><td></td>
             </tr>"""
         groups_html += f"""
-        <div class="section-title">{TYPE_LABELS.get(ptype, ptype)}</div>
+        <div class="section-title">{cat.name}</div>
         <table class="baking-tbl">
           <thead>
             <tr>

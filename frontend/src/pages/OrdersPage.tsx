@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
-import type { BotBroadcastResult, BotPendingOrder, Client, Order, Product, Route } from '../types'
+import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
 import OrderModal from '../components/OrderModal'
 import styles from './OrdersPage.module.css'
 
@@ -88,10 +88,11 @@ function BotPendingRow({
 export default function OrdersPage() {
   const { workDate } = useWorkDate()
 
-  const [routes,   setRoutes]   = useState<Route[]>([])
-  const [clients,  setClients]  = useState<Client[]>([])
-  const [products, setProducts] = useState<Product[]>([])
-  const [orders,   setOrders]   = useState<Order[]>([])
+  const [routes,     setRoutes]     = useState<Route[]>([])
+  const [clients,    setClients]    = useState<Client[]>([])
+  const [products,   setProducts]   = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [orders,     setOrders]     = useState<Order[]>([])
   const [loading,  setLoading]  = useState(true)
   const [saving,   setSaving]   = useState<SavingMap>({})
   const [prices,   setPrices]   = useState<PricesCache>({})
@@ -139,11 +140,13 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       api.get<Route[]>('/routes/'),
       api.get<Client[]>('/clients/'),
       api.get<Product[]>('/products/'),
+      api.get<Category[]>('/categories?active_only=false'),
       api.get<Order[]>(`/orders/?order_date=${date}`),
-    ]).then(([r, c, p, o]) => {
+    ]).then(([r, c, p, cats, o]) => {
       setRoutes(r.filter(rt => rt.is_active).sort((a, b) => a.sort_order - b.sort_order))
       setClients(c)
       setProducts(p)
+      setCategories(cats)
       setOrders(o)
       setLoading(false)
       // Завантажуємо ціни для всіх клієнтів з замовленнями
@@ -309,13 +312,14 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   // ─── Підрахунки по клієнту ────────────────────────────────────────────────
 
-  const clientBread = (id: number) =>
-    orders.filter(o => o.client_id === id && o.parent_order_id == null)
-      .reduce((s, o) => s + (productMap.get(o.product_id)?.type === 'bread' ? o.qty : 0), 0)
+  const bakedCategories = useMemo(
+    () => [...categories].filter(c => c.is_baked).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk')),
+    [categories]
+  )
 
-  const clientBun = (id: number) =>
-    orders.filter(o => o.client_id === id && o.parent_order_id == null)
-      .reduce((s, o) => s + (productMap.get(o.product_id)?.type === 'bun' ? o.qty : 0), 0)
+  const clientCategoryQty = (clientId: number, categoryId: number) =>
+    orders.filter(o => o.client_id === clientId && o.parent_order_id == null)
+      .reduce((s, o) => s + (productMap.get(o.product_id)?.category_id === categoryId ? o.qty : 0), 0)
 
   // ─── Рендер ────────────────────────────────────────────────────────────────
 
@@ -374,7 +378,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const showClientCol = selectedClientId == null
   const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 6
 
-  const openBakingPrint = async (type: 'bread' | 'bun') => {
+  const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
       const ok = window.confirm(
         `⚠️ Є ${pendingBotOrders.length} непідтверджених замовлень через бота.\n\n` +
@@ -382,7 +386,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       )
       if (!ok) return
     }
-    const url = `/api/v1/print/baking?task_date=${workDate}&product_type=${type}`
+    const url = `/api/v1/print/baking?task_date=${workDate}&category_id=${categoryId}`
     const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bakery_token')}` } })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
@@ -393,13 +397,6 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     }
   }
 
-  // Колір клітинки Хл/Бул: червоний якщо обидва 0, жовтий якщо цей 0 а інший > 0
-  const numCellClass = (val: number, other: number) => {
-    if (val === 0 && other === 0) return styles.cellRed
-    if (val === 0) return styles.cellYellow
-    return ''
-  }
-
   return (
     <div className={styles.page}>
 
@@ -407,8 +404,11 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       <div className={styles.toolbar}>
         <h2 className={styles.title}>Замовлення — {workDate}</h2>
         <div className={styles.bakingBtns}>
-          <button className={styles.btnBaking} onClick={() => openBakingPrint('bread')}>Завдання Хліб</button>
-          <button className={styles.btnBaking} onClick={() => openBakingPrint('bun')}>Завдання Булки</button>
+          {bakedCategories.map(cat => (
+            <button key={cat.id} className={styles.btnBaking} onClick={() => openBakingPrint(cat.id)}>
+              Завдання {cat.name}
+            </button>
+          ))}
           <button
             className={styles.btnBaking}
             disabled={broadcastLoading}
@@ -480,14 +480,17 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           <div className={styles.clientListWrap}>
             <div className={styles.clientListHeader}>
               <span className={styles.chName}>Клієнт</span>
-              <span className={styles.chNum} title="Хліб">Хл</span>
-              <span className={styles.chNum} title="Булки">Бул</span>
+              {bakedCategories.map(cat => (
+                <span key={cat.id} className={styles.chNum} title={cat.name}>
+                  {cat.name.substring(0, 3)}
+                </span>
+              ))}
               <span className={styles.chBtn}></span>
             </div>
             <div className={styles.clientList}>
               {sidebarClients.map(client => {
-                const bread = clientBread(client.id)
-                const bun   = clientBun(client.id)
+                const catQtys = bakedCategories.map(cat => clientCategoryQty(client.id, cat.id))
+                const totalQty = catQtys.reduce((s, q) => s + q, 0)
                 const isSel = client.id === selectedClientId
                 return (
                   <div
@@ -506,12 +509,11 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                     }}
                   >
                     <span className={styles.ciName}>{client.short_name ?? client.full_name}</span>
-                    <span className={`${styles.ciNum} ${numCellClass(bread, bun)}`}>
-                      {bread || ''}
-                    </span>
-                    <span className={`${styles.ciNum} ${numCellClass(bun, bread)}`}>
-                      {bun || ''}
-                    </span>
+                    {catQtys.map((qty, i) => (
+                      <span key={bakedCategories[i].id} className={`${styles.ciNum} ${qty === 0 && totalQty > 0 ? styles.cellYellow : qty === 0 ? styles.cellRed : ''}`}>
+                        {qty || ''}
+                      </span>
+                    ))}
                     <button
                       className={`${styles.ciAddBtn} ${lockedClientIds.has(client.id) ? styles.ciLocked : ''}`}
                       title={lockedClientIds.has(client.id) ? 'Накладна сформована — замовлення заблоковані' : 'Відкрити замовлення'}
@@ -646,6 +648,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           client={modalClient}
           workDate={workDate}
           products={products}
+          categories={categories}
           orders={orders}
           saving={saving}
           locked={lockedClientIds.has(modalClient.id)}

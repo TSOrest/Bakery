@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type {
-  BakingTask, Client, Product,
+  BakingTask, Category, Client, Product,
   SurplusAllocationLine, ShortageClientInfo,
 } from '../types'
 import styles from './BakingPage.module.css'
@@ -293,6 +293,7 @@ export default function BakingPage() {
 
   const [tasks,        setTasks]        = useState<BakingTask[]>([])
   const [products,     setProducts]     = useState<Product[]>([])
+  const [categories,   setCategories]   = useState<Category[]>([])
   const [clients,      setClients]      = useState<Client[]>([])
   const [surplusLines, setSurplusLines] = useState<SurplusAllocationLine[]>([])
   const [loading,      setLoading]      = useState(true)
@@ -309,14 +310,16 @@ export default function BakingPage() {
 
   const load = async (date: string) => {
     setLoading(true)
-    const [t, p, c, sl] = await Promise.all([
+    const [t, p, cats, c, sl] = await Promise.all([
       api.get<BakingTask[]>(`/baking/tasks?task_date=${date}`),
       api.get<Product[]>('/products/'),
+      api.get<Category[]>('/categories?active_only=false'),
       api.get<Client[]>('/clients/'),
       api.get<SurplusAllocationLine[]>(`/baking/surplus-lines?alloc_date=${date}`),
     ])
     setTasks(t)
     setProducts(p)
+    setCategories(cats)
     setClients(c)
     setSurplusLines(sl)
     const map: Record<number, number> = {}
@@ -383,7 +386,7 @@ export default function BakingPage() {
     return p?.short_name ?? p?.name ?? `#${id}`
   }
 
-  const productType = (id: number) => products.find((p) => p.id === id)?.type
+  const productCategoryId = (productId: number) => products.find((p) => p.id === productId)?.category_id
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
@@ -394,11 +397,17 @@ export default function BakingPage() {
     return (bakedMap[t.id] ?? t.baked_qty) < t.ordered_qty
   })
 
-  const groups = [
-    { label: 'Хліб',  list: tasks.filter((t) => productType(t.product_id) === 'bread') },
-    { label: 'Булки', list: tasks.filter((t) => productType(t.product_id) === 'bun')   },
-    { label: 'Інше',  list: tasks.filter((t) => productType(t.product_id) === 'other') },
-  ].filter(({ list }) => list.length > 0)
+  const bakedCategories = [...categories]
+    .filter((c) => c.is_baked)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+
+  const groups = bakedCategories
+    .map((cat) => ({
+      label:      cat.name,
+      category_id: cat.id,
+      list:       tasks.filter((t) => productCategoryId(t.product_id) === cat.id),
+    }))
+    .filter(({ list }) => list.length > 0)
 
   return (
     <div className={styles.page}>

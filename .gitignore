@@ -14,3 +14,10 @@ Bakery-Setup.bat
 bakery.db.bak-*
 DEV.md
 scripts/create-installer.ps1
+null
+.Old version as a ref/Пекарня_base.accdb
+.Old version as a ref/Пекарня.accdb
+logs/bakery.log
+logs/tray.lock
+.claude/settings.local.json
+.claude/settings.local.json
