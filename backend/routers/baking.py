@@ -29,7 +29,7 @@ def get_baking_tasks(task_date: str, db: Session = Depends(get_db)):
 def generate_tasks(task_date: str, db: Session = Depends(get_db)):
     """
     Генерує завдання на випічку на основі замовлень.
-    Резерв (bun_reserve_pct / bread_reserve_pct) додається і заокруглюється вгору
+    Резерв (category.reserve_pct) додається і заокруглюється вгору
     до цілого — не можна спекти пів-буханки.
     """
     from backend.models.references import Product, Category
