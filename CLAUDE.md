@@ -372,6 +372,33 @@ CREATE TABLE finances (
 );
 ```
 
+### Telegram Bot
+```sql
+-- Авторизовані користувачі бота (кілька акаунтів на клієнта)
+CREATE TABLE client_bot_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    chat_id TEXT NOT NULL UNIQUE,
+    phone TEXT,
+    first_name TEXT,
+    authorized_at TEXT,
+    is_active INTEGER DEFAULT 1
+);
+```
+
+Bot-поля в існуючих таблицях:
+```sql
+-- orders
+ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'phone' CHECK(source IN ('phone','paper','bot'));
+ALTER TABLE orders ADD COLUMN bot_status TEXT CHECK(bot_status IN ('pending','confirmed','rejected','modified'));
+ALTER TABLE orders ADD COLUMN bot_rejection_reason TEXT;
+ALTER TABLE orders ADD COLUMN bot_original_qty REAL;   -- qty до зміни оператором
+ALTER TABLE orders ADD COLUMN placed_by_chat_id TEXT;  -- хто подав замовлення
+
+-- clients
+ALTER TABLE clients ADD COLUMN bot_phones TEXT;        -- телефони для авторизації (через кому)
+```
+
 ### Налаштування
 ```sql
 CREATE TABLE settings (
@@ -394,7 +421,16 @@ INSERT INTO settings VALUES
     ('archive_months', '1', 'Місяців зберігати в активній БД'),
     ('cancel_discount_pct', '10', 'Знижка при перенесенні скасованого рейсу, %'),
     ('invoice_number_format', 'YYYYMMDD-NNN', 'Формат номера накладної'),
-    ('copy_order_days', '14', 'Кількість днів для функції копіювати з дати');
+    ('copy_order_days', '14', 'Кількість днів для функції копіювати з дати'),
+    -- Telegram Bot
+    ('telegram_bot_token', '', 'Токен Telegram-бота'),
+    ('bot_order_start_time', '08:00', 'Час початку прийому замовлень'),
+    ('bot_orders_closed_until', '', 'Бот не приймає замовлення до цього часу (ISO datetime)'),
+    ('bot_tpl_confirmed', '✅ {product} × {qty} шт на {date} підтверджено.', 'Шаблон: підтвердження'),
+    ('bot_tpl_rejected', '❌ {product} × {qty} шт на {date} відхилено. Причина: {reason}', 'Шаблон: відхилення'),
+    ('bot_tpl_modified', '✏️ {product}: замовлено {qty} → змінено на {new_qty} шт на {date}.', 'Шаблон: зміна кількості'),
+    ('bot_tpl_reminder', 'Нагадування: ви ще не подали замовлення на {date}.', 'Шаблон: нагадування'),
+    ('bot_tpl_deadline', 'Прийом замовлень через бота на {date} завершено.', 'Шаблон: закриття прийому');
 ```
 
 ---
@@ -421,6 +457,17 @@ INSERT INTO settings VALUES
     /reports           GET — різні звіти
     /settings          GET, PUT
     /issues            GET / (список client-report) · POST / (нове звернення → GitHub)
+    /bot/
+        pending-orders              GET — замовлення зі статусом pending
+        orders/{id}/verify          PUT — підтвердити/відхилити/змінити кількість
+        broadcast-reminder          POST — розсилка нагадувань
+        broadcast-deadline          POST — розсилка закриття прийому
+        order-status                GET — чи приймає бот замовлення
+        order-status/stop           POST — зупинити до ранку наступного дня
+        order-status/resume         POST — відновити негайно
+        clients/{id}/bot-users      GET — список авторизованих Telegram-юзерів
+        clients/{id}/bot-users/{uid} DELETE — відкликати авторизацію
+    /invoices/locked-clients        GET — client_ids з наявними накладними на дату
 ```
 
 ### Ключові бізнес-правила для сервісів
@@ -506,11 +553,39 @@ INSERT INTO settings VALUES
 - [x] `scripts/create-installer.ps1` — генерує `Bakery-Setup.ps1` з вбудованими токенами (git clone + install + write ISSUES_TOKEN до БД)
 - [x] Система звернень (Issues): `backend/routers/issues.py` проксує GitHub Issues API; `IssuesWidget.tsx` — плаваюча кнопка 💬 на всіх сторінках; токен зберігається в БД, ніколи не потрапляє у браузер
 
-### 🔄 Фаза 3 — Фінанси та аналітика
+### ✅ Фаза 3 — Фінанси та аналітика
 - [x] Фінансовий модуль (баланси клієнтів, рух коштів, журнал операцій)
 - [x] Управління цінами (майбутні дати, % зміна)
 - [x] Собівартість і маржинальність
 - [x] Мобільний дашборд для власника
+
+### ✅ Telegram Bot
+- [x] Авторизація через номер телефону (`/start` → контакт → прив'язка до клієнта)
+- [x] Мульти-юзер: кілька Telegram-акаунтів на одного клієнта (`client_bot_users`)
+- [x] `bot_phones` — список телефонів клієнта для авторизації в боті (через кому)
+- [x] Подача замовлення через бота: вибір типу → вибір товару → кількість
+  - показує ціну клієнта з урахуванням знижок (не вагу)
+  - сторінкова навігація по товарах
+- [x] Статус замовлення: значок на початку рядка (⏳/✅/✏️/❌/👤 для оператора)
+- [x] Верифікація оператором: підтвердити / відхилити / змінити кількість
+  - відповідь надсилається тому хто подав замовлення (`placed_by_chat_id`)
+  - fallback на перший активний chat_id клієнта
+  - зберігає `bot_original_qty` при зміні кількості
+- [x] Розсилки: нагадування клієнтам без замовлення, повідомлення про закриття прийому
+- [x] Кнопка "📦 Накладна сьогодні" — дані з таблиці `invoices` + баланс клієнта
+- [x] Контроль прийому замовлень: стоп (до ранку наступного дня) / відновлення
+  - налаштування `bot_orders_closed_until` (ISO datetime)
+  - налаштування `bot_order_start_time` (час відновлення, default "08:00")
+- [x] Блокування замовлень коли накладна вже сформована (як у UI оператора)
+- [x] Шаблони повідомлень у налаштуваннях (`bot_tpl_confirmed/rejected/modified/reminder/deadline`)
+- [x] UI оператора (OrdersPage): індикатор стану прийому (зелений/червоний), кнопка стоп/відновлення
+- [x] UI оператора: блокування рядків клієнта при наявності накладної (🔒)
+- [x] UI оператора: автооновлення pending-замовлень кожні 30 сек
+- [x] UI оператора: жовтий фон для pending, сірий disabled-вигляд для rejected
+- [x] UI оператора: розширений tooltip з примітками та оригінальною кількістю
+- [x] AdminPage: поле `bot_phones` + таблиця авторизованих користувачів з кнопкою відкликання
+- [x] BakingPage: попередження про непідтверджені bot-замовлення перед формуванням/друком
+- [x] Pending bot-замовлення виключені з агрегату для випічки
 
 ### ⬜ Фаза 3.5 — Уточнення (на основі аналізу старої системи)
 
@@ -577,10 +652,10 @@ INSERT INTO settings VALUES
 - Фільтр по статтях (редаговані статті відображаються в фільтрі)
 - Групування по маршрутах в списку клієнтів-боржників
 
-- [ ] Додати `parent_order_id` і `delivered_qty` до orders
-- [ ] Додати поля до clients (is_own_shop, print_invoice, receiver_name, delivery_agent, delivery_note_number, delivery_note_date, client_group)
-- [ ] Додати `initial_stock` до products
-- [ ] Замінити finance_type enum на таблицю `finance_articles`
+- [x] Додати `parent_order_id` і `delivered_qty` до orders
+- [x] Додати поля до clients (is_own_shop, print_invoice, receiver_name, delivery_agent, delivery_note_number, delivery_note_date, client_group)
+- [x] Додати `initial_stock` до products
+- [x] Замінити finance_type enum на таблицю `finance_articles`
 - [ ] UX вкладки Замовлення: дерево маршрут→клієнт, підказка середнього, швидка навігація
 - [ ] UX вкладки Випічка: пайок у рядку, Enter-навігація
 - [ ] UX вкладки Маршрути: акцент на "сума від водія", розгортання деталі замовлення
