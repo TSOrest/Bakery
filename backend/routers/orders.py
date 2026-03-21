@@ -46,6 +46,8 @@ def order_averages(
 def list_orders(
     order_date: Optional[str] = None,
     client_id: Optional[int] = None,
+    product_id: Optional[int] = None,
+    origin_id: Optional[str] = None,   # "0" = надлишки, "null" = звичайні, інше = ID джерела
     db: Session = Depends(get_db),
 ):
     q = db.query(Order)
@@ -53,6 +55,12 @@ def list_orders(
         q = q.filter(Order.order_date == order_date)
     if client_id:
         q = q.filter(Order.client_id == client_id)
+    if product_id:
+        q = q.filter(Order.product_id == product_id)
+    if origin_id == "null":
+        q = q.filter(Order.origin_id.is_(None))
+    elif origin_id is not None:
+        q = q.filter(Order.origin_id == int(origin_id))
     return q.order_by(Order.client_id, Order.product_id).all()
 
 

@@ -73,6 +73,7 @@ export interface Order {
   created_at: string | null
   parent_order_id: number | null
   delivered_qty: number | null
+  origin_id: number | null   // null=замовлення, 0=надлишок випічки, X=orders.id джерела
   bot_status: 'pending' | 'confirmed' | 'rejected' | 'modified' | null
   bot_rejection_reason: string | null
   bot_original_qty: number | null

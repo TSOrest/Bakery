@@ -32,6 +32,34 @@
   font-size: 0.95rem;
 }
 
+/* ─── Дві колонки ────────────────────────────────────────── */
+
+.twoCol {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.mainCol {
+  flex: 0 0 50%;
+  min-width: 0;
+}
+
+.sideCol {
+  flex: 0 0 50%;
+  min-width: 0;
+}
+
+.sideEmpty {
+  margin-top: 2.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #bbb;
+  font-size: 0.85rem;
+  border: 1px dashed #e0e0e0;
+  border-radius: 8px;
+}
+
 /* ─── Секції ──────────────────────────────────────────────── */
 
 .section { margin-bottom: 2rem; }
@@ -133,6 +161,7 @@
 
 /* ─── Панель надлишків ────────────────────────────────────── */
 
+/* Повністю розподілено — зелений тон */
 .surplusPanel {
   border: 1px solid #b8d4b0;
   border-radius: 6px;
@@ -142,6 +171,23 @@
 
 .surplusPanelHeader {
   background: #edf7ea;
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Частково розподілено — жовтий тон */
+.surplusPanelPartial {
+  border: 1px solid #d4c470;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.surplusPanelHeaderPartial {
+  background: #fffbe6;
   padding: 0.5rem 0.9rem;
   display: flex;
   align-items: center;
@@ -255,8 +301,9 @@
   border-top: 1px solid #e8e8e8;
 }
 
-.ok      { color: #27ae60; font-weight: 600; }
-.toShopHint { color: #888; }
+.ok          { color: #27ae60; font-weight: 600; }
+.toShopHint  { color: #888; }
+.unallocated { color: #e74c3c; font-weight: 700; }
 
 /* ─── Кнопки ──────────────────────────────────────────────── */
 

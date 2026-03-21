@@ -2,79 +2,89 @@ import { useEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type {
-  BakingTask, Category, Client, Product,
-  SurplusAllocationLine, ShortageClientInfo,
+  BakingTask, Category, Client, Order, Product, ShortageClientInfo,
 } from '../types'
 import styles from './BakingPage.module.css'
 
-// ─── Допоміжні функції ────────────────────────────────────────────────────────
-
-function recipientLabel(line: SurplusAllocationLine, clients: Client[]): string {
-  switch (line.recipient_type) {
-    case 'ration':   return 'Пайок'
-    case 'writeoff': return 'Списати'
-    case 'route':    return 'Маршрут'
-    case 'client': {
-      const c = clients.find((c) => c.id === line.client_id)
-      return c ? (c.short_name ?? c.full_name) : `Клієнт #${line.client_id}`
-    }
-  }
-}
-
 // ─── Панель розподілу надлишків (один продукт) ────────────────────────────────
+
+const KIND_ICON: Record<string, string> = {
+  shop:     '🏪',
+  ration:   '🍞',
+  writeoff: '🗑',
+  customer: '',
+}
 
 interface SurplusPanelProps {
   task: BakingTask
   productName: string
   clients: Client[]
-  lines: SurplusAllocationLine[]
+  lines: Order[]          // orders з origin_id=0 для цього продукту
   workDate: string
-  onLineAdded: (line: SurplusAllocationLine) => void
-  onLineDeleted: (id: number) => void
+  routeReserve: boolean
+  onLineAdded:   (order: Order) => void
+  onLineDeleted: (id: number)   => void
 }
 
 function SurplusPanel({
-  task, productName, clients, lines, workDate, onLineAdded, onLineDeleted,
+  task, productName, clients, lines, workDate, routeReserve, onLineAdded, onLineDeleted,
 }: SurplusPanelProps) {
-  const surplus = task.baked_qty - task.ordered_qty
+  const surplus   = task.baked_qty - task.ordered_qty
   const allocated = lines.reduce((s, l) => s + l.qty, 0)
-  const toShop = surplus - allocated  // решта йде до магазину за замовчуванням
+  const remaining = surplus - allocated
+  const isFullyAllocated = remaining === 0
 
-  const [recipient, setRecipient] = useState<string>('ration')
-  const [qty, setQty]             = useState<string>('')
-  const [notes, setNotes]         = useState<string>('')
-  const [saving, setSaving]       = useState(false)
+  // Впорядковані клієнти для dropdown: shop → ration → writeoff → (route) → customer
+  const shopClients     = clients.filter(c => c.is_active && c.client_kind === 'shop')
+  const rationClients   = clients.filter(c => c.is_active && c.client_kind === 'ration')
+  const writeoffClients = clients.filter(c => c.is_active && c.client_kind === 'writeoff')
+  const customerClients = clients.filter(c => c.is_active && c.client_kind === 'customer')
+
+  const firstId = (shopClients[0] ?? rationClients[0] ?? writeoffClients[0] ?? customerClients[0])?.id
+  const [selectedClientId, setSelectedClientId] = useState<number | ''>(firstId ?? '')
+  const [qty,    setQty]    = useState<string>('')
+  const [notes,  setNotes]  = useState<string>('')
+  const [saving, setSaving] = useState(false)
+
+  const clientName = (id: number) => {
+    const c = clients.find(c => c.id === id)
+    return c ? (c.short_name ?? c.full_name) : `#${id}`
+  }
 
   const handleAdd = async () => {
     const qtyNum = Number(qty)
-    if (!qtyNum || qtyNum <= 0) return
+    if (!qtyNum || qtyNum <= 0 || !selectedClientId) return
+    if (qtyNum > remaining) return
     setSaving(true)
-    const isClient = recipient.startsWith('client_')
-    const clientId = isClient ? Number(recipient.replace('client_', '')) : null
-    const type = isClient ? 'client' : (recipient as SurplusAllocationLine['recipient_type'])
-    const line = await api.post<SurplusAllocationLine>('/baking/surplus-lines', {
-      alloc_date: workDate,
+    const order = await api.post<Order>('/orders/', {
+      client_id:  selectedClientId,
       product_id: task.product_id,
-      recipient_type: type,
-      client_id: clientId,
-      qty: qtyNum,
-      notes: notes.trim() || null,
+      qty:        qtyNum,
+      order_date: workDate,
+      origin_id:  0,
+      notes:      notes.trim() || null,
     })
-    onLineAdded(line)
+    onLineAdded(order)
     setQty('')
     setNotes('')
     setSaving(false)
   }
 
   const handleDelete = async (id: number) => {
-    await api.delete(`/baking/surplus-lines/${id}`)
+    await api.delete(`/orders/${id}`)
     onLineDeleted(id)
   }
 
+  const renderClientOption = (c: Client) => (
+    <option key={c.id} value={c.id}>
+      {KIND_ICON[c.client_kind] ? `${KIND_ICON[c.client_kind]} ` : ''}{c.short_name ?? c.full_name}
+    </option>
+  )
+
   return (
-    <div className={styles.surplusPanel}>
+    <div className={isFullyAllocated ? styles.surplusPanel : styles.surplusPanelPartial}>
       {/* Заголовок */}
-      <div className={styles.surplusPanelHeader}>
+      <div className={isFullyAllocated ? styles.surplusPanelHeader : styles.surplusPanelHeaderPartial}>
         <span className={styles.surplusPanelName}>{productName}</span>
         <span className={styles.surplusTag}>
           Замовлено: {task.ordered_qty} &nbsp;·&nbsp; Спечено: {task.baked_qty}
@@ -96,7 +106,7 @@ function SurplusPanel({
           <tbody>
             {lines.map((line) => (
               <tr key={line.id}>
-                <td>{recipientLabel(line, clients)}</td>
+                <td>{clientName(line.client_id)}</td>
                 <td className={styles.lineQty}>{line.qty}</td>
                 <td className={styles.lineNotes}>{line.notes ?? ''}</td>
                 <td>
@@ -104,9 +114,7 @@ function SurplusPanel({
                     className={styles.btnDelete}
                     onClick={() => handleDelete(line.id)}
                     title="Видалити рядок"
-                  >
-                    🗑
-                  </button>
+                  >🗑</button>
                 </td>
               </tr>
             ))}
@@ -114,56 +122,58 @@ function SurplusPanel({
         </table>
       )}
 
-      {/* Форма додавання */}
-      <div className={styles.addLineForm}>
-        <select
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          className={styles.recipientSelect}
-        >
-          <option value="ration">Пайок</option>
-          <option value="writeoff">Списати</option>
-          <option value="route">Маршрут (резерв)</option>
-          <optgroup label="Клієнт">
-            {clients.filter((c) => c.is_active).map((c) => (
-              <option key={c.id} value={`client_${c.id}`}>
-                {c.short_name ?? c.full_name}
-              </option>
-            ))}
-          </optgroup>
-        </select>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          value={qty}
-          onChange={(e) => setQty(e.target.value)}
-          placeholder="к-сть"
-          className={styles.addQtyInput}
-        />
-        <input
-          type="text"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="нотатка..."
-          className={styles.addNotesInput}
-        />
-        <button
-          className={styles.btnAdd}
-          onClick={handleAdd}
-          disabled={saving || !qty}
-        >
-          + Додати
-        </button>
-      </div>
+      {/* Форма додавання — тільки якщо є нерозподілений залишок */}
+      {!isFullyAllocated && (
+        <div className={styles.addLineForm}>
+          <select
+            value={selectedClientId}
+            onChange={(e) => setSelectedClientId(Number(e.target.value))}
+            className={styles.recipientSelect}
+          >
+            {shopClients.map(renderClientOption)}
+            {rationClients.map(renderClientOption)}
+            {writeoffClients.map(renderClientOption)}
+            {routeReserve && <option value="route">🚚 Маршрут (резерв)</option>}
+            {customerClients.length > 0 && (
+              <optgroup label="Клієнти">
+                {customerClients.map(renderClientOption)}
+              </optgroup>
+            )}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={remaining}
+            step={1}
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            placeholder="к-сть"
+            className={styles.addQtyInput}
+          />
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="нотатка..."
+            className={styles.addNotesInput}
+          />
+          <button
+            className={styles.btnAdd}
+            onClick={handleAdd}
+            disabled={saving || !qty || !selectedClientId}
+          >
+            + Додати
+          </button>
+        </div>
+      )}
 
       {/* Підсумок */}
       <div className={styles.surplusSummary}>
         <span>Розподілено: <strong>{allocated}</strong> / {surplus}</span>
-        <span className={toShop === 0 ? styles.ok : styles.toShopHint}>
-          {toShop === 0
+        <span className={isFullyAllocated ? styles.ok : styles.unallocated}>
+          {isFullyAllocated
             ? '✓ Повністю розподілено'
-            : `До магазину (залишок): ${toShop}`}
+            : `⚠ Не розподілений надлишок: ${remaining}`}
         </span>
       </div>
     </div>
@@ -295,11 +305,12 @@ export default function BakingPage() {
   const [products,     setProducts]     = useState<Product[]>([])
   const [categories,   setCategories]   = useState<Category[]>([])
   const [clients,      setClients]      = useState<Client[]>([])
-  const [surplusLines, setSurplusLines] = useState<SurplusAllocationLine[]>([])
+  const [surplusOrders, setSurplusOrders] = useState<Order[]>([])
   const [loading,      setLoading]      = useState(true)
   const [generating,   setGenerating]   = useState(false)
   const [showRec,      setShowRec]      = useState(false)  // показувати "Рекомендовано"
   const [printNotice,  setPrintNotice]  = useState<string | null>(null)
+  const [routeReserve, setRouteReserve] = useState(false)
 
   const bakedTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
   const [bakedMap,  setBakedMap]  = useState<Record<number, number>>({})
@@ -310,18 +321,20 @@ export default function BakingPage() {
 
   const load = async (date: string) => {
     setLoading(true)
-    const [t, p, cats, c, sl] = await Promise.all([
+    const [t, p, cats, c, so, sett] = await Promise.all([
       api.get<BakingTask[]>(`/baking/tasks?task_date=${date}`),
       api.get<Product[]>('/products/'),
       api.get<Category[]>('/categories?active_only=false'),
       api.get<Client[]>('/clients/'),
-      api.get<SurplusAllocationLine[]>(`/baking/surplus-lines?alloc_date=${date}`),
+      api.get<Order[]>(`/orders/?order_date=${date}&origin_id=0`),
+      api.get<Record<string, { value: string }>>('/settings/'),
     ])
+    setRouteReserve(sett['baking_route_reserve']?.value === '1')
     setTasks(t)
     setProducts(p)
     setCategories(cats)
     setClients(c)
-    setSurplusLines(sl)
+    setSurplusOrders(so)
     const map: Record<number, number> = {}
     t.forEach((tk) => { map[tk.id] = tk.baked_qty })
     setBakedMap(map)
@@ -371,13 +384,13 @@ export default function BakingPage() {
   // ─── Розподіл надлишків ───────────────────────────────────────────────────
 
   const linesFor = (productId: number) =>
-    surplusLines.filter((l) => l.product_id === productId)
+    surplusOrders.filter((o) => o.product_id === productId)
 
-  const handleLineAdded = (line: SurplusAllocationLine) =>
-    setSurplusLines((prev) => [...prev, line])
+  const handleLineAdded = (order: Order) =>
+    setSurplusOrders((prev) => [...prev, order])
 
   const handleLineDeleted = (id: number) =>
-    setSurplusLines((prev) => prev.filter((l) => l.id !== id))
+    setSurplusOrders((prev) => prev.filter((o) => o.id !== id))
 
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
@@ -462,7 +475,10 @@ export default function BakingPage() {
         </div>
       ) : (
         <>
-          {/* ── Секція 1: Завдання пекарям ─────────────────────────────── */}
+          <div className={styles.twoCol}>
+
+          {/* ── Ліва колонка: Завдання пекарям ───────────────────────── */}
+          <div className={styles.mainCol}>
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Завдання пекарям</h3>
 
@@ -542,45 +558,60 @@ export default function BakingPage() {
               </div>
             ))}
           </section>
+          </div>{/* /mainCol */}
 
-          {/* ── Секція 2: Розподіл надлишків ────────────────────────────── */}
-          {withSurplus.length > 0 && (
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Розподіл надлишків</h3>
-              <p className={styles.hint}>
-                Вкажіть кому передати надлишки. Все нерозподілене автоматично йде до магазину.
-              </p>
-              {withSurplus.map((task) => (
-                <SurplusPanel
-                  key={task.product_id}
-                  task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
-                  productName={productName(task.product_id)}
-                  clients={clients}
-                  lines={linesFor(task.product_id)}
-                  workDate={workDate}
-                  onLineAdded={handleLineAdded}
-                  onLineDeleted={handleLineDeleted}
-                />
-              ))}
-            </section>
-          )}
+          {/* ── Права колонка: Надлишки + Нестача ────────────────────── */}
+          <div className={styles.sideCol}>
 
-          {/* ── Секція 3: Обробка нестачі ────────────────────────────────── */}
-          {withShortage.length > 0 && (
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Нестача — узгодження з клієнтами</h3>
-              <p className={styles.hint}>
-                Спечено менше ніж замовлено. Вкажіть на скільки зменшити замовлення кожного клієнта.
-              </p>
-              {withShortage.map((task) => (
-                <ShortagePanel
-                  key={task.product_id}
-                  task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
-                  productName={productName(task.product_id)}
-                />
-              ))}
-            </section>
-          )}
+            {withSurplus.length === 0 && withShortage.length === 0 && (
+              <div className={styles.sideEmpty}>
+                <span>Надлишків і нестачі немає</span>
+              </div>
+            )}
+
+            {/* Секція 2: Розподіл надлишків */}
+            {withSurplus.length > 0 && (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>Розподіл надлишків</h3>
+                <p className={styles.hint}>
+                  Вкажіть кому передати надлишки. Нерозподілений залишок нікуди не переноситься автоматично.
+                </p>
+                {withSurplus.map((task) => (
+                  <SurplusPanel
+                    key={task.product_id}
+                    task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
+                    productName={productName(task.product_id)}
+                    clients={clients}
+                    lines={linesFor(task.product_id)}
+                    workDate={workDate}
+                    routeReserve={routeReserve}
+                    onLineAdded={handleLineAdded}
+                    onLineDeleted={handleLineDeleted}
+                  />
+                ))}
+              </section>
+            )}
+
+            {/* Секція 3: Обробка нестачі */}
+            {withShortage.length > 0 && (
+              <section className={styles.section}>
+                <h3 className={styles.sectionTitle}>Нестача — узгодження</h3>
+                <p className={styles.hint}>
+                  Спечено менше ніж замовлено. Вкажіть на скільки зменшити замовлення.
+                </p>
+                {withShortage.map((task) => (
+                  <ShortagePanel
+                    key={task.product_id}
+                    task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
+                    productName={productName(task.product_id)}
+                  />
+                ))}
+              </section>
+            )}
+
+          </div>{/* /sideCol */}
+
+          </div>{/* /twoCol */}
         </>
       )}
     </div>

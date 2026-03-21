@@ -75,6 +75,7 @@ def _seed_initial_data() -> None:
     from backend.models.auth import User
     from backend.models.settings import Setting
     from backend.models.finances import FinanceArticle
+    from backend.models.references import Client
 
     with OrmSession(engine) as db:
         # Налаштування
@@ -103,6 +104,17 @@ def _seed_initial_data() -> None:
                     full_name=full_name,
                     role=role,
                 ))
+
+        # Системні клієнти — завжди мають існувати
+        for kind, name in [("writeoff", "Списання"), ("ration", "Пайок")]:
+            exists = db.query(Client).filter(Client.client_kind == kind).first()
+            if not exists:
+                db.add(Client(
+                    full_name=name, short_name=name,
+                    client_kind=kind, is_active=1,
+                    created_at=dt.now().isoformat(),
+                ))
+
         db.commit()
 
 

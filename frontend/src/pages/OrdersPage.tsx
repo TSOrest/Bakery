@@ -326,7 +326,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  const isShop = (c: Client) => c.client_kind === 'shop' || c.is_own_shop === 1
+  const isShop = (c: Client) => c.client_kind === 'shop'
 
   const sidebarClients = clients
     .filter(c => {
@@ -368,7 +368,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       c.is_active && c.client_kind !== 'writeoff' && c.client_kind !== 'ration'
     const rc = routeId == null
       ? clients.filter(visible)
-      : clients.filter(c => visible(c) && (c.client_kind === 'shop' || c.is_own_shop || c.route_id === routeId))
+      : clients.filter(c => visible(c) && (c.client_kind === 'shop' || c.route_id === routeId))
     const withOrders = rc.filter(c => orders.some(o => o.client_id === c.id && o.qty > 0 && o.parent_order_id == null))
     return `${withOrders.length}/${rc.length}`
   }
@@ -525,7 +525,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                     className={[
                       styles.clientItem,
                       isSel ? styles.clientSel : '',
-                      (client.client_kind === 'shop' || client.is_own_shop) ? styles.clientShop : '',
+                      client.client_kind === 'shop' ? styles.clientShop : '',
                     ].join(' ')}
                     onClick={() => {
                       if (isSel) { setSelectedClientId(null) }

@@ -8,14 +8,37 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.shop import ShopCount, OtherStockIn
-from backend.models.baking import BakingTask, SurplusAllocationLine
-from backend.models.references import Product, OtherProduct
+from backend.models.baking import BakingTask
+from backend.models.orders import Order
+from backend.models.references import Product, OtherProduct, Client
 from backend.schemas.shop import (
     ShopCountOut, ShopCountUpdate,
     OtherStockInCreate, OtherStockInOut,
 )
 
 router = APIRouter(prefix="/shop", tags=["Магазин"])
+
+
+def _shop_received(db: Session, count_date: str, product_id: int) -> float:
+    """Сума qty з orders з origin_id=0 для магазинів на задану дату і продукт."""
+    shop_ids = [
+        c.id for c in db.query(Client).filter(
+            Client.client_kind == "shop", Client.is_active == 1
+        ).all()
+    ]
+    if not shop_ids:
+        return 0.0
+    total = (
+        db.query(Order)
+        .filter(
+            Order.order_date == count_date,
+            Order.product_id == product_id,
+            Order.origin_id == 0,
+            Order.client_id.in_(shop_ids),
+        )
+        .all()
+    )
+    return sum(o.qty for o in total)
 
 
 # ─── Звірка ──────────────────────────────────────────────────────────────────
@@ -28,29 +51,12 @@ def list_counts(count_date: str, db: Session = Depends(get_db)):
         .order_by(ShopCount.product_id)
         .all()
     )
-    # Для незаблокованих рядків перераховуємо received_today актуально
+    # Для незбережених рядків — перераховуємо received_today з orders(origin_id=0)
     changed = False
     for sc in rows:
         if sc.saved:
             continue
-        task = (
-            db.query(BakingTask)
-            .filter(BakingTask.task_date == count_date, BakingTask.product_id == sc.product_id)
-            .first()
-        )
-        received = 0.0
-        if task and task.baked_qty > task.ordered_qty:
-            surplus = task.baked_qty - task.ordered_qty
-            explicitly_allocated = sum(
-                line.qty
-                for line in db.query(SurplusAllocationLine)
-                .filter(
-                    SurplusAllocationLine.alloc_date == count_date,
-                    SurplusAllocationLine.product_id == sc.product_id,
-                )
-                .all()
-            )
-            received = max(0.0, surplus - explicitly_allocated)
+        received = _shop_received(db, count_date, sc.product_id)
         if sc.received_today != received:
             sc.received_today = received
             changed = True
@@ -65,7 +71,7 @@ def init_counts(count_date: str, db: Session = Depends(get_db)):
     Ініціалізує рядки звірки на задану дату:
     - Бере всі активні вироби, що мають задачу на випічку або залишок з вчора
     - Заповнює yesterday_balance з попереднього дня
-    - Заповнює received_today з surplus_allocation_lines (to_shop)
+    - Заповнює received_today з orders з origin_id=0 для магазинів
     Якщо рядки вже існують — повертає наявні.
     """
     existing = db.query(ShopCount).filter(ShopCount.count_date == count_date).all()
@@ -91,26 +97,8 @@ def init_counts(count_date: str, db: Session = Depends(get_db)):
         if not product or not product.is_active:
             continue
 
-        # received_today = надлишок після замовлень мінус явно розподілені рядки
-        # Залишок надлишку йде до магазину неявно (відображається в SurplusPanel)
-        task = (
-            db.query(BakingTask)
-            .filter(BakingTask.task_date == count_date, BakingTask.product_id == pid)
-            .first()
-        )
-        shop_received = 0.0
-        if task and task.baked_qty > task.ordered_qty:
-            surplus = task.baked_qty - task.ordered_qty
-            explicitly_allocated = sum(
-                line.qty
-                for line in db.query(SurplusAllocationLine)
-                .filter(
-                    SurplusAllocationLine.alloc_date == count_date,
-                    SurplusAllocationLine.product_id == pid,
-                )
-                .all()
-            )
-            shop_received = max(0.0, surplus - explicitly_allocated)
+        # received_today = надлишки з випічки (origin_id=0) + скасування рейсів
+        shop_received = _shop_received(db, count_date, pid)
 
         sc = ShopCount(
             count_date=count_date,

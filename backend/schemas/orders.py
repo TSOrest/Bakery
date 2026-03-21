@@ -38,6 +38,7 @@ class OrderCreate(BaseModel):
     notes: Optional[str] = None
     parent_order_id: Optional[int] = None
     delivered_qty: Optional[float] = None
+    origin_id: Optional[int] = None
 
 
 class OrderUpdate(BaseModel):
@@ -71,6 +72,7 @@ class OrderOut(BaseModel):
     created_at: Optional[str]
     parent_order_id: Optional[int]
     delivered_qty: Optional[float]
+    origin_id: Optional[int]
     bot_status: Optional[str]
     bot_rejection_reason: Optional[str]
     bot_original_qty: Optional[float]

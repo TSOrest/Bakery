@@ -26,6 +26,8 @@ class Order(Base):
     # Split-замовлення: дочірній рядок посилається на батьківський
     parent_order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)
     delivered_qty        = Column(Float, nullable=True)
+    # Джерело рядка: NULL=замовлення клієнта, 0=надлишок випічки, X=orders.id звідки переміщено
+    origin_id            = Column(Integer, nullable=True)
     bot_status           = Column(Text, nullable=True)   # pending|confirmed|rejected|modified
     bot_rejection_reason = Column(Text, nullable=True)
     bot_original_qty     = Column(Float, nullable=True)  # кількість до модифікації оператором

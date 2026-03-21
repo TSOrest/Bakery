@@ -418,7 +418,6 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       route_id:    form.route_id ? Number(form.route_id) : null,
       discount_pct: Number(form.discount_pct),
       client_kind: form.client_kind,
-      is_own_shop: form.client_kind === 'shop' ? 1 : 0,
       bot_phones:  form.bot_phones.trim() || null,
     }
     try {
@@ -466,7 +465,9 @@ function ClientsTab({ routes }: { routes: Route[] }) {
               <Td>
                 <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
                 {c.is_active === 1 ? (
-                  <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+                  (c.client_kind === 'writeoff' || c.client_kind === 'ration')
+                    ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
+                    : <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
                 ) : (
                   <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
                 )}
@@ -1581,6 +1582,32 @@ function SettingsTab({ section }: { section: SettingsSection }) {
             {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
           </div>
         </form>
+
+        {/* ── Додаткові функції (окремі перемикачі) ── */}
+        <div style={{ marginTop: '2rem', borderTop: '1px solid #e8eef5', paddingTop: '1.25rem' }}>
+          <div style={{ fontWeight: 600, color: '#1a3a5c', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+            Додаткові функції
+          </div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', maxWidth: 520 }}>
+            <input
+              type="checkbox"
+              checked={form['baking_route_reserve'] === '1'}
+              onChange={(e) => {
+                const val = e.target.checked ? '1' : '0'
+                setForm(f => ({ ...f, baking_route_reserve: val }))
+                api.put('/settings/', { baking_route_reserve: val }).catch(() => {})
+              }}
+              style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+            />
+            <span>
+              <span style={{ fontWeight: 500 }}>Резерв для маршруту у розподілі надлишків</span>
+              <br />
+              <span style={{ fontSize: '0.82rem', color: '#e67e22' }}>
+                ⚠ Функція в розробці — увімкнення показує опцію «Маршрут (резерв)» у списку розподілу, але рух товару по маршруту ще не реалізовано.
+              </span>
+            </span>
+          </label>
+        </div>
       </>}
 
       {/* ── Telegram Бот ── */}

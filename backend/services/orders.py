@@ -60,6 +60,8 @@ def aggregate_for_baking(db: Session, date: str) -> List[dict]:
         .filter(
             Order.order_date == date,
             Order.status.in_(["confirmed", "draft"]),
+            # Тільки звичайні замовлення клієнтів (не надлишки і не переміщення)
+            Order.origin_id.is_(None),
             # Виключаємо bot-замовлення які ще не підтверджені оператором
             ~((Order.source == "bot") & (Order.bot_status == "pending")),
         )
