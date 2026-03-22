@@ -5,6 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
+
 class BakingTaskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -12,7 +13,7 @@ class BakingTaskOut(BaseModel):
     product_id: int
     ordered_qty: float
     recommended_qty: float
-    baked_qty: float
+    baked_qty: Optional[float] = None  # NULL = не введено, 0 = явно нуль
 
 
 class BakingTaskUpdate(BaseModel):
@@ -20,43 +21,3 @@ class BakingTaskUpdate(BaseModel):
     recommended_qty: Optional[float] = None
 
 
-class SurplusAllocationCreate(BaseModel):
-    alloc_date: str
-    product_id: int
-    to_shop: float = 0
-    to_route: float = 0
-    ration_qty: float = 0
-    written_off: float = 0
-    notes: Optional[str] = None
-
-
-class SurplusAllocationOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    alloc_date: str
-    product_id: int
-    to_shop: float
-    to_route: float
-    ration_qty: float
-    written_off: float
-    notes: Optional[str]
-
-
-class SurplusLineCreate(BaseModel):
-    alloc_date: str
-    product_id: int
-    recipient_type: str  # 'ration' | 'writeoff' | 'route' | 'client'
-    client_id: Optional[int] = None
-    qty: float
-    notes: Optional[str] = None
-
-
-class SurplusLineOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    alloc_date: str
-    product_id: int
-    recipient_type: str
-    client_id: Optional[int]
-    qty: float
-    notes: Optional[str]

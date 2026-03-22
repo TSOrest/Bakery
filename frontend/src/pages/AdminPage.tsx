@@ -19,6 +19,7 @@ type Tab =
   | 'prices'   | 'ingredients' | 'margin'
   | 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
   | 'users' | 'permissions'
+  | 'system_clients'
 
 interface TabGroup {
   label: string
@@ -58,6 +59,7 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
     permKey: 'admin_org',
     tabs: [
       { key: 'settings_bakery',  label: 'Параметри пекарні' },
+      { key: 'system_clients',   label: 'Системні клієнти' },
       { key: 'settings_bot',     label: 'Telegram Бот' },
       { key: 'settings_bot_tpl', label: 'Шаблони повідомлень' },
       { key: 'settings_issues',  label: 'Система звернень' },
@@ -169,7 +171,8 @@ export default function AdminPage() {
         {activeTab === 'products' && (
           <ProductsTab products={products} units={units} categories={categories} onReload={reloadProducts} />
         )}
-        {activeTab === 'clients'     && <ClientsTab routes={routes} />}
+        {activeTab === 'clients'        && <ClientsTab routes={routes} />}
+        {activeTab === 'system_clients' && <SystemClientsTab routes={routes} />}
         {activeTab === 'routes'      && <RoutesTab routes={routes} onReload={reloadRoutes} />}
         {activeTab === 'prices'      && <PricesTab products={products} clients={clients} />}
         {activeTab === 'units'       && (
@@ -368,10 +371,11 @@ interface BotUser {
 }
 
 const CLIENT_KIND_LABELS: Record<string, string> = {
-  customer: 'Клієнт',
-  shop:     'Власний магазин',
-  writeoff: 'Списання',
-  ration:   'Пайок',
+  customer:   'Клієнт',
+  shop:       'Власний магазин',
+  writeoff:   'Списання',
+  ration:     'Пайок',
+  underbaked: 'Недопечено',
 }
 
 function ClientsTab({ routes }: { routes: Route[] }) {
@@ -382,7 +386,8 @@ function ClientsTab({ routes }: { routes: Route[] }) {
   const [saving, setSaving]     = useState(false)
   const [botUsers, setBotUsers] = useState<BotUser[]>([])
 
-  const load = () => api.get<Client[]>('/clients/?active_only=false').then(setClients)
+  const load = () => api.get<Client[]>('/clients/?active_only=false')
+    .then(data => setClients(data.filter(c => c.client_kind === 'customer')))
   useEffect(() => { load() }, [])
 
   const openNew  = () => { setEditing(null); setForm(emptyClient()); setBotUsers([]); setModal(true) }
@@ -417,7 +422,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       accountant:  form.accountant || null,
       route_id:    form.route_id ? Number(form.route_id) : null,
       discount_pct: Number(form.discount_pct),
-      client_kind: form.client_kind,
+      client_kind: 'customer',
       bot_phones:  form.bot_phones.trim() || null,
     }
     try {
@@ -448,7 +453,7 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Скорочена</Th><Th>Тип</Th><Th>Маршрут</Th>
+            <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
             <Th>Знижка %</Th><Th>Телефон</Th><Th>Активний</Th><Th>Дії</Th>
           </tr>
         </thead>
@@ -457,20 +462,16 @@ function ClientsTab({ routes }: { routes: Route[] }) {
             <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
               <Td>{c.full_name}</Td>
               <Td>{c.short_name ?? '—'}</Td>
-              <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
               <Td>{routeName(c.route_id)}</Td>
               <Td>{c.discount_pct}</Td>
               <Td>{c.phone ?? '—'}</Td>
               <Td>{c.is_active ? '✓' : '✗'}</Td>
               <Td>
                 <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-                {c.is_active === 1 ? (
-                  (c.client_kind === 'writeoff' || c.client_kind === 'ration')
-                    ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
-                    : <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
-                ) : (
-                  <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
-                )}
+                {c.is_active === 1
+                  ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+                  : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+                }
               </Td>
             </tr>
           ))}
@@ -488,15 +489,6 @@ function ClientsTab({ routes }: { routes: Route[] }) {
               <label>Скорочена назва</label>
               <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
               <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
-            </div>
-            <div className={formStyles.field}>
-              <label>Тип клієнта</label>
-              <select value={form.client_kind} onChange={(e) => setForm({ ...form, client_kind: e.target.value })}>
-                <option value="customer">Клієнт</option>
-                <option value="shop">Власний магазин</option>
-                <option value="writeoff">Списання</option>
-                <option value="ration">Пайок</option>
-              </select>
             </div>
             <div className={formStyles.field}>
               <label>Маршрут</label>
@@ -571,6 +563,141 @@ function ClientsTab({ routes }: { routes: Route[] }) {
                 </table>
               </div>
             )}
+            <div className={formStyles.actions}>
+              <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
+              <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
+                {saving ? 'Збереження...' : 'Зберегти'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </section>
+  )
+}
+
+// ─── Системні клієнти ────────────────────────────────────────────────────────
+
+const SYSTEM_KINDS = ['shop', 'writeoff', 'ration', 'underbaked'] as const
+const PROTECTED_KINDS = new Set(['writeoff', 'ration', 'underbaked'])
+
+function SystemClientsTab({ routes }: { routes: Route[] }) {
+  const [clients, setClients]   = useState<Client[]>([])
+  const [modal, setModal]       = useState(false)
+  const [editing, setEditing]   = useState<Client | null>(null)
+  const [form, setForm]         = useState<ClientFormState>({ ...emptyClient(), client_kind: 'shop' })
+  const [saving, setSaving]     = useState(false)
+
+  const load = () => api.get<Client[]>('/clients/?active_only=false')
+    .then(data => setClients(data.filter(c => c.client_kind !== 'customer')))
+  useEffect(() => { load() }, [])
+
+  const openNew  = () => { setEditing(null); setForm({ ...emptyClient(), client_kind: 'shop' }); setModal(true) }
+  const openEdit = (c: Client) => {
+    setEditing(c)
+    setForm({
+      full_name:    c.full_name,
+      short_name:   c.short_name ?? '',
+      address:      c.address ?? '',
+      phone:        c.phone ?? '',
+      director:     '',
+      accountant:   '',
+      route_id:     c.route_id?.toString() ?? '',
+      discount_pct: c.discount_pct.toString(),
+      client_kind:  c.client_kind,
+      bot_phones:   c.bot_phones ?? '',
+    })
+    setModal(true)
+  }
+  const closeModal = () => setModal(false)
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    const body = {
+      full_name:    form.full_name,
+      short_name:   form.short_name || null,
+      address:      form.address || null,
+      phone:        form.phone || null,
+      route_id:     form.route_id ? Number(form.route_id) : null,
+      discount_pct: Number(form.discount_pct),
+      client_kind:  form.client_kind,
+    }
+    try {
+      if (editing) {
+        await api.put(`/clients/${editing.id}`, body)
+      } else {
+        await api.post('/clients/', body)
+      }
+      load(); closeModal()
+    } finally { setSaving(false) }
+  }
+
+  const routeName = (id: number | null) => routes.find((r) => r.id === id)?.name ?? '—'
+
+  return (
+    <section>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+        <strong>Системні клієнти ({clients.length})</strong>
+        <button onClick={openNew} style={addBtnStyle}>+ Додати</button>
+      </div>
+
+      <table style={tableStyle}>
+        <thead>
+          <tr style={{ background: '#e8eef5' }}>
+            <Th>Назва</Th><Th>Тип</Th><Th>Маршрут</Th><Th>Активний</Th><Th>Дії</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {clients.map((c) => (
+            <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
+              <Td>{c.full_name}</Td>
+              <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
+              <Td>{routeName(c.route_id)}</Td>
+              <Td>{c.is_active ? '✓' : '✗'}</Td>
+              <Td>
+                <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+                {c.is_active === 1 ? (
+                  PROTECTED_KINDS.has(c.client_kind)
+                    ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
+                    : <button onClick={async () => { if (!confirm(`Деактивувати "${c.full_name}"?`)) return; await api.delete(`/clients/${c.id}`); load() }} style={delBtnStyle}>Деактивувати</button>
+                ) : (
+                  <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+                )}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {modal && (
+        <Modal title={editing ? 'Редагувати системного клієнта' : 'Новий системний клієнт'} onClose={closeModal}>
+          <form onSubmit={handleSubmit} className={formStyles.form}>
+            <div className={formStyles.field}>
+              <label>Повна назва *</label>
+              <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+            </div>
+            <div className={formStyles.field}>
+              <label>Скорочена назва</label>
+              <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
+            </div>
+            <div className={formStyles.field}>
+              <label>Тип</label>
+              <select value={form.client_kind} onChange={(e) => setForm({ ...form, client_kind: e.target.value })}>
+                {SYSTEM_KINDS.map(k => (
+                  <option key={k} value={k}>{CLIENT_KIND_LABELS[k]}</option>
+                ))}
+              </select>
+            </div>
+            <div className={formStyles.field}>
+              <label>Маршрут</label>
+              <select value={form.route_id} onChange={(e) => setForm({ ...form, route_id: e.target.value })}>
+                <option value="">— не призначено —</option>
+                {routes.filter((r) => r.is_active).map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </div>
             <div className={formStyles.actions}>
               <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
               <button type="submit" disabled={saving} className={formStyles.btnPrimary}>

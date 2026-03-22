@@ -6,7 +6,7 @@ from backend.models.references import (
 )
 from backend.models.pricing import Price, ClientPriceOverride
 from backend.models.orders import Order
-from backend.models.baking import BakingTask, SurplusAllocation, SurplusAllocationLine
+from backend.models.baking import BakingTask
 from backend.models.invoices import Invoice, InvoiceLine
 from backend.models.movements import Movement, DailyBalance
 from backend.models.shop import ShopCount, OtherStockIn
@@ -20,7 +20,7 @@ __all__ = [
     "OtherProduct", "Route", "Client",
     "Price", "ClientPriceOverride",
     "Order",
-    "BakingTask", "SurplusAllocation", "SurplusAllocationLine",
+    "BakingTask",
     "Invoice", "InvoiceLine",
     "Movement", "DailyBalance",
     "ShopCount", "OtherStockIn",

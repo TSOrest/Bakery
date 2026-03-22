@@ -106,12 +106,13 @@ def _seed_initial_data() -> None:
                 ))
 
         # Системні клієнти — завжди мають існувати
-        for kind, name in [("writeoff", "Списання"), ("ration", "Пайок")]:
+        for kind, name in [("writeoff", "Списання"), ("ration", "Пайок"), ("underbaked", "Недопечено")]:
             exists = db.query(Client).filter(Client.client_kind == kind).first()
             if not exists:
                 db.add(Client(
                     full_name=name, short_name=name,
                     client_kind=kind, is_active=1,
+                    discount_pct=0,
                     created_at=dt.now().isoformat(),
                 ))
 

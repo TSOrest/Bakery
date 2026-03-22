@@ -52,7 +52,7 @@ export interface Client {
   delivery_note_number: string | null
   delivery_note_date: string | null
   client_group: string | null
-  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
+  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration' | 'underbaked'
   bot_phones: string | null
 }
 
@@ -102,29 +102,9 @@ export interface BakingTask {
   product_id: number
   ordered_qty: number
   recommended_qty: number
-  baked_qty: number
+  baked_qty: number | null  // null = ще не введено, 0 = явно нуль
 }
 
-export interface SurplusAllocation {
-  id: number
-  alloc_date: string
-  product_id: number
-  to_shop: number
-  to_route: number
-  ration_qty: number
-  written_off: number
-  notes: string | null
-}
-
-export interface SurplusAllocationLine {
-  id: number
-  alloc_date: string
-  product_id: number
-  recipient_type: 'ration' | 'writeoff' | 'route' | 'client'
-  client_id: number | null
-  qty: number
-  notes: string | null
-}
 
 export interface ShortageClientInfo {
   order_id: number
@@ -132,6 +112,7 @@ export interface ShortageClientInfo {
   client_name: string
   route_name: string
   ordered_qty: number
+  existing_reduction: number
 }
 
 export interface InvoiceLine {
@@ -190,7 +171,7 @@ export interface ClientBalance {
   balance: number
   last_payment_date: string | null
   last_invoice_date: string | null
-  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
+  client_kind: 'customer' | 'shop' | 'writeoff' | 'ration' | 'underbaked'
 }
 
 export interface FinanceSummary {

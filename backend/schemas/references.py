@@ -144,7 +144,7 @@ class ClientCreate(BaseModel):
     delivery_note_number: Optional[str] = None
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
-    client_kind: str = 'customer'
+    client_kind: str = 'customer'  # customer | shop | writeoff | ration | underbaked
     bot_phones: Optional[str] = None
 
 
@@ -186,5 +186,5 @@ class ClientOut(BaseModel):
     delivery_note_number: Optional[str]
     delivery_note_date: Optional[str]
     client_group: Optional[str]
-    client_kind: str = 'customer'
+    client_kind: str = 'customer'  # customer | shop | writeoff | ration | underbaked
     bot_phones: Optional[str] = None

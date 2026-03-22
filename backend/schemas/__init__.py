@@ -17,7 +17,6 @@ from backend.schemas.orders import (
 )
 from backend.schemas.baking import (
     BakingTaskOut, BakingTaskUpdate,
-    SurplusAllocationCreate, SurplusAllocationOut,
 )
 from backend.schemas.invoices import (
     InvoiceCreate, InvoiceOut, InvoiceLineCreate,
@@ -34,6 +33,5 @@ __all__ = [
     "ClientPriceOverrideCreate", "ClientPriceOverrideOut",
     "OrderCreate", "OrderUpdate", "OrderOut",
     "BakingTaskOut", "BakingTaskUpdate",
-    "SurplusAllocationCreate", "SurplusAllocationOut",
     "InvoiceCreate", "InvoiceOut", "InvoiceLineCreate",
 ]

@@ -9,7 +9,6 @@ from backend.database import get_db
 from backend.models.finances import Finance
 from backend.models.shop import ShopCount
 from backend.models.references import Client
-from backend.models.baking import SurplusAllocation
 from backend.services.prices import get_price
 from backend.models.finances import FinanceArticle
 from backend.schemas.finance import (
@@ -90,19 +89,34 @@ def summary(date: Optional[str] = None, db: Session = Depends(get_db)):
 @router.get("/internal-kpi")
 def internal_kpi(date: str, db: Session = Depends(get_db)):
     """KPI-картки для внутрішніх клієнтів: магазин, пайок, списання."""
-    # Пайок і списання — з surplus_allocations (рухи типу ration/writeoff не пишуться в movements)
-    allocs = db.query(SurplusAllocation).filter(SurplusAllocation.alloc_date == date).all()
+    from backend.models.orders import Order
 
-    # Ціни: get_price з таблиці prices за датою (без прив'язки до клієнта)
-    product_ids = {a.product_id for a in allocs}
+    # Розподіл надлишків зберігається як orders з origin_id=0
+    surplus_orders = db.query(Order).filter(
+        Order.order_date == date,
+        Order.origin_id == 0,
+    ).all()
+
+    product_ids = {o.product_id for o in surplus_orders}
     price_map: dict[int, float] = {
         pid: get_price(db, pid, None, date)
         for pid in product_ids
     }
 
-    ration_amount   = sum(price_map.get(a.product_id, 0) * (a.ration_qty  or 0) for a in allocs)
-    writeoff_amount = sum(price_map.get(a.product_id, 0) * (a.written_off or 0) for a in allocs)
-    shop_received   = sum(price_map.get(a.product_id, 0) * (a.to_shop     or 0) for a in allocs)
+    ration_amount = 0.0
+    writeoff_amount = 0.0
+    shop_received = 0.0
+    for o in surplus_orders:
+        client = db.get(Client, o.client_id)
+        if not client:
+            continue
+        amount = o.qty * price_map.get(o.product_id, 0.0)
+        if client.client_kind == 'ration':
+            ration_amount += amount
+        elif client.client_kind == 'writeoff':
+            writeoff_amount += amount
+        elif client.client_kind == 'shop':
+            shop_received += amount
 
     # Магазин — залишок зі shop_counts (entered_balance × price)
     shop_counts = db.query(ShopCount).filter(ShopCount.count_date == date).all()

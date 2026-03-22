@@ -4,15 +4,12 @@ import math
 from typing import List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.baking import BakingTask, SurplusAllocation, SurplusAllocationLine
-from backend.schemas.baking import (
-    BakingTaskOut, BakingTaskUpdate,
-    SurplusAllocationCreate, SurplusAllocationOut,
-    SurplusLineCreate, SurplusLineOut,
-)
+from backend.models.baking import BakingTask
+from backend.schemas.baking import BakingTaskOut, BakingTaskUpdate
 from backend.services.orders import aggregate_for_baking
 
 router = APIRouter(prefix="/baking", tags=["Випічка"])
@@ -31,11 +28,18 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
     Генерує завдання на випічку на основі замовлень.
     Резерв (category.reserve_pct) додається і заокруглюється вгору
     до цілого — не можна спекти пів-буханки.
+
+    При повторній генерації:
+    - задачі для незамовлених виробів з baked_qty=0 видаляються
+    - задачі для незамовлених виробів з baked_qty>0 обнуляють ordered/recommended
+      (виріб вже спечено — залишається для розподілу надлишку)
     """
     from backend.models.references import Product, Category
 
     aggregated = aggregate_for_baking(db, task_date)
     created = updated = 0
+
+    ordered_product_ids: set[int] = set()
 
     for row in aggregated:
         product = db.get(Product, row["product_id"])
@@ -48,6 +52,12 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
         reserve_pct = category.reserve_pct if category else 5.0
         # math.ceil — результат завжди ціле число
         recommended = math.ceil(row["ordered_qty"] * (1 + reserve_pct / 100))
+
+        # Ігноруємо вироби з нульовим підсумком замовлень (замовлення обнулені але не видалені)
+        if row["ordered_qty"] <= 0:
+            continue
+
+        ordered_product_ids.add(row["product_id"])
 
         existing = db.query(BakingTask).filter(
             BakingTask.task_date == task_date,
@@ -64,12 +74,51 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
                 product_id      = row["product_id"],
                 ordered_qty     = row["ordered_qty"],
                 recommended_qty = recommended,
+                baked_qty       = None,  # NULL = ще не введено
                 created_at      = datetime.now().isoformat(),
             ))
             created += 1
 
+    # Прибираємо задачі для виробів що більше не замовлені
+    removed = zeroed = 0
+    stale_tasks = db.query(BakingTask).filter(
+        BakingTask.task_date == task_date,
+        BakingTask.product_id.notin_(ordered_product_ids),
+    ).all()
+    for task in stale_tasks:
+        if task.baked_qty == 0:
+            db.delete(task)
+            removed += 1
+        else:
+            # Вже спечено — залишаємо але обнуляємо замовлення
+            task.ordered_qty     = 0
+            task.recommended_qty = 0
+            zeroed += 1
+
     db.commit()
-    return {"generated": created, "updated": updated}
+    return {"generated": created, "updated": updated, "removed": removed, "zeroed": zeroed}
+
+
+@router.post("/tasks/ensure", response_model=BakingTaskOut)
+def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db)):
+    """Створює задачу на випічку для виробу без замовлень якщо вона ще не існує."""
+    existing = db.query(BakingTask).filter(
+        BakingTask.task_date == task_date,
+        BakingTask.product_id == product_id,
+    ).first()
+    if existing:
+        return existing
+    task = BakingTask(
+        task_date=task_date,
+        product_id=product_id,
+        ordered_qty=0,
+        recommended_qty=0,
+        created_at=datetime.now().isoformat(),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 @router.put("/tasks/{task_id}", response_model=BakingTaskOut)
@@ -77,7 +126,7 @@ def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_
     task = db.get(BakingTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Завдання не знайдено")
-    for field, value in data.model_dump(exclude_none=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
     db.commit()
     db.refresh(task)
@@ -88,88 +137,56 @@ def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_
 
 @router.get("/shortage-clients")
 def get_shortage_clients(task_date: str, product_id: int, db: Session = Depends(get_db)):
-    """Повертає список клієнтів з замовленнями на цей виріб — щоб оператор міг узгодити зменшення."""
+    """Повертає список клієнтів з замовленнями на цей виріб — щоб оператор міг узгодити зменшення.
+
+    Виключає: надлишки (origin_id IS NOT NULL), дочірні рядки (parent_order_id IS NOT NULL),
+    та системних клієнтів (writeoff, ration, underbaked).
+    Повертає existing_reduction — вже зафіксоване зменшення через дочірні рядки.
+    """
     from backend.models.orders import Order
     from backend.models.references import Client, Route
 
-    orders = (
+    # Тільки батьківські звичайні замовлення клієнтів
+    SYSTEM_KINDS = {'writeoff', 'ration', 'underbaked'}
+    parent_orders = (
         db.query(Order)
-        .filter(Order.order_date == task_date, Order.product_id == product_id)
+        .filter(
+            Order.order_date == task_date,
+            Order.product_id == product_id,
+            Order.origin_id.is_(None),
+            Order.parent_order_id.is_(None),
+        )
         .all()
     )
 
     result = []
-    for o in orders:
+    for o in parent_orders:
         client = db.get(Client, o.client_id)
-        if not client:
+        if not client or client.client_kind in SYSTEM_KINDS:
             continue
         route = db.get(Route, client.route_id) if client.route_id else None
+
+        # Сума вже зафіксованих зменшень (дочірні рядки з underbaked-клієнтом)
+        existing_reduction = (
+            db.query(Order)
+            .join(Client, Order.client_id == Client.id)
+            .filter(
+                Order.parent_order_id == o.id,
+                Client.client_kind == 'underbaked',
+            )
+            .with_entities(func.coalesce(func.sum(Order.qty), 0))
+            .scalar() or 0
+        )
+
         result.append({
-            "order_id":   o.id,
-            "client_id":  o.client_id,
-            "client_name": client.short_name or client.full_name,
-            "route_name": route.name if route else "—",
-            "ordered_qty": o.qty,
+            "order_id":          o.id,
+            "client_id":         o.client_id,
+            "client_name":       client.short_name or client.full_name,
+            "route_name":        route.name if route else "—",
+            "ordered_qty":       o.qty,
+            "existing_reduction": float(existing_reduction),
         })
 
     return sorted(result, key=lambda x: x["route_name"])
 
 
-# ── Рядки розподілу надлишків ────────────────────────────────────────────────
-
-@router.get("/surplus-lines", response_model=List[SurplusLineOut])
-def get_surplus_lines(alloc_date: str, db: Session = Depends(get_db)):
-    return (
-        db.query(SurplusAllocationLine)
-        .filter(SurplusAllocationLine.alloc_date == alloc_date)
-        .all()
-    )
-
-
-@router.post("/surplus-lines", response_model=SurplusLineOut, status_code=201)
-def create_surplus_line(data: SurplusLineCreate, db: Session = Depends(get_db)):
-    line = SurplusAllocationLine(
-        **data.model_dump(),
-        created_at=datetime.now().isoformat(),
-    )
-    db.add(line)
-    db.commit()
-    db.refresh(line)
-    return line
-
-
-@router.delete("/surplus-lines/{line_id}", status_code=204)
-def delete_surplus_line(line_id: int, db: Session = Depends(get_db)):
-    line = db.get(SurplusAllocationLine, line_id)
-    if not line:
-        raise HTTPException(status_code=404, detail="Рядок не знайдено")
-    db.delete(line)
-    db.commit()
-
-
-# ── Старий ендпоінт surplus (summary, залишається для сумісності) ────────────
-
-@router.get("/surplus", response_model=List[SurplusAllocationOut])
-def get_surplus(alloc_date: str, db: Session = Depends(get_db)):
-    return db.query(SurplusAllocation).filter(SurplusAllocation.alloc_date == alloc_date).all()
-
-
-@router.post("/surplus", response_model=SurplusAllocationOut, status_code=201)
-def create_or_update_surplus(data: SurplusAllocationCreate, db: Session = Depends(get_db)):
-    existing = db.query(SurplusAllocation).filter(
-        SurplusAllocation.alloc_date == data.alloc_date,
-        SurplusAllocation.product_id == data.product_id,
-    ).first()
-
-    if existing:
-        for field, value in data.model_dump().items():
-            setattr(existing, field, value)
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    alloc = SurplusAllocation(**data.model_dump())
-    db.add(alloc)
-    db.commit()
-    db.refresh(alloc)
-    return alloc

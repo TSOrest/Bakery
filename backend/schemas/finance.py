@@ -86,7 +86,7 @@ class ClientBalance(BaseModel):
     balance:           float   # додатне = кредит; від'ємне = борг
     last_payment_date: Optional[str]
     last_invoice_date: Optional[str]
-    client_kind:       str = "customer"  # customer | shop | writeoff | ration
+    client_kind:       str = "customer"  # customer | shop | writeoff | ration | underbaked
 
 
 class FinanceSummary(BaseModel):

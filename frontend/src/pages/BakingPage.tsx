@@ -6,8 +6,6 @@ import type {
 } from '../types'
 import styles from './BakingPage.module.css'
 
-// ─── Панель розподілу надлишків (один продукт) ────────────────────────────────
-
 const KIND_ICON: Record<string, string> = {
   shop:     '🏪',
   ration:   '🍞',
@@ -15,64 +13,103 @@ const KIND_ICON: Record<string, string> = {
   customer: '',
 }
 
-interface SurplusPanelProps {
-  task: BakingTask
-  productName: string
-  clients: Client[]
-  lines: Order[]          // orders з origin_id=0 для цього продукту
-  workDate: string
+// ─── Єдина панель розбіжності (надлишок / нестача / конфлікт) ─────────────────
+
+interface DiscrepancyPanelProps {
+  task:         BakingTask
+  productName:  string
+  clients:      Client[]
+  surplusLines: Order[]     // origin_id=0 для цього продукту (зі стану батька)
+  workDate:     string
   routeReserve: boolean
-  onLineAdded:   (order: Order) => void
-  onLineDeleted: (id: number)   => void
+  onSurplusLineAdded:   (o: Order)   => void
+  onSurplusLineDeleted: (id: number) => void
+  onSurplusLineUpdated: (o: Order)   => void
 }
 
-function SurplusPanel({
-  task, productName, clients, lines, workDate, routeReserve, onLineAdded, onLineDeleted,
-}: SurplusPanelProps) {
-  const surplus   = task.baked_qty - task.ordered_qty
-  const allocated = lines.reduce((s, l) => s + l.qty, 0)
-  const remaining = surplus - allocated
-  const isFullyAllocated = remaining === 0
+function DiscrepancyPanel({
+  task, productName, clients, surplusLines, workDate, routeReserve,
+  onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated,
+}: DiscrepancyPanelProps) {
 
-  // Впорядковані клієнти для dropdown: shop → ration → writeoff → (route) → customer
+  const [clientRows,     setClientRows]     = useState<ShortageClientInfo[]>([])
+  const [childOrders,    setChildOrders]    = useState<Order[]>([])
+  const [reductions,     setReductions]     = useState<Record<number, number>>({})
+  const [editReductions, setEditReductions] = useState<Record<number, string>>({})
+  const [editQty,        setEditQty]        = useState<Record<number, string>>({})
+  const [loading,        setLoading]        = useState(true)
+  const [applying,       setApplying]       = useState(false)
+  const [addClientId,    setAddClientId]    = useState<number | ''>('')
+  const [addQty,         setAddQty]         = useState('')
+  const [addNotes,       setAddNotes]       = useState('')
+  const [addSaving,      setAddSaving]      = useState(false)
+
+  const underbakedClient = clients.find(c => c.client_kind === 'underbaked')
+
+  const loadRows = async () => {
+    setLoading(true)
+    const data = await api.get<ShortageClientInfo[]>(
+      `/baking/shortage-clients?task_date=${task.task_date}&product_id=${task.product_id}`
+    )
+    setClientRows(data)
+    if (underbakedClient) {
+      const parentIds = new Set(data.map(c => c.order_id))
+      const all = await api.get<Order[]>(
+        `/orders/?order_date=${task.task_date}&client_id=${underbakedClient.id}`
+      )
+      setChildOrders(all.filter(o => o.parent_order_id && parentIds.has(o.parent_order_id)))
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { loadRows() }, [task.task_date, task.product_id])
+
+  // ── Обчислення стану ──────────────────────────────────────────────────────
+  const rawDiff  = (task.baked_qty ?? 0) - task.ordered_qty  // + надлишок, - нестача
+  const surplus  = Math.max(0,  rawDiff)
+  const shortage = Math.max(0, -rawDiff)
+
+  const surplusAlloc       = surplusLines.reduce((s, l) => s + l.qty, 0)
+  const totalExistingReduc = clientRows.reduce((s, c) => s + c.existing_reduction, 0)
+  const totalNewReduc      = Object.values(reductions).reduce((s, v) => s + v, 0)
+
+  const surplusRemaining = surplus - surplusAlloc
+  const overAllocation   = surplusAlloc > surplus        // розподілено більше ніж є
+  const overReduction    = Math.max(0, totalExistingReduc - shortage)
+  const hasConflict      = rawDiff <= 0 && surplusAlloc > 0  // нестача/рівність але є записи розподілу
+  const effectiveDiff    = rawDiff - surplusAlloc + totalExistingReduc
+
+  const showSurplusSection  = surplusAlloc > 0 || rawDiff > 0
+  const showShortageSection = shortage > 0 || totalExistingReduc > 0
+
+  // Коли показувати edit/delete
+  const surplusRowsEditable  = overAllocation || hasConflict
+  const shortageRowsEditable = overReduction > 0
+
+  // ── Стиль панелі ──────────────────────────────────────────────────────────
+  const isPerfect  = effectiveDiff === 0 && !hasConflict && totalNewReduc === 0
+  const panelClass = isPerfect
+    ? styles.surplusPanel
+    : hasConflict || effectiveDiff < 0
+    ? styles.shortagePanel
+    : styles.surplusPanelPartial
+  const headerClass = isPerfect
+    ? styles.surplusPanelHeader
+    : hasConflict || effectiveDiff < 0
+    ? styles.shortagePanelHeader
+    : styles.surplusPanelHeaderPartial
+
+  // ── Клієнти для select (додавання надлишку) ───────────────────────────────
   const shopClients     = clients.filter(c => c.is_active && c.client_kind === 'shop')
   const rationClients   = clients.filter(c => c.is_active && c.client_kind === 'ration')
   const writeoffClients = clients.filter(c => c.is_active && c.client_kind === 'writeoff')
   const customerClients = clients.filter(c => c.is_active && c.client_kind === 'customer')
-
   const firstId = (shopClients[0] ?? rationClients[0] ?? writeoffClients[0] ?? customerClients[0])?.id
-  const [selectedClientId, setSelectedClientId] = useState<number | ''>(firstId ?? '')
-  const [qty,    setQty]    = useState<string>('')
-  const [notes,  setNotes]  = useState<string>('')
-  const [saving, setSaving] = useState(false)
+  const effectiveAddClientId = addClientId !== '' ? addClientId : (firstId ?? '')
 
   const clientName = (id: number) => {
     const c = clients.find(c => c.id === id)
     return c ? (c.short_name ?? c.full_name) : `#${id}`
-  }
-
-  const handleAdd = async () => {
-    const qtyNum = Number(qty)
-    if (!qtyNum || qtyNum <= 0 || !selectedClientId) return
-    if (qtyNum > remaining) return
-    setSaving(true)
-    const order = await api.post<Order>('/orders/', {
-      client_id:  selectedClientId,
-      product_id: task.product_id,
-      qty:        qtyNum,
-      order_date: workDate,
-      origin_id:  0,
-      notes:      notes.trim() || null,
-    })
-    onLineAdded(order)
-    setQty('')
-    setNotes('')
-    setSaving(false)
-  }
-
-  const handleDelete = async (id: number) => {
-    await api.delete(`/orders/${id}`)
-    onLineDeleted(id)
   }
 
   const renderClientOption = (c: Client) => (
@@ -81,217 +118,347 @@ function SurplusPanel({
     </option>
   )
 
-  return (
-    <div className={isFullyAllocated ? styles.surplusPanel : styles.surplusPanelPartial}>
-      {/* Заголовок */}
-      <div className={isFullyAllocated ? styles.surplusPanelHeader : styles.surplusPanelHeaderPartial}>
-        <span className={styles.surplusPanelName}>{productName}</span>
-        <span className={styles.surplusTag}>
-          Замовлено: {task.ordered_qty} &nbsp;·&nbsp; Спечено: {task.baked_qty}
-          &nbsp;·&nbsp; Надлишок: <strong>+{surplus}</strong>
-        </span>
-      </div>
-
-      {/* Існуючі рядки */}
-      {lines.length > 0 && (
-        <table className={styles.linesTable}>
-          <thead>
-            <tr>
-              <th>Кому</th>
-              <th>Кількість</th>
-              <th>Нотатка</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line) => (
-              <tr key={line.id}>
-                <td>{clientName(line.client_id)}</td>
-                <td className={styles.lineQty}>{line.qty}</td>
-                <td className={styles.lineNotes}>{line.notes ?? ''}</td>
-                <td>
-                  <button
-                    className={styles.btnDelete}
-                    onClick={() => handleDelete(line.id)}
-                    title="Видалити рядок"
-                  >🗑</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {/* Форма додавання — тільки якщо є нерозподілений залишок */}
-      {!isFullyAllocated && (
-        <div className={styles.addLineForm}>
-          <select
-            value={selectedClientId}
-            onChange={(e) => setSelectedClientId(Number(e.target.value))}
-            className={styles.recipientSelect}
-          >
-            {shopClients.map(renderClientOption)}
-            {rationClients.map(renderClientOption)}
-            {writeoffClients.map(renderClientOption)}
-            {routeReserve && <option value="route">🚚 Маршрут (резерв)</option>}
-            {customerClients.length > 0 && (
-              <optgroup label="Клієнти">
-                {customerClients.map(renderClientOption)}
-              </optgroup>
-            )}
-          </select>
-          <input
-            type="number"
-            min={1}
-            max={remaining}
-            step={1}
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-            placeholder="к-сть"
-            className={styles.addQtyInput}
-          />
-          <input
-            type="text"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="нотатка..."
-            className={styles.addNotesInput}
-          />
-          <button
-            className={styles.btnAdd}
-            onClick={handleAdd}
-            disabled={saving || !qty || !selectedClientId}
-          >
-            + Додати
-          </button>
-        </div>
-      )}
-
-      {/* Підсумок */}
-      <div className={styles.surplusSummary}>
-        <span>Розподілено: <strong>{allocated}</strong> / {surplus}</span>
-        <span className={isFullyAllocated ? styles.ok : styles.unallocated}>
-          {isFullyAllocated
-            ? '✓ Повністю розподілено'
-            : `⚠ Не розподілений надлишок: ${remaining}`}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-// ─── Панель нестачі (один продукт) ───────────────────────────────────────────
-
-interface ShortagePanelProps {
-  task: BakingTask
-  productName: string
-}
-
-function ShortagePanel({ task, productName }: ShortagePanelProps) {
-  const shortage = task.ordered_qty - task.baked_qty
-  const [clients, setClients]     = useState<ShortageClientInfo[]>([])
-  const [reductions, setReductions] = useState<Record<number, number>>({})
-  const [loading, setLoading]     = useState(true)
-  const [applied, setApplied]     = useState(false)
-  const [applying, setApplying]   = useState(false)
-
-  useEffect(() => {
-    api.get<ShortageClientInfo[]>(
-      `/baking/shortage-clients?task_date=${task.task_date}&product_id=${task.product_id}`
-    ).then((data) => {
-      setClients(data)
-      setLoading(false)
+  // ── Surplus actions ───────────────────────────────────────────────────────
+  const handleAddSurplus = async () => {
+    const qtyNum = Number(addQty)
+    if (!qtyNum || qtyNum <= 0 || !effectiveAddClientId) return
+    if (qtyNum > surplusRemaining) return
+    setAddSaving(true)
+    const order = await api.post<Order>('/orders/', {
+      client_id:  effectiveAddClientId,
+      product_id: task.product_id,
+      qty:        qtyNum,
+      order_date: workDate,
+      origin_id:  0,
+      notes:      addNotes.trim() || null,
     })
-  }, [task.task_date, task.product_id])
+    onSurplusLineAdded(order)
+    setAddQty('')
+    setAddNotes('')
+    setAddSaving(false)
+  }
 
-  const totalReduction = Object.values(reductions).reduce((s, v) => s + v, 0)
+  const handleDeleteSurplus = async (id: number) => {
+    await api.delete(`/orders/${id}`)
+    onSurplusLineDeleted(id)
+  }
 
-  const handleApply = async () => {
+  const handleSaveSurplusEdit = async (line: Order) => {
+    const raw = editQty[line.id]
+    if (raw === undefined) return
+    const newQty = Number(raw)
+    setEditQty(prev => { const n = { ...prev }; delete n[line.id]; return n })
+    if (!newQty || newQty <= 0 || newQty === line.qty) return
+    const updated = await api.put<Order>(`/orders/${line.id}`, { qty: newQty })
+    onSurplusLineUpdated(updated)
+  }
+
+  // ── Shortage actions ──────────────────────────────────────────────────────
+  const handleApplyReductions = async () => {
+    if (!underbakedClient) {
+      alert('Системний клієнт "Недопечено" не знайдений.')
+      return
+    }
     setApplying(true)
     for (const [orderId, reduceBy] of Object.entries(reductions)) {
       if (!reduceBy) continue
-      const c = clients.find((c) => c.order_id === Number(orderId))
-      if (!c) continue
-      const newQty = Math.max(0, c.ordered_qty - reduceBy)
-      if (newQty === 0) {
-        await api.delete(`/orders/${orderId}`)
-      } else {
-        await api.put(`/orders/${orderId}`, { qty: newQty })
-      }
+      await api.post('/orders/', {
+        client_id:       underbakedClient.id,
+        product_id:      task.product_id,
+        qty:             reduceBy,
+        order_date:      task.task_date,
+        parent_order_id: Number(orderId),
+      })
     }
-    setApplied(true)
+    setReductions({})
+    await loadRows()
     setApplying(false)
   }
 
-  if (loading) return <div className={styles.shortagePanel}>Завантаження...</div>
+  const handleSaveEditReduction = async (c: ShortageClientInfo) => {
+    const raw = editReductions[c.order_id]
+    if (raw === undefined) return
+    setEditReductions(prev => { const n = { ...prev }; delete n[c.order_id]; return n })
+    const newQty = Number(raw)
+    const toDelete = childOrders.filter(o => o.parent_order_id === c.order_id)
+    await Promise.all(toDelete.map(o => api.delete(`/orders/${o.id}`)))
+    if (newQty > 0 && underbakedClient) {
+      await api.post('/orders/', {
+        client_id:       underbakedClient.id,
+        product_id:      task.product_id,
+        qty:             newQty,
+        order_date:      task.task_date,
+        parent_order_id: c.order_id,
+      })
+    }
+    await loadRows()
+  }
+
+  const handleDeleteReduction = async (c: ShortageClientInfo) => {
+    const toDelete = childOrders.filter(o => o.parent_order_id === c.order_id)
+    await Promise.all(toDelete.map(o => api.delete(`/orders/${o.id}`)))
+    await loadRows()
+  }
+
+  if (loading) return <div className={panelClass} style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#888' }}>Завантаження...</div>
 
   return (
-    <div className={styles.shortagePanel}>
-      <div className={styles.shortagePanelHeader}>
+    <div className={panelClass}>
+
+      {/* ── Заголовок ──────────────────────────────────────────────────── */}
+      <div className={headerClass}>
         <span className={styles.surplusPanelName}>{productName}</span>
-        <span className={styles.shortageTag}>
+        <span className={styles.surplusTag}>
           Замовлено: {task.ordered_qty} &nbsp;·&nbsp; Спечено: {task.baked_qty}
-          &nbsp;·&nbsp; Нестача: <strong>-{shortage}</strong>
+          &nbsp;·&nbsp;
+          {rawDiff > 0
+            ? <>Надлишок: <strong>+{rawDiff}</strong></>
+            : rawDiff < 0
+            ? <>Нестача: <strong>{rawDiff}</strong></>
+            : <>Кількість відповідає</>
+          }
         </span>
       </div>
 
-      <table className={styles.linesTable}>
-        <thead>
-          <tr>
-            <th>Клієнт</th>
-            <th>Маршрут</th>
-            <th>Замовлено</th>
-            <th>Зменшити на</th>
-          </tr>
-        </thead>
-        <tbody>
-          {clients.map((c) => (
-            <tr key={c.order_id}>
-              <td>{c.client_name}</td>
-              <td className={styles.lineNotes}>{c.route_name}</td>
-              <td className={styles.lineQty}>{c.ordered_qty}</td>
-              <td>
-                <input
-                  type="number"
-                  min={0}
-                  max={c.ordered_qty}
-                  step={1}
-                  value={reductions[c.order_id] ?? ''}
-                  placeholder="0"
-                  className={styles.addQtyInput}
-                  onChange={(e) =>
-                    setReductions((prev) => ({
-                      ...prev,
-                      [c.order_id]: Math.min(Number(e.target.value), c.ordered_qty),
-                    }))
-                  }
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* ── Попередження про конфлікт ───────────────────────────────────── */}
+      {hasConflict && (
+        <div className={styles.overWarning}>
+          ⚠ Конфлікт: є <strong>{surplusAlloc}</strong> шт розподілених надлишків при поточній нестачі.
+          Спочатку видаліть або скоротіть рядки розподілу нижче.
+        </div>
+      )}
 
-      <div className={styles.surplusSummary}>
-        <span>
-          Погоджено зменшити:{' '}
-          <strong className={totalReduction >= shortage ? styles.ok : ''}>
-            {totalReduction}
-          </strong>{' '}
-          / {shortage}
-        </span>
-        {applied ? (
-          <span className={styles.ok}>✓ Замовлення оновлені</span>
-        ) : (
-          <button
-            className={styles.btnApply}
-            onClick={handleApply}
-            disabled={applying || totalReduction === 0}
-          >
-            {applying ? 'Застосовую...' : 'Застосувати'}
-          </button>
-        )}
-      </div>
+      {/* ── Секція розподілу надлишків ──────────────────────────────────── */}
+      {showSurplusSection && (
+        <>
+          {showShortageSection && (
+            <div className={styles.sectionDivider}>Розподіл надлишків</div>
+          )}
+
+          {surplusLines.length > 0 && (
+            <>
+              {overAllocation && !hasConflict && (
+                <div className={styles.overWarning}>
+                  ⚠ Розподілено на <strong>{surplusAlloc - surplus}</strong> більше ніж надлишок.
+                  Відредагуйте або видаліть зайві рядки.
+                </div>
+              )}
+              <table className={styles.linesTable}>
+                <thead>
+                  <tr>
+                    <th>Кому</th>
+                    <th>Кількість</th>
+                    <th>Нотатка</th>
+                    {surplusRowsEditable && <th />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {surplusLines.map(line => (
+                    <tr key={line.id}>
+                      <td>{clientName(line.client_id)}</td>
+                      <td className={styles.lineQty}>
+                        {surplusRowsEditable ? (
+                          <input
+                            type="number" min={1} step={1}
+                            value={editQty[line.id] ?? String(line.qty)}
+                            className={styles.addQtyInput}
+                            onChange={e => setEditQty(prev => ({ ...prev, [line.id]: e.target.value }))}
+                            onBlur={() => handleSaveSurplusEdit(line)}
+                          />
+                        ) : line.qty}
+                      </td>
+                      <td className={styles.lineNotes}>{line.notes ?? ''}</td>
+                      {surplusRowsEditable && (
+                        <td>
+                          <button
+                            className={styles.btnDelete}
+                            onClick={() => handleDeleteSurplus(line.id)}
+                            title="Видалити рядок"
+                          >🗑</button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {/* Форма додавання — є нерозподілений надлишок і немає конфлікту */}
+          {surplusRemaining > 0 && !hasConflict && (
+            <div className={styles.addLineForm}>
+              <select
+                value={effectiveAddClientId}
+                onChange={e => setAddClientId(Number(e.target.value))}
+                className={styles.recipientSelect}
+              >
+                {shopClients.map(renderClientOption)}
+                {rationClients.map(renderClientOption)}
+                {writeoffClients.map(renderClientOption)}
+                {routeReserve && <option value="route">🚚 Маршрут (резерв)</option>}
+                {customerClients.length > 0 && (
+                  <optgroup label="Клієнти">
+                    {customerClients.map(renderClientOption)}
+                  </optgroup>
+                )}
+              </select>
+              <input
+                type="number" min={1} max={surplusRemaining} step={1}
+                value={addQty}
+                onChange={e => setAddQty(e.target.value)}
+                placeholder="к-сть"
+                className={styles.addQtyInput}
+              />
+              <input
+                type="text"
+                value={addNotes}
+                onChange={e => setAddNotes(e.target.value)}
+                placeholder="нотатка..."
+                className={styles.addNotesInput}
+              />
+              <button
+                className={styles.btnAdd}
+                onClick={handleAddSurplus}
+                disabled={addSaving || !addQty || !effectiveAddClientId}
+              >
+                + Додати
+              </button>
+            </div>
+          )}
+
+          {/* Підсумок розподілу */}
+          <div className={styles.surplusSummary}>
+            <span>
+              Розподілено: <strong>{surplusAlloc}</strong> / {surplus || surplusAlloc}
+            </span>
+            {overAllocation
+              ? <span className={styles.unallocated}>⚠ Перерозподіл: +{surplusAlloc - surplus}</span>
+              : surplusRemaining === 0 && surplusAlloc > 0
+              ? <span className={styles.ok}>✓ Повністю розподілено</span>
+              : surplusRemaining > 0
+              ? <span className={styles.unallocated}>⚠ Не розподілено: {surplusRemaining}</span>
+              : null
+            }
+          </div>
+        </>
+      )}
+
+      {/* ── Секція узгодження нестачі ───────────────────────────────────── */}
+      {showShortageSection && (
+        <>
+          {showSurplusSection && (
+            <div className={styles.sectionDivider}>Узгодження нестачі</div>
+          )}
+
+          {overReduction > 0 && (
+            <div className={styles.overWarning}>
+              ⚠ Спечено більше ніж очікувалось. Знято на <strong>{overReduction}</strong> більше
+              ніж поточна нестача. Відредагуйте або видаліть зайве нижче.
+            </div>
+          )}
+
+          <table className={`${styles.linesTable} ${hasConflict ? styles.dimmed : ''}`}>
+            <thead>
+              <tr>
+                <th>Клієнт</th>
+                <th>Маршрут</th>
+                <th>Замовлено</th>
+                <th>Вже знято</th>
+                {!hasConflict && <th>Зняти ще</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {clientRows.map(c => {
+                const maxReduce = c.ordered_qty - c.existing_reduction
+                const showEditDel = shortageRowsEditable && c.existing_reduction > 0
+                return (
+                  <tr key={c.order_id}>
+                    <td>{c.client_name}</td>
+                    <td className={styles.lineNotes}>{c.route_name}</td>
+                    <td className={styles.lineQty}>{c.ordered_qty}</td>
+                    <td className={styles.lineQty}>
+                      {showEditDel ? (
+                        <div className={styles.inlineEditCell}>
+                          <input
+                            type="number" min={0} max={c.ordered_qty} step={1}
+                            value={editReductions[c.order_id] ?? String(c.existing_reduction)}
+                            className={styles.addQtyInput}
+                            onChange={e => setEditReductions(prev => ({ ...prev, [c.order_id]: e.target.value }))}
+                            onBlur={() => handleSaveEditReduction(c)}
+                          />
+                          <button
+                            className={styles.btnDelete}
+                            onClick={() => handleDeleteReduction(c)}
+                            title="Скасувати зняття"
+                          >🗑</button>
+                        </div>
+                      ) : c.existing_reduction > 0 ? (
+                        <span className={styles.shortageReduced}>-{c.existing_reduction}</span>
+                      ) : '—'}
+                    </td>
+                    {!hasConflict && (
+                      <td>
+                        <input
+                          type="number" min={0} max={maxReduce} step={1}
+                          value={reductions[c.order_id] ?? ''}
+                          placeholder="0"
+                          className={styles.addQtyInput}
+                          disabled={maxReduce <= 0}
+                          onChange={e => setReductions(prev => ({
+                            ...prev,
+                            [c.order_id]: Math.min(Number(e.target.value), maxReduce),
+                          }))}
+                        />
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          <div className={styles.surplusSummary}>
+            {!hasConflict && (
+              <span>
+                Погоджено зменшити:{' '}
+                <strong className={totalExistingReduc >= shortage ? styles.ok : ''}>
+                  {totalExistingReduc + totalNewReduc}
+                </strong>{' '}
+                / {shortage}
+              </span>
+            )}
+            {overReduction > 0 ? (
+              <span className={styles.unallocated}>⚠ Зайве зняття: +{overReduction}</span>
+            ) : hasConflict ? (
+              <span className={styles.unallocated}>⚠ Спочатку вирішіть конфлікт вище</span>
+            ) : totalExistingReduc >= shortage && totalNewReduc === 0 ? (
+              <span className={styles.ok}>✓ Нестачу узгоджено</span>
+            ) : (
+              <button
+                className={styles.btnApply}
+                onClick={handleApplyReductions}
+                disabled={applying || totalNewReduc === 0}
+              >
+                {applying ? 'Застосовую...' : 'Застосувати'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Нетто відхилення (тільки коли обидві секції) ───────────────── */}
+      {showSurplusSection && showShortageSection && (
+        <div className={styles.netSummary}>
+          Нетто відхилення:{' '}
+          <strong className={
+            effectiveDiff === 0 ? styles.ok :
+            effectiveDiff > 0  ? styles.surplusCell :
+            styles.shortageCell
+          }>
+            {effectiveDiff > 0 ? `+${effectiveDiff}` : effectiveDiff === 0 ? '✓ 0' : `${effectiveDiff}`}
+          </strong>
+        </div>
+      )}
     </div>
   )
 }
@@ -305,17 +472,21 @@ export default function BakingPage() {
   const [products,     setProducts]     = useState<Product[]>([])
   const [categories,   setCategories]   = useState<Category[]>([])
   const [clients,      setClients]      = useState<Client[]>([])
-  const [surplusOrders, setSurplusOrders] = useState<Order[]>([])
-  const [loading,      setLoading]      = useState(true)
+  const [surplusOrders,    setSurplusOrders]    = useState<Order[]>([])
+  const [underbakedOrders, setUnderbakedOrders] = useState<Order[]>([])
+  const [loading,          setLoading]          = useState(true)
   const [generating,   setGenerating]   = useState(false)
-  const [showRec,      setShowRec]      = useState(false)  // показувати "Рекомендовано"
+  const [showRec,      setShowRec]      = useState(false)
+  const [showEmpty,    setShowEmpty]    = useState(false)   // показати вироби без замовлень
   const [printNotice,  setPrintNotice]  = useState<string | null>(null)
   const [routeReserve, setRouteReserve] = useState(false)
 
-  const bakedTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
-  const [bakedMap,  setBakedMap]  = useState<Record<number, number>>({})
-  // Множина task.id де оператор явно ввів значення (навіть 0)
-  const [enteredIds, setEnteredIds] = useState<Set<number>>(new Set())
+  // Всі мапи і сети ключовані за product_id (не task.id) — підтримує "віртуальні" рядки
+  // null = значення не надано (порожнє поле), number = явно введене (в т.ч. 0)
+  const bakedTimers  = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
+  const [bakedMap,       setBakedMap]       = useState<Record<number, number | null>>({})
+  const [loadedBakedQty, setLoadedBakedQty] = useState<Record<number, number | null>>({})
+  const [enteredIds,     setEnteredIds]     = useState<Set<number>>(new Set())
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -335,9 +506,16 @@ export default function BakingPage() {
     setCategories(cats)
     setClients(c)
     setSurplusOrders(so)
-    const map: Record<number, number> = {}
-    t.forEach((tk) => { map[tk.id] = tk.baked_qty })
+    const underbakedClient = c.find(cl => cl.client_kind === 'underbaked')
+    if (underbakedClient) {
+      api.get<Order[]>(`/orders/?order_date=${date}&client_id=${underbakedClient.id}`)
+        .then(setUnderbakedOrders).catch(() => setUnderbakedOrders([]))
+    }
+    // null = не введено (baked_qty IS NULL у БД), 0/число = явно введено
+    const map: Record<number, number | null> = {}
+    t.forEach((tk) => { map[tk.product_id] = tk.baked_qty ?? null })
     setBakedMap(map)
+    setLoadedBakedQty(map)
     setLoading(false)
   }
 
@@ -371,26 +549,59 @@ export default function BakingPage() {
 
   // ─── Зміна "Спечено" з дебаунсом ─────────────────────────────────────────
 
-  const handleBakedChange = (task: BakingTask, value: number) => {
-    setBakedMap((prev) => ({ ...prev, [task.id]: value }))
-    setEnteredIds((prev) => new Set(prev).add(task.id))
-    if (bakedTimers.current[task.id]) clearTimeout(bakedTimers.current[task.id])
-    bakedTimers.current[task.id] = setTimeout(async () => {
-      const updated = await api.put<BakingTask>(`/baking/tasks/${task.id}`, { baked_qty: value })
+  const handleBakedBlur = (task: BakingTask) => {
+    // null = поле очищено/пусте → прибираємо з enteredIds
+    // number (в т.ч. 0) = явно введено → додаємо до enteredIds
+    const baked = bakedMap[task.product_id]
+    setEnteredIds(prev => {
+      const next = new Set(prev)
+      if (baked != null) { next.add(task.product_id) }
+      else               { next.delete(task.product_id) }
+      return next
+    })
+  }
+
+  const handleBakedKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const all = Array.from(document.querySelectorAll<HTMLInputElement>('[data-baked-input]'))
+    const idx = all.indexOf(e.currentTarget)
+    if (idx >= 0 && idx < all.length - 1) {
+      all[idx + 1].focus()
+      all[idx + 1].select()
+    }
+  }
+
+  const handleBakedChange = (task: BakingTask, rawValue: string) => {
+    // Порожній рядок → null (не введено), інакше → число (в т.ч. 0)
+    const value: number | null = rawValue === '' ? null : Math.max(0, Number(rawValue))
+    setBakedMap((prev) => ({ ...prev, [task.product_id]: value }))
+    if (bakedTimers.current[task.product_id]) clearTimeout(bakedTimers.current[task.product_id])
+    bakedTimers.current[task.product_id] = setTimeout(async () => {
+      const numValue = value ?? 0
+      let realId = task.id
+      if (task.id === 0) {
+        if (numValue === 0) return  // не створюємо задачу для пустого/нульового віртуального рядка
+        // Віртуальний рядок: спочатку створюємо задачу
+        const created = await api.post<BakingTask>(
+          `/baking/tasks/ensure?task_date=${task.task_date}&product_id=${task.product_id}`, {}
+        )
+        setTasks((prev) => [...prev, created])
+        realId = created.id
+      }
+      const updated = await api.put<BakingTask>(`/baking/tasks/${realId}`, { baked_qty: numValue })
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
     }, 600)
   }
 
-  // ─── Розподіл надлишків ───────────────────────────────────────────────────
+  // ─── Surplus callbacks ────────────────────────────────────────────────────
 
   const linesFor = (productId: number) =>
     surplusOrders.filter((o) => o.product_id === productId)
 
-  const handleLineAdded = (order: Order) =>
-    setSurplusOrders((prev) => [...prev, order])
-
-  const handleLineDeleted = (id: number) =>
-    setSurplusOrders((prev) => prev.filter((o) => o.id !== id))
+  const handleSurplusLineAdded   = (order: Order) => setSurplusOrders(prev => [...prev, order])
+  const handleSurplusLineDeleted = (id: number)   => setSurplusOrders(prev => prev.filter(o => o.id !== id))
+  const handleSurplusLineUpdated = (order: Order) => setSurplusOrders(prev => prev.map(o => o.id === order.id ? order : o))
 
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
@@ -399,28 +610,69 @@ export default function BakingPage() {
     return p?.short_name ?? p?.name ?? `#${id}`
   }
 
-  const productCategoryId = (productId: number) => products.find((p) => p.id === productId)?.category_id
-
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
-  const withSurplus  = tasks.filter((t) => (bakedMap[t.id] ?? t.baked_qty) > t.ordered_qty)
-  // Нестача: оператор явно ввів значення (enteredIds) І спечено < замовлено
-  const withShortage = tasks.filter((t) => {
-    if (!enteredIds.has(t.id)) return false
-    return (bakedMap[t.id] ?? t.baked_qty) < t.ordered_qty
+  // ── Фільтр: завдання з реальною розбіжністю ─────────────────────────────
+  // baked > ordered → надлишок (потрібен розподіл)
+  // baked < ordered → нестача (включно з 0) — записи зняття показуються всередині
+  // surplusOrders    → є записи розподілу надлишку (потрібен перегляд)
+  // underbakedOrders → НЕ показуємо окремого блоку коли baked=ordered:
+  //   якщо спечено рівно замовленому — записи зняття застарілі й не впливають на доставку;
+  //   вони з'являться в блоці нестачі якщо оператор знову зменшить Спечено
+  const withDiscrepancy = tasks.filter(t => {
+    // Показуємо тільки після того як оператор ввів "Спечено" (нульове поле — не рахується)
+    const bakedEntered = loadedBakedQty[t.product_id] != null || enteredIds.has(t.product_id)
+    if (!bakedEntered) return false
+
+    const baked = bakedMap[t.product_id] ?? 0
+    if (baked > t.ordered_qty) return true
+    if (baked < t.ordered_qty) return true
+    if (surplusOrders.some(o => o.product_id === t.product_id)) return true
+    return false
+  }).sort((a, b) => {
+    // Пріоритет: конфлікт > нестача > надлишок
+    const score = (t: BakingTask) => {
+      const baked = bakedMap[t.product_id] ?? t.baked_qty ?? 0
+      const alloc = surplusOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
+      if (baked <= t.ordered_qty && alloc > 0) return 0  // конфлікт
+      if (baked < t.ordered_qty) return 1                // нестача
+      return 2                                            // надлишок
+    }
+    return score(a) - score(b)
   })
 
   const bakedCategories = [...categories]
     .filter((c) => c.is_baked)
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
 
+  const taskByProductId = new Map(tasks.map(t => [t.product_id, t]))
+
+  const makeVirtualTask = (productId: number): BakingTask => ({
+    id: 0, task_date: workDate, product_id: productId,
+    ordered_qty: 0, recommended_qty: 0, baked_qty: 0,
+  })
+
+  // Рядок видимий якщо: showEmpty, або є замовлення, або введено Спечено
+  const isRowVisible = (t: BakingTask) =>
+    showEmpty ||
+    t.ordered_qty > 0 ||
+    (bakedMap[t.product_id] ?? 0) > 0 ||
+    enteredIds.has(t.product_id)
+
   const groups = bakedCategories
-    .map((cat) => ({
-      label:      cat.name,
-      category_id: cat.id,
-      list:       tasks.filter((t) => productCategoryId(t.product_id) === cat.id),
-    }))
-    .filter(({ list }) => list.length > 0)
+    .map((cat) => {
+      const catProducts = products
+        .filter(p => p.category_id === cat.id && p.is_active)
+        .sort((a, b) => (a.short_name ?? a.name).localeCompare(b.short_name ?? b.name, 'uk'))
+      const fullList    = catProducts.map(p => taskByProductId.get(p.id) ?? makeVirtualTask(p.id))
+      const visibleList = fullList.filter(isRowVisible)
+      return { label: cat.name, fullList, visibleList }
+    })
+    .filter(g => g.visibleList.length > 0)
+
+  const hasBakedProducts = bakedCategories.some(cat =>
+    products.some(p => p.category_id === cat.id && p.is_active)
+  )
 
   return (
     <div className={styles.page}>
@@ -435,6 +687,15 @@ export default function BakingPage() {
         >
           {generating ? 'Формую...' : '⟳ Сформувати із замовлень'}
         </button>
+        {hasBakedProducts && (
+          <button
+            className={styles.btnToggleRec}
+            onClick={() => setShowEmpty(v => !v)}
+            title="Показати або приховати вироби без замовлень"
+          >
+            {showEmpty ? '▲ Сховати пусті' : '▼ Показати всі вироби'}
+          </button>
+        )}
         {tasks.length > 0 && (
           <>
             <button
@@ -469,9 +730,11 @@ export default function BakingPage() {
         <div className={styles.printNotice}>⚠️ {printNotice}</div>
       )}
 
-      {tasks.length === 0 ? (
+      {groups.length === 0 ? (
         <div className={styles.empty}>
-          Завдань немає. Натисніть «Сформувати із замовлень».
+          {showEmpty
+            ? 'Активних виробів не знайдено.'
+            : 'Завдань немає. Натисніть «Сформувати із замовлень» або «Показати всі вироби».'}
         </div>
       ) : (
         <>
@@ -482,9 +745,14 @@ export default function BakingPage() {
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Завдання пекарям</h3>
 
-            {groups.map(({ label, list }) => (
+            {groups.map(({ label, visibleList, fullList }) => (
               <div key={label} className={styles.typeBlock}>
-                <div className={styles.typeLabel}>{label}</div>
+                <div className={styles.typeLabel}>
+                  {label}
+                  {!showEmpty && fullList.length > visibleList.length && (
+                    <span className={styles.hiddenCount}> +{fullList.length - visibleList.length} прихованих</span>
+                  )}
+                </div>
                 <div className={styles.tableWrap}>
                   <table className={styles.table}>
                     <thead>
@@ -497,11 +765,53 @@ export default function BakingPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {list.map((task) => {
-                        const baked = bakedMap[task.id] ?? task.baked_qty
-                        const diff  = baked - task.ordered_qty   // відхилення від замовленого
+                      {visibleList.map((task) => {
+                        // Введено = є в БД (loadedBakedQty != null) АБО внесено в цій сесії
+                        // Не беремо bakedMap — він оновлюється під час набору (до blur) і спричинив би ранній тригер
+                        const bakedIsEntered = loadedBakedQty[task.product_id] != null
+                          || enteredIds.has(task.product_id)
+                        const baked = bakedMap[task.product_id] ?? 0
+                        const isEmpty = task.ordered_qty === 0 && !bakedIsEntered
+                        const diff  = baked - task.ordered_qty
+                        const surplusAlloc  = surplusOrders.filter(o => o.product_id === task.product_id).reduce((s, o) => s + o.qty, 0)
+                        const shortageReduc = underbakedOrders.filter(o => o.product_id === task.product_id).reduce((s, o) => s + o.qty, 0)
+                        // Бейдж актуальний лише коли відповідає напрямку відхилення:
+                        // розподіл надлишку — тільки при diff>0, зняття — тільки при diff<0
+                        const hasSurplusCorr  = surplusAlloc > 0 && diff > 0
+                        const hasShortageCorr = shortageReduc > 0 && diff < 0
+                        const hasCorrection   = hasSurplusCorr || hasShortageCorr
+                        const correction    = (hasShortageCorr ? shortageReduc : 0) - (hasSurplusCorr ? surplusAlloc : 0)
+                        const effectiveDiff = diff + correction
+                        const isOverAlloc   = diff > 0 && surplusAlloc > diff
+                        const isOverReduc   = diff < 0 && shortageReduc > Math.abs(diff)
+
+                        const effectiveClass =
+                          !bakedIsEntered ? '' :
+                          diff === 0 ? styles.diffEffectiveOk :
+                          isOverAlloc || isOverReduc ? styles.diffEffectiveWarn :
+                          effectiveDiff > 0 ? styles.diffEffectiveSurplus :
+                          effectiveDiff < 0 ? styles.diffEffectiveShortage :
+                          styles.diffEffectiveOk
+
+                        // При diff=0 завжди "✓" — стале записи не змінюють реального відхилення в колонці
+                        const effectiveLabel =
+                          !bakedIsEntered ? '' :
+                          diff === 0 ? '✓' :
+                          effectiveDiff > 0 ? `+${effectiveDiff}` :
+                          effectiveDiff < 0 ? `${effectiveDiff}` : '✓'
+
+                        const badgeLabel =
+                          hasSurplusCorr && hasShortageCorr
+                            ? `↗${surplusAlloc} ✂${shortageReduc}`
+                            : hasSurplusCorr ? `↗ ${surplusAlloc} розподілено`
+                            : hasShortageCorr ? `✂ ${shortageReduc} знято`
+                            : ''
+
                         return (
-                          <tr key={task.id} className={styles.row}>
+                          <tr
+                            key={task.id || -task.product_id}
+                            className={`${styles.row} ${isEmpty ? styles.emptyRow : ''}`}
+                          >
                             <td className={styles.tdName}>{productName(task.product_id)}</td>
                             <td className={styles.tdNum}>{task.ordered_qty}</td>
                             {showRec && (
@@ -514,21 +824,37 @@ export default function BakingPage() {
                                 type="number"
                                 min={0}
                                 step={1}
-                                value={baked || ''}
+                                value={bakedMap[task.product_id] ?? ''}
                                 placeholder="—"
                                 className={styles.bakedInput}
+                                data-baked-input="true"
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => handleBakedChange(task, Number(e.target.value))}
+                                onChange={(e) => handleBakedChange(task, e.target.value)}
+                                onBlur={() => handleBakedBlur(task)}
+                                onKeyDown={handleBakedKeyDown}
                               />
                             </td>
-                            <td className={`${styles.tdNum} ${
-                              baked === 0 ? '' :
-                              diff > 0 ? styles.surplusCell :
-                              diff < 0 ? styles.shortageCell : styles.exactCell
-                            }`}>
-                              {baked > 0
-                                ? diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '✓'
-                                : ''}
+                            <td className={styles.tdNum}>
+                              {bakedIsEntered && (
+                                hasCorrection ? (
+                                  <div className={styles.diffCell}>
+                                    <span className={styles.diffRaw}>
+                                      {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '='}
+                                    </span>
+                                    <span className={styles.diffBadge}>{badgeLabel}</span>
+                                    <span className={`${styles.diffEffective} ${effectiveClass}`}>
+                                      {effectiveLabel}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className={
+                                    diff > 0 ? styles.surplusCell :
+                                    diff < 0 ? styles.shortageCell : styles.exactCell
+                                  }>
+                                    {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '✓'}
+                                  </span>
+                                )
+                              )}
                             </td>
                           </tr>
                         )
@@ -538,16 +864,16 @@ export default function BakingPage() {
                       <tr className={styles.footerRow}>
                         <td className={styles.tdName}><strong>Разом</strong></td>
                         <td className={styles.tdNum}>
-                          <strong>{list.reduce((s, t) => s + t.ordered_qty, 0)}</strong>
+                          <strong>{visibleList.reduce((s, t) => s + t.ordered_qty, 0)}</strong>
                         </td>
                         {showRec && (
                           <td className={styles.tdNum}>
-                            <strong>{list.reduce((s, t) => s + t.recommended_qty, 0)}</strong>
+                            <strong>{visibleList.reduce((s, t) => s + t.recommended_qty, 0)}</strong>
                           </td>
                         )}
                         <td className={styles.tdNum}>
                           <strong>
-                            {list.reduce((s, t) => s + (bakedMap[t.id] ?? t.baked_qty), 0)}
+                            {visibleList.reduce((s, t) => s + (bakedMap[t.product_id] ?? 0), 0)}
                           </strong>
                         </td>
                         <td />
@@ -560,50 +886,33 @@ export default function BakingPage() {
           </section>
           </div>{/* /mainCol */}
 
-          {/* ── Права колонка: Надлишки + Нестача ────────────────────── */}
+          {/* ── Права колонка: Розбіжності ────────────────────────────── */}
           <div className={styles.sideCol}>
 
-            {withSurplus.length === 0 && withShortage.length === 0 && (
+            {withDiscrepancy.length === 0 && (
               <div className={styles.sideEmpty}>
                 <span>Надлишків і нестачі немає</span>
               </div>
             )}
 
-            {/* Секція 2: Розподіл надлишків */}
-            {withSurplus.length > 0 && (
+            {withDiscrepancy.length > 0 && (
               <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Розподіл надлишків</h3>
+                <h3 className={styles.sectionTitle}>Розбіжності</h3>
                 <p className={styles.hint}>
-                  Вкажіть кому передати надлишки. Нерозподілений залишок нікуди не переноситься автоматично.
+                  Вироби де спечено ≠ замовлено або є нерозподілені записи.
                 </p>
-                {withSurplus.map((task) => (
-                  <SurplusPanel
+                {withDiscrepancy.map((task) => (
+                  <DiscrepancyPanel
                     key={task.product_id}
-                    task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
+                    task={{ ...task, baked_qty: bakedMap[task.product_id] ?? 0 }}
                     productName={productName(task.product_id)}
                     clients={clients}
-                    lines={linesFor(task.product_id)}
+                    surplusLines={linesFor(task.product_id)}
                     workDate={workDate}
                     routeReserve={routeReserve}
-                    onLineAdded={handleLineAdded}
-                    onLineDeleted={handleLineDeleted}
-                  />
-                ))}
-              </section>
-            )}
-
-            {/* Секція 3: Обробка нестачі */}
-            {withShortage.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Нестача — узгодження</h3>
-                <p className={styles.hint}>
-                  Спечено менше ніж замовлено. Вкажіть на скільки зменшити замовлення.
-                </p>
-                {withShortage.map((task) => (
-                  <ShortagePanel
-                    key={task.product_id}
-                    task={{ ...task, baked_qty: bakedMap[task.id] ?? task.baked_qty }}
-                    productName={productName(task.product_id)}
+                    onSurplusLineAdded={handleSurplusLineAdded}
+                    onSurplusLineDeleted={handleSurplusLineDeleted}
+                    onSurplusLineUpdated={handleSurplusLineUpdated}
                   />
                 ))}
               </section>

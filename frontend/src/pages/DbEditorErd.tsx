@@ -123,7 +123,7 @@ const TABLE_COLOR: Record<string, string> = {
   ingredients: '#2980b9', finance_articles: '#2980b9',
   clients: '#27ae60', products: '#27ae60', users: '#27ae60',
   orders: '#e67e22', invoices: '#e67e22', invoice_lines: '#e67e22',
-  baking_tasks: '#e67e22', surplus_allocations: '#e67e22', surplus_allocation_lines: '#e67e22',
+  baking_tasks: '#e67e22',
   prices: '#8e44ad', client_price_overrides: '#8e44ad', finances: '#8e44ad',
   shop_counts: '#16a085', other_products: '#16a085', other_stock_in: '#16a085',
   daily_balances: '#16a085', movements: '#16a085',
