@@ -25,11 +25,12 @@ interface DiscrepancyPanelProps {
   onSurplusLineAdded:   (o: Order)   => void
   onSurplusLineDeleted: (id: number) => void
   onSurplusLineUpdated: (o: Order)   => void
+  onShortageChanged:    () => void   // перезавантажити underbakedOrders у батьку
 }
 
 function DiscrepancyPanel({
   task, productName, clients, surplusLines, workDate, routeReserve,
-  onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated,
+  onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated, onShortageChanged,
 }: DiscrepancyPanelProps) {
 
   const [clientRows,     setClientRows]     = useState<ShortageClientInfo[]>([])
@@ -172,6 +173,7 @@ function DiscrepancyPanel({
     }
     setReductions({})
     await loadRows()
+    onShortageChanged()
     setApplying(false)
   }
 
@@ -192,12 +194,14 @@ function DiscrepancyPanel({
       })
     }
     await loadRows()
+    onShortageChanged()
   }
 
   const handleDeleteReduction = async (c: ShortageClientInfo) => {
     const toDelete = childOrders.filter(o => o.parent_order_id === c.order_id)
     await Promise.all(toDelete.map(o => api.delete(`/orders/${o.id}`)))
     await loadRows()
+    onShortageChanged()
   }
 
   if (loading) return <div className={panelClass} style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#888' }}>Завантаження...</div>
@@ -615,6 +619,14 @@ export default function BakingPage() {
   const handleSurplusLineDeleted = (id: number)   => setSurplusOrders(prev => prev.filter(o => o.id !== id))
   const handleSurplusLineUpdated = (order: Order) => setSurplusOrders(prev => prev.map(o => o.id === order.id ? order : o))
 
+  const handleShortageChanged = async () => {
+    const underbakedClient = clients.find(c => c.client_kind === 'underbaked')
+    if (underbakedClient) {
+      const updated = await api.get<Order[]>(`/orders/?order_date=${workDate}&client_id=${underbakedClient.id}`)
+      setUnderbakedOrders(updated)
+    }
+  }
+
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
   const productName = (id: number) => {
@@ -925,6 +937,7 @@ export default function BakingPage() {
                     onSurplusLineAdded={handleSurplusLineAdded}
                     onSurplusLineDeleted={handleSurplusLineDeleted}
                     onSurplusLineUpdated={handleSurplusLineUpdated}
+                    onShortageChanged={handleShortageChanged}
                   />
                 ))}
               </section>
