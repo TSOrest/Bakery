@@ -313,14 +313,17 @@
 
 /* Дерево дочірніх рядків (переміщення / повернення) */
 .expandBtn {
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0 0.2rem;
+  font-size: 0.7rem;
+  padding: 0;
   color: #7090b0;
   line-height: 1;
-  vertical-align: middle;
 }
 .expandBtn:hover { color: #1a3a5c; }
 
@@ -349,6 +352,7 @@
   font-size: 0.85rem;
 }
 .tdProduct {
+  position: relative;
   padding: 0.28rem 0.7rem;
   border-bottom: 1px solid #eee;
   font-size: 0.87rem;

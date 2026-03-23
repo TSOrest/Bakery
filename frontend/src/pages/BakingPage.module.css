@@ -156,7 +156,15 @@
 .exactCell    { color: #27ae60; }
 
 /* Корекція у клітинці Відхилення */
-.diffCell { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.diffCell { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+.thDiff {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  min-width: 180px;
+}
+.tdDiff { padding: 0.25rem 0.4rem; border-bottom: 1px solid #e8e8e8; text-align: left; min-width: 180px; }
 .diffRaw  { font-size: 0.72rem; color: #999; font-weight: 400; }
 .diffBadge {
   font-size: 0.72rem; color: #6a8aac; font-weight: 500;
@@ -239,14 +247,14 @@
 
 /* Повністю розподілено — зелений тон */
 .surplusPanel {
-  border: 1px solid #b8d4b0;
+  border: 1px solid #5a9e52;
   border-radius: 6px;
   margin-bottom: 1rem;
   overflow: hidden;
 }
 
 .surplusPanelHeader {
-  background: #edf7ea;
+  background: linear-gradient(to bottom, #c8e6c9, #dff0dc);
   padding: 0.5rem 0.9rem;
   display: flex;
   align-items: center;
@@ -256,14 +264,14 @@
 
 /* Частково розподілено — жовтий тон */
 .surplusPanelPartial {
-  border: 1px solid #d4c470;
+  border: 1px solid #c9a000;
   border-radius: 6px;
   margin-bottom: 1rem;
   overflow: hidden;
 }
 
 .surplusPanelHeaderPartial {
-  background: #fffbe6;
+  background: linear-gradient(to bottom, #fff0a0, #fffbe6);
   padding: 0.5rem 0.9rem;
   display: flex;
   align-items: center;
@@ -273,22 +281,23 @@
 
 .surplusPanelName { font-weight: 700; font-size: 0.95rem; }
 
-.surplusTag {
-  font-size: 0.85rem;
-  color: #444;
-}
+.headerDiff  { font-size: 0.85rem; font-weight: 700; margin-left: 0.15rem; }
+.headerSep   { color: #aaa; margin: 0 0.3rem; }
+.headerOk    { font-size: 0.85rem; color: #2e7d32; font-weight: 600; }
+.headerMuted { font-size: 0.85rem; color: #666; }
+.headerWarn  { font-size: 0.85rem; color: #c62828; font-weight: 600; }
 
 /* ─── Панель нестачі ──────────────────────────────────────── */
 
 .shortagePanel {
-  border: 1px solid #f5c6cb;
+  border: 1px solid #d9534f;
   border-radius: 6px;
   margin-bottom: 1rem;
   overflow: hidden;
 }
 
 .shortagePanelHeader {
-  background: #fff3f3;
+  background: linear-gradient(to bottom, #f5c6c6, #fde8e8);
   padding: 0.5rem 0.9rem;
   display: flex;
   align-items: center;

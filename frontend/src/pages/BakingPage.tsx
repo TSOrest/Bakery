@@ -212,16 +212,25 @@ function DiscrepancyPanel({
       {/* ── Заголовок ──────────────────────────────────────────────────── */}
       <div className={headerClass}>
         <span className={styles.surplusPanelName}>{productName}</span>
-        <span className={styles.surplusTag}>
-          Замовлено: {task.ordered_qty} &nbsp;·&nbsp; Спечено: {task.baked_qty}
-          &nbsp;·&nbsp;
-          {rawDiff > 0
-            ? <>Надлишок: <strong>+{rawDiff}</strong></>
-            : rawDiff < 0
-            ? <>Нестача: <strong>{rawDiff}</strong></>
-            : <>Кількість відповідає</>
-          }
+        <span className={styles.headerDiff}>
+          {rawDiff > 0 ? `+${rawDiff}` : rawDiff < 0 ? `${rawDiff}` : '='}
         </span>
+        <span className={styles.headerSep}>·</span>
+        {showShortageSection ? (
+          hasConflict
+            ? <span className={styles.headerWarn}>⚠ Конфлікт</span>
+            : totalExistingReduc >= shortage && totalNewReduc === 0
+            ? <span className={styles.headerOk}>{totalExistingReduc}/{shortage} ✓ Нестачу узгоджено</span>
+            : <span className={styles.headerMuted}>Погоджено: {totalExistingReduc + totalNewReduc}/{shortage}</span>
+        ) : showSurplusSection ? (
+          overAllocation
+            ? <span className={styles.headerWarn}>⚠ Перерозподіл: +{surplusAlloc - surplus}</span>
+            : surplusRemaining === 0 && surplusAlloc > 0
+            ? <span className={styles.headerOk}>{surplusAlloc}/{surplus || surplusAlloc} ✓ Повністю розподілено</span>
+            : surplusRemaining > 0
+            ? <span className={styles.headerMuted}>Розподілено: {surplusAlloc}/{surplus}</span>
+            : null
+        ) : null}
       </div>
 
       {/* ── Попередження про конфлікт ───────────────────────────────────── */}
@@ -328,20 +337,12 @@ function DiscrepancyPanel({
             </div>
           )}
 
-          {/* Підсумок розподілу */}
-          <div className={styles.surplusSummary}>
-            <span>
-              Розподілено: <strong>{surplusAlloc}</strong> / {surplus || surplusAlloc}
-            </span>
-            {overAllocation
-              ? <span className={styles.unallocated}>⚠ Перерозподіл: +{surplusAlloc - surplus}</span>
-              : surplusRemaining === 0 && surplusAlloc > 0
-              ? <span className={styles.ok}>✓ Повністю розподілено</span>
-              : surplusRemaining > 0
-              ? <span className={styles.unallocated}>⚠ Не розподілено: {surplusRemaining}</span>
-              : null
-            }
-          </div>
+          {/* Попередження перерозподілу — статус вже у заголовку */}
+          {overAllocation && (
+            <div className={styles.surplusSummary}>
+              <span className={styles.unallocated}>⚠ Розподілено на <strong>{surplusAlloc - surplus}</strong> більше ніж надлишок. Відредагуйте або видаліть зайві рядки.</span>
+            </div>
+          )}
         </>
       )}
 
@@ -433,32 +434,24 @@ function DiscrepancyPanel({
             </tbody>
           </table>
 
-          <div className={styles.surplusSummary}>
-            {!hasConflict && (
-              <span>
-                Погоджено зменшити:{' '}
-                <strong className={totalExistingReduc >= shortage ? styles.ok : ''}>
-                  {totalExistingReduc + totalNewReduc}
-                </strong>{' '}
-                / {shortage}
-              </span>
-            )}
-            {overReduction > 0 ? (
-              <span className={styles.unallocated}>⚠ Зайве зняття: +{overReduction}</span>
-            ) : hasConflict ? (
-              <span className={styles.unallocated}>⚠ Спочатку вирішіть конфлікт вище</span>
-            ) : totalExistingReduc >= shortage && totalNewReduc === 0 ? (
-              <span className={styles.ok}>✓ Нестачу узгоджено</span>
-            ) : (
-              <button
-                className={styles.btnApply}
-                onClick={handleApplyReductions}
-                disabled={applying || totalNewReduc === 0}
-              >
-                {applying ? 'Застосовую...' : 'Застосувати'}
-              </button>
-            )}
-          </div>
+          {/* Статус узгодження нестачі — кнопка або попередження; підсумок у заголовку */}
+          {(overReduction > 0 || hasConflict || !(totalExistingReduc >= shortage && totalNewReduc === 0)) && (
+            <div className={styles.surplusSummary}>
+              {overReduction > 0 ? (
+                <span className={styles.unallocated}>⚠ Зайве зняття: +{overReduction}</span>
+              ) : hasConflict ? (
+                <span className={styles.unallocated}>⚠ Спочатку вирішіть конфлікт вище</span>
+              ) : (
+                <button
+                  className={styles.btnApply}
+                  onClick={handleApplyReductions}
+                  disabled={applying || totalNewReduc === 0}
+                >
+                  {applying ? 'Застосовую...' : 'Застосувати'}
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -807,7 +800,7 @@ export default function BakingPage() {
                         <th className={styles.thNum}>Замовлено</th>
                         {showRec && <th className={styles.thNum}>Рекомендовано</th>}
                         <th className={styles.thNum}>Спечено</th>
-                        <th className={styles.thNum}>Відхилення</th>
+                        <th className={styles.thDiff}>Відхилення</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -880,17 +873,17 @@ export default function BakingPage() {
                                 onKeyDown={handleBakedKeyDown}
                               />
                             </td>
-                            <td className={styles.tdNum}>
+                            <td className={styles.tdDiff}>
                               {bakedIsEntered && (
                                 hasCorrection ? (
                                   <div className={styles.diffCell}>
+                                    <span className={`${styles.diffEffective} ${effectiveClass}`}>
+                                      {effectiveLabel}
+                                    </span>
                                     <span className={styles.diffRaw}>
                                       {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '='}
                                     </span>
                                     <span className={styles.diffBadge}>{badgeLabel}</span>
-                                    <span className={`${styles.diffEffective} ${effectiveClass}`}>
-                                      {effectiveLabel}
-                                    </span>
                                   </div>
                                 ) : (
                                   <span className={

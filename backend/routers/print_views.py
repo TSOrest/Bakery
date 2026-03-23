@@ -530,70 +530,7 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
         c = db.get(Client, client_id)
         return (c.short_name or c.full_name) if c else f"#{client_id}"
 
-    # Групуємо завдання по категорії
-    groups: dict[int, list] = {}
-    for task in entered:
-        product = db.get(Product, task.product_id)
-        if not product or not product.category_id:
-            continue
-        if product.category_id not in all_cats:
-            continue
-        groups.setdefault(product.category_id, []).append((task, product))
-
-    # ── Таблиці категорій ──────────────────────────────────────────────────────
-    cats_html = ""
-    for cat in all_cats.values():
-        group = groups.get(cat.id)
-        if not group:
-            continue
-        rows_html = ""
-        total_ord = total_baked = 0.0
-        for task, product in group:
-            baked = task.baked_qty or 0
-            diff  = baked - task.ordered_qty
-            diff_html = (
-                f'<span class="rp">+{diff:g}</span>' if diff > 0 else
-                f'<span class="rm">{diff:g}</span>' if diff < 0 else
-                '<span class="rok">✓</span>'
-            )
-            total_ord += task.ordered_qty
-            total_baked += baked
-            rows_html += f"""
-        <tr>
-          <td>{product.name}</td>
-          <td class="r">{task.ordered_qty:g}</td>
-          <td class="r"><b>{baked:g}</b></td>
-          <td class="c">{diff_html}</td>
-        </tr>"""
-        total_diff = total_baked - total_ord
-        total_diff_html = (
-            f'<span class="rp">+{total_diff:g}</span>' if total_diff > 0 else
-            f'<span class="rm">{total_diff:g}</span>' if total_diff < 0 else
-            '<span class="rok">✓</span>'
-        )
-        cats_html += f"""
-      <div class="section-title">{cat.name.upper()}</div>
-      <table class="baking-tbl">
-        <thead>
-          <tr>
-            <th>Виріб</th>
-            <th class="r" style="width:70px">Замовлено</th>
-            <th class="r" style="width:70px">Спечено</th>
-            <th class="c" style="width:60px">Відхил.</th>
-          </tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-        <tfoot>
-          <tr>
-            <td><b>Разом</b></td>
-            <td class="r">{total_ord:g}</td>
-            <td class="r">{total_baked:g}</td>
-            <td class="c">{total_diff_html}</td>
-          </tr>
-        </tfoot>
-      </table>"""
-
-    # ── Розбіжності ────────────────────────────────────────────────────────────
+    # ── Розбіжності: обчислення (потрібне і для таблиць категорій) ────────────
     surplus_by_pid: dict[int, list] = {}
     for o in surplus_orders:
         surplus_by_pid.setdefault(o.product_id, []).append(o)
@@ -616,36 +553,130 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
     ]
     discrepant = [(t, p) for t, p in discrepant if p and p.category_id in all_cats]
 
+    def dev_html(pid: int, diff: float) -> str:
+        """Клітинка Відхил.: іконка фінального стану + значення в дужках."""
+        if diff == 0:
+            return '<span class="dv-icon rok">✓</span>'
+        s_alloc  = sum(o.qty for o in surplus_by_pid.get(pid, []))
+        s_reduc  = sum(c.qty for c, _ in shortage_by_product.get(pid, []))
+        if diff > 0:
+            resolved = s_alloc >= diff
+            icon, cls, val = ("✓", "rok", f"+{diff:g}") if resolved else ("↗", "rp", f"+{diff:g}")
+        else:
+            resolved = s_reduc >= abs(diff)
+            icon, cls, val = ("✓", "rok", f"{diff:g}") if resolved else ("✂", "rm", f"{diff:g}")
+        return f'<span class="dv-icon {cls}">{icon}</span><span class="dv-val {cls}">({val})</span>'
+
+    # Групуємо завдання по категорії
+    groups: dict[int, list] = {}
+    for task in entered:
+        product = db.get(Product, task.product_id)
+        if not product or not product.category_id:
+            continue
+        if product.category_id not in all_cats:
+            continue
+        groups.setdefault(product.category_id, []).append((task, product))
+
+    # ── Таблиці категорій ──────────────────────────────────────────────────────
+    cats_html = ""
+    for cat in all_cats.values():
+        group = groups.get(cat.id)
+        if not group:
+            continue
+        rows_html = ""
+        total_ord = total_baked = 0.0
+        for task, product in group:
+            baked = task.baked_qty or 0
+            diff  = baked - task.ordered_qty
+            total_ord   += task.ordered_qty
+            total_baked += baked
+            rows_html += f"""
+        <tr>
+          <td>{product.name}</td>
+          <td class="r">{task.ordered_qty:g}</td>
+          <td class="r"><b>{baked:g}</b></td>
+          <td class="dv">{dev_html(task.product_id, diff)}</td>
+        </tr>"""
+        total_diff = total_baked - total_ord
+        cats_html += f"""
+      <div class="section-title section-header">
+        <span>{cat.name.upper()}</span>
+        <span class="section-sig">Пекар: ________________</span>
+      </div>
+      <table class="baking-tbl">
+        <thead>
+          <tr>
+            <th>Виріб</th>
+            <th class="r" style="width:70px">Замовлено</th>
+            <th class="r" style="width:70px">Спечено</th>
+            <th class="dv" style="width:62px">Відхил.</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+        <tfoot>
+          <tr>
+            <td><b>Разом</b></td>
+            <td class="r">{total_ord:g}</td>
+            <td class="r">{total_baked:g}</td>
+            <td class="dv">{dev_html(0, total_diff)}</td>
+          </tr>
+        </tfoot>
+      </table>"""
+
     disc_rows = ""
     for task, product in discrepant:
         baked = task.baked_qty or 0
         diff  = baked - task.ordered_qty
-        diff_label = (
-            f'<span class="rp">Надлишок: +{diff:g}</span>' if diff > 0 else
-            f'<span class="rm">Нестача: {diff:g}</span>' if diff < 0 else
-            ""
-        )
-        disc_rows += f"""
-        <tr class="dh"><td colspan="3"><b>{product.name}</b>&nbsp; {diff_label}</td></tr>"""
+        surplus_lines  = surplus_by_pid.get(task.product_id, [])
+        shortage_lines = shortage_by_product.get(task.product_id, [])
+        surplus_alloc  = sum(o.qty for o in surplus_lines)
+        shortage_reduc = sum(child.qty for child, _parent in shortage_lines)
 
-        for o in surplus_by_pid.get(task.product_id, []):
+        # Фінальний стан продукту
+        if diff > 0:
+            is_resolved  = surplus_alloc >= diff
+            state_icon   = "✓" if is_resolved else "↗"
+            state_cls    = "rok" if is_resolved else "rp"
+            diff_label   = f'Надлишок: +{diff:g}'
+        elif diff < 0:
+            is_resolved  = shortage_reduc >= abs(diff)
+            state_icon   = "✓" if is_resolved else "✂"
+            state_cls    = "rok" if is_resolved else "rm"
+            diff_label   = f'Нестача: {diff:g}'
+        else:
+            state_icon, state_cls, diff_label = "✓", "rok", ""
+
+        disc_rows += f"""
+        <tr class="dh">
+          <td class="icon-col"><span class="{state_cls}">{state_icon}</span></td>
+          <td colspan="2"><b>{product.name}</b>{"&nbsp; " + diff_label if diff_label else ""}</td>
+        </tr>"""
+
+        for o in surplus_lines:
             note = f" &mdash; {o.notes}" if o.notes else ""
             disc_rows += f"""
         <tr class="dd">
-          <td class="di">↗ {cname(o.client_id)}{note}</td>
-          <td class="r">{o.qty:g}</td><td></td>
+          <td class="icon-col"><span class="rp">↗</span></td>
+          <td>{cname(o.client_id)}{note}</td>
+          <td class="r">(+{o.qty:g})</td>
         </tr>"""
 
-        for child, parent in shortage_by_product.get(task.product_id, []):
+        for child, parent in shortage_lines:
             disc_rows += f"""
         <tr class="dd">
-          <td class="di">✂ {cname(parent.client_id)}</td>
-          <td class="r">−{child.qty:g}</td><td></td>
+          <td class="icon-col"><span class="rm">✂</span></td>
+          <td>{cname(parent.client_id)}</td>
+          <td class="r">(−{child.qty:g})</td>
         </tr>"""
 
     disc_section = f"""
       <div class="section-title">РОЗБІЖНОСТІ</div>
       <table class="baking-tbl dt">
+        <colgroup>
+          <col style="width:22px">
+          <col>
+          <col style="width:60px">
+        </colgroup>
         <tbody>{disc_rows}</tbody>
       </table>""" if disc_rows else """
       <div class="section-title">РОЗБІЖНОСТІ</div>
@@ -664,10 +695,16 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
     .rp  {{ color:#1a6a30;font-weight:bold; }}
     .rm  {{ color:#b00;font-weight:bold; }}
     .rok {{ color:#1a6a30; }}
-    .dh td {{ background:#f0f4f8;padding:3px 8px;border-top:1px solid #aaa;font-size:9pt; }}
-    .dd td {{ font-size:8.5pt;padding:2px 8px;border-bottom:1px solid #ebebeb;color:#333; }}
-    .di    {{ padding-left:16px!important; }}
+    .dh td {{ background:#f0f4f8;padding:3px 6px;border-top:1px solid #aaa;font-size:9pt; }}
+    .dd td {{ font-size:8.5pt;padding:2px 6px;border-bottom:1px solid #ebebeb;color:#333;padding-left:28px!important; }}
+    .dd td.icon-col {{ padding-left:4px!important; }}
     .dt    {{ margin-bottom:6px; }}
+    .icon-col {{ width:22px;text-align:center;padding-left:4px!important;padding-right:2px!important; }}
+    .section-header {{ display:flex;justify-content:space-between;align-items:baseline; }}
+    .section-sig {{ font-size:8.5pt;font-weight:normal;color:#333; }}
+    .dv {{ text-align:left;padding-left:6px!important; }}
+    .dv-icon {{ display:inline-block;width:14px;text-align:center;font-weight:bold; }}
+    .dv-val {{ font-size:8.5pt; }}
   </style>
 </head>
 <body>
@@ -678,14 +715,13 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
       <div style="font-size:13pt;font-weight:bold;">{bakery_name}</div>
       <div style="font-size:11pt;font-weight:bold;margin-top:4px;">Звіт випічки</div>
     </div>
-    <div style="font-size:12pt;font-weight:bold;">{ua_date(task_date)}</div>
+    <div style="text-align:right;">
+      <div style="font-size:12pt;font-weight:bold;">{ua_date(task_date)}</div>
+      <div style="font-size:8.5pt;margin-top:8px;">Оператор: ________________</div>
+    </div>
   </div>
   {cats_html}
   {disc_section}
-  <div class="sig-row" style="margin-top:18px;">
-    <div class="sig-item">Оператор: ________________</div>
-    <div class="sig-item">Пекар: ________________</div>
-  </div>
 </div>
 </body>
 </html>"""
