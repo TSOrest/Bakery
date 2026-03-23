@@ -732,8 +732,7 @@ export default function BakingPage() {
             <button
               className={styles.btnPrint}
               onClick={async () => {
-                if (!(await checkPendingAndConfirm())) return
-                const url = `/api/v1/print/baking?task_date=${workDate}`
+                const url = `/api/v1/print/baking-report?task_date=${workDate}`
                 const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bakery_token')}` } })
                 if (!res.ok) {
                   const data = await res.json().catch(() => ({}))
@@ -744,7 +743,7 @@ export default function BakingPage() {
                 }
               }}
             >
-              🖨 Завдання пекарям
+              🖨 Звіт випічки
             </button>
           </>
         )}

@@ -475,3 +475,218 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+# ─── Звіт випічки (результат дня) ────────────────────────────────────────────
+
+@router.get("/baking-report", response_class=HTMLResponse)
+def print_baking_report(task_date: str, db: Session = Depends(get_db)):
+    """Друкований звіт результатів випічки: категорії + компактні розбіжності."""
+    from backend.models.orders import Order
+    from backend.models.references import Client
+
+    tasks = (
+        db.query(BakingTask)
+        .filter(BakingTask.task_date == task_date)
+        .order_by(BakingTask.product_id)
+        .all()
+    )
+    if not tasks:
+        raise HTTPException(status_code=404, detail="Завдань на цю дату не знайдено")
+
+    entered = [t for t in tasks if t.baked_qty is not None]
+    if not entered:
+        raise HTTPException(status_code=404, detail="Кількість 'Спечено' ще не введено жодного виробу")
+
+    all_cats: dict[int, Category] = {
+        c.id: c for c in db.query(Category)
+        .filter(Category.is_baked == 1)
+        .order_by(Category.sort_order, Category.name)
+        .all()
+    }
+
+    surplus_orders = (
+        db.query(Order)
+        .filter(Order.order_date == task_date, Order.origin_id == 0)
+        .all()
+    )
+    underbaked_client = db.query(Client).filter(Client.client_kind == "underbaked").first()
+    shortage_children: list = []
+    if underbaked_client:
+        shortage_children = (
+            db.query(Order)
+            .filter(
+                Order.order_date == task_date,
+                Order.client_id == underbaked_client.id,
+                Order.parent_order_id.isnot(None),
+            )
+            .all()
+        )
+
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    def cname(client_id: int) -> str:
+        c = db.get(Client, client_id)
+        return (c.short_name or c.full_name) if c else f"#{client_id}"
+
+    # Групуємо завдання по категорії
+    groups: dict[int, list] = {}
+    for task in entered:
+        product = db.get(Product, task.product_id)
+        if not product or not product.category_id:
+            continue
+        if product.category_id not in all_cats:
+            continue
+        groups.setdefault(product.category_id, []).append((task, product))
+
+    # ── Таблиці категорій ──────────────────────────────────────────────────────
+    cats_html = ""
+    for cat in all_cats.values():
+        group = groups.get(cat.id)
+        if not group:
+            continue
+        rows_html = ""
+        total_ord = total_baked = 0.0
+        for task, product in group:
+            baked = task.baked_qty or 0
+            diff  = baked - task.ordered_qty
+            diff_html = (
+                f'<span class="rp">+{diff:g}</span>' if diff > 0 else
+                f'<span class="rm">{diff:g}</span>' if diff < 0 else
+                '<span class="rok">✓</span>'
+            )
+            total_ord += task.ordered_qty
+            total_baked += baked
+            rows_html += f"""
+        <tr>
+          <td>{product.name}</td>
+          <td class="r">{task.ordered_qty:g}</td>
+          <td class="r"><b>{baked:g}</b></td>
+          <td class="c">{diff_html}</td>
+        </tr>"""
+        total_diff = total_baked - total_ord
+        total_diff_html = (
+            f'<span class="rp">+{total_diff:g}</span>' if total_diff > 0 else
+            f'<span class="rm">{total_diff:g}</span>' if total_diff < 0 else
+            '<span class="rok">✓</span>'
+        )
+        cats_html += f"""
+      <div class="section-title">{cat.name.upper()}</div>
+      <table class="baking-tbl">
+        <thead>
+          <tr>
+            <th>Виріб</th>
+            <th class="r" style="width:70px">Замовлено</th>
+            <th class="r" style="width:70px">Спечено</th>
+            <th class="c" style="width:60px">Відхил.</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+        <tfoot>
+          <tr>
+            <td><b>Разом</b></td>
+            <td class="r">{total_ord:g}</td>
+            <td class="r">{total_baked:g}</td>
+            <td class="c">{total_diff_html}</td>
+          </tr>
+        </tfoot>
+      </table>"""
+
+    # ── Розбіжності ────────────────────────────────────────────────────────────
+    surplus_by_pid: dict[int, list] = {}
+    for o in surplus_orders:
+        surplus_by_pid.setdefault(o.product_id, []).append(o)
+
+    shortage_by_product: dict[int, list] = {}
+    for o in shortage_children:
+        if not o.parent_order_id:
+            continue
+        parent = db.get(Order, o.parent_order_id)
+        if not parent:
+            continue
+        shortage_by_product.setdefault(parent.product_id, []).append((o, parent))
+
+    discrepant = [
+        (task, db.get(Product, task.product_id))
+        for task in entered
+        if (task.baked_qty or 0) != task.ordered_qty
+           or task.product_id in surplus_by_pid
+           or task.product_id in shortage_by_product
+    ]
+    discrepant = [(t, p) for t, p in discrepant if p and p.category_id in all_cats]
+
+    disc_rows = ""
+    for task, product in discrepant:
+        baked = task.baked_qty or 0
+        diff  = baked - task.ordered_qty
+        diff_label = (
+            f'<span class="rp">Надлишок: +{diff:g}</span>' if diff > 0 else
+            f'<span class="rm">Нестача: {diff:g}</span>' if diff < 0 else
+            ""
+        )
+        disc_rows += f"""
+        <tr class="dh"><td colspan="3"><b>{product.name}</b>&nbsp; {diff_label}</td></tr>"""
+
+        for o in surplus_by_pid.get(task.product_id, []):
+            note = f" &mdash; {o.notes}" if o.notes else ""
+            disc_rows += f"""
+        <tr class="dd">
+          <td class="di">↗ {cname(o.client_id)}{note}</td>
+          <td class="r">{o.qty:g}</td><td></td>
+        </tr>"""
+
+        for child, parent in shortage_by_product.get(task.product_id, []):
+            disc_rows += f"""
+        <tr class="dd">
+          <td class="di">✂ {cname(parent.client_id)}</td>
+          <td class="r">−{child.qty:g}</td><td></td>
+        </tr>"""
+
+    disc_section = f"""
+      <div class="section-title">РОЗБІЖНОСТІ</div>
+      <table class="baking-tbl dt">
+        <tbody>{disc_rows}</tbody>
+      </table>""" if disc_rows else """
+      <div class="section-title">РОЗБІЖНОСТІ</div>
+      <p style="font-size:9pt;color:#555;margin:4px 0 10px;">
+        Розбіжностей немає — випічка точно відповідає замовленням.</p>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Звіт випічки {task_date}</title>
+  {BASE_CSS}
+  <style>
+    @media print  {{ @page {{ size: A4 portrait; margin: 8mm; }} }}
+    @media screen {{ .baking-wrap {{ max-width: 680px; }} }}
+    .rp  {{ color:#1a6a30;font-weight:bold; }}
+    .rm  {{ color:#b00;font-weight:bold; }}
+    .rok {{ color:#1a6a30; }}
+    .dh td {{ background:#f0f4f8;padding:3px 8px;border-top:1px solid #aaa;font-size:9pt; }}
+    .dd td {{ font-size:8.5pt;padding:2px 8px;border-bottom:1px solid #ebebeb;color:#333; }}
+    .di    {{ padding-left:16px!important; }}
+    .dt    {{ margin-bottom:6px; }}
+  </style>
+</head>
+<body>
+{PRINT_BTN}
+<div class="baking-wrap">
+  <div class="baking-header">
+    <div>
+      <div style="font-size:13pt;font-weight:bold;">{bakery_name}</div>
+      <div style="font-size:11pt;font-weight:bold;margin-top:4px;">Звіт випічки</div>
+    </div>
+    <div style="font-size:12pt;font-weight:bold;">{ua_date(task_date)}</div>
+  </div>
+  {cats_html}
+  {disc_section}
+  <div class="sig-row" style="margin-top:18px;">
+    <div class="sig-item">Оператор: ________________</div>
+    <div class="sig-item">Пекар: ________________</div>
+  </div>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
