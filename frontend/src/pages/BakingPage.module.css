@@ -1,6 +1,13 @@
 /* Вкладка Випічка */
 
-.page { padding: 1rem 1.5rem; }
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1rem 1.5rem;
+  box-sizing: border-box;
+}
 
 .toolbar {
   display: flex;
@@ -8,6 +15,7 @@
   gap: 0.75rem;
   margin-bottom: 1.25rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .title {
@@ -37,17 +45,21 @@
 .twoCol {
   display: flex;
   gap: 1.5rem;
-  align-items: flex-start;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .mainCol {
   flex: 0 0 50%;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .sideCol {
   flex: 0 0 50%;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .sideEmpty {
