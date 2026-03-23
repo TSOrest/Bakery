@@ -732,6 +732,19 @@ export default function BakingPage() {
             <button
               className={styles.btnPrint}
               onClick={async () => {
+                if (withDiscrepancy.length > 0) {
+                  const ok = window.confirm(
+                    `⚠️ Є ${withDiscrepancy.length} виробів з розбіжностями між замовленням і випічкою.\n\n` +
+                    withDiscrepancy.map(t => {
+                      const p = products.find(p => p.id === t.product_id)
+                      const baked = bakedMap[t.product_id] ?? 0
+                      const diff  = baked - t.ordered_qty
+                      return `• ${p?.name ?? `#${t.product_id}`}: ${diff > 0 ? '+' : ''}${diff}`
+                    }).join('\n') +
+                    '\n\nВсе одно роздрукувати звіт?'
+                  )
+                  if (!ok) return
+                }
                 const url = `/api/v1/print/baking-report?task_date=${workDate}`
                 const res = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('bakery_token')}` } })
                 if (!res.ok) {
