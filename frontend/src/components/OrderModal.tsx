@@ -268,9 +268,9 @@ export default function OrderModal({
                   <th className={styles.thName}>Виріб</th>
                   <th className={styles.thWeight}>Вага</th>
                   <th className={styles.thPrice}>Ціна</th>
+                  <th className={styles.thAct}></th>
                   <th className={styles.thQtyH}>Кількість</th>
                   <th className={styles.thSum}>Сума</th>
-                  <th className={styles.thAct}></th>
                 </tr>
               </thead>
               <tbody>
@@ -299,6 +299,15 @@ export default function OrderModal({
                         <td className={styles.tdPrice}>
                           {price != null && price > 0 ? fmt(price) : '—'}
                         </td>
+                        <td className={styles.tdAct}>
+                          {!locked && !showAdd && (
+                            <button
+                              className={styles.btnAddLine}
+                              title="Додати рядок (обмін або знижка)"
+                              onClick={() => setAddLine({ productId: product.id, qty: '', type: 'exchange', price: '' })}
+                            >+</button>
+                          )}
+                        </td>
                         <td className={styles.tdInput}>
                           <input
                             ref={el => { inputRefs.current[product.id] = el }}
@@ -322,15 +331,6 @@ export default function OrderModal({
                         <td className={styles.tdSum}>
                           {price != null && qty > 0 ? fmt(qty * price) : '—'}
                         </td>
-                        <td className={styles.tdAct}>
-                          {qty > 0 && !locked && !showAdd && (
-                            <button
-                              className={styles.btnAddLine}
-                              title="Додати рядок (обмін або знижка)"
-                              onClick={() => setAddLine({ productId: product.id, qty: '', type: 'exchange', price: '' })}
-                            >+</button>
-                          )}
-                        </td>
                       </tr>
 
                       {/* ── Існуючі extra рядки ─────────────────────────── */}
@@ -342,14 +342,6 @@ export default function OrderModal({
                           <td className={styles.tdPrice}>
                             {line.price_override != null ? fmt(line.price_override) : '0.00'}
                           </td>
-                          <td className={styles.tdInput} style={{ textAlign: 'center', color: '#333' }}>
-                            {line.qty}
-                          </td>
-                          <td className={styles.tdSum}>
-                            {line.price_override != null && line.price_override > 0
-                              ? fmt(line.qty * line.price_override)
-                              : '—'}
-                          </td>
                           <td className={styles.tdAct}>
                             {!locked && (
                               <button
@@ -358,6 +350,14 @@ export default function OrderModal({
                                 onClick={() => handleDeleteExtraLine(line.id)}
                               >🗑</button>
                             )}
+                          </td>
+                          <td className={styles.tdInput} style={{ textAlign: 'center', color: '#333' }}>
+                            {line.qty}
+                          </td>
+                          <td className={styles.tdSum}>
+                            {line.price_override != null && line.price_override > 0
+                              ? fmt(line.qty * line.price_override)
+                              : '—'}
                           </td>
                         </tr>
                       ))}
@@ -386,18 +386,6 @@ export default function OrderModal({
                               />
                             )}
                           </td>
-                          <td className={styles.addLineCell}>
-                            <input
-                              type="number" min={1} step={1}
-                              value={addLine!.qty}
-                              placeholder="К-сть"
-                              className={styles.addLineQtyInput}
-                              autoFocus
-                              onKeyDown={e => { if (e.key === 'Enter') handleAddExtraLine() }}
-                              onChange={e => setAddLine(p => p ? { ...p, qty: e.target.value } : null)}
-                            />
-                          </td>
-                          <td />
                           <td className={styles.tdAct}>
                             <button
                               className={styles.btnSaveLine}
@@ -411,6 +399,18 @@ export default function OrderModal({
                               title="Скасувати"
                             >✕</button>
                           </td>
+                          <td className={styles.addLineCell}>
+                            <input
+                              type="number" min={1} step={1}
+                              value={addLine!.qty}
+                              placeholder="К-сть"
+                              className={styles.addLineQtyInput}
+                              autoFocus
+                              onKeyDown={e => { if (e.key === 'Enter') handleAddExtraLine() }}
+                              onChange={e => setAddLine(p => p ? { ...p, qty: e.target.value } : null)}
+                            />
+                          </td>
+                          <td />
                         </tr>
                       )}
                     </Fragment>
