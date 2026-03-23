@@ -290,6 +290,27 @@
 .exchangeTag { font-style: italic; opacity: 0.75; }
 .discountTag { font-style: italic; opacity: 0.75; }
 
+/* Рядки з origin_id (надлишок / переміщення) */
+.orderRowSurplus { background: #f2fbf5; }
+.orderRowSurplus:hover { background: #e6f7ee !important; }
+.orderRowSurplus td { color: #2a6a4a; font-size: 0.87rem; }
+.orderRowMoved { background: #faf5fb; }
+.orderRowMoved:hover { background: #f3eaf8 !important; }
+.orderRowMoved td { color: #5a3a7a; font-size: 0.87rem; }
+
+.srcSurplus {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  color: #2a7a4a;
+  cursor: default;
+}
+.srcMoved {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  color: #6a3a9a;
+  cursor: default;
+}
+
 /* Дерево дочірніх рядків (переміщення / повернення) */
 .expandBtn {
   background: none;

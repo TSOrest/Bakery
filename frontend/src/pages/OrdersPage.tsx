@@ -357,9 +357,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const ordersToShow = orders
     .filter(o => {
-      // Тільки кореневі рядки (не знімання нестачі, не розподіл надлишку)
+      // Тільки кореневі рядки — виключаємо лише знімання нестачі (дочірні)
       if (o.parent_order_id != null) return false
-      if (o.origin_id != null) return false   // surplus allocation (origin_id=0)
       if (o.qty <= 0) return false
       if (selectedRouteId != null) {
         const c = clientMap.get(o.client_id)
@@ -634,6 +633,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const isSel      = order.client_id === selectedClientId
                 const isPending  = order.source === 'bot' && order.bot_status === 'pending'
                 const isRejected = order.source === 'bot' && order.bot_status === 'rejected'
+                const isSurplus  = order.origin_id === 0
+                const isMoved    = order.origin_id != null && order.origin_id > 0
 
                 return (
                   <Fragment key={order.id}>
@@ -642,6 +643,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                         styles.orderRow,
                         isExchange ? styles.orderRowExchange : '',
                         isDiscount ? styles.orderRowDiscount : '',
+                        isSurplus  ? styles.orderRowSurplus  : '',
+                        isMoved    ? styles.orderRowMoved    : '',
                         isSel      ? styles.orderRowSel     : '',
                         isPending  ? styles.orderRowPending  : '',
                         isRejected ? styles.orderRowRejected : '',
@@ -680,6 +683,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                         {isExchange ? '—' : sum != null ? fmt(sum) : '—'}
                       </td>
                       <td className={styles.tdSrc} title={(() => {
+                        if (isSurplus) return 'Розподіл надлишку випічки'
+                        if (isMoved)   return 'Переміщено з іншого замовлення'
                         if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
                         const lines: string[] = []
                         if (order.bot_status === 'pending')   lines.push('Очікує підтвердження оператора')
@@ -689,7 +694,11 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                         if (order.bot_rejection_reason)       lines.push(`Примітка: ${order.bot_rejection_reason}`)
                         return lines.join('\n') || 'Бот'
                       })()}>
-                        {order.source === 'bot' ? (
+                        {isSurplus ? (
+                          <span className={styles.srcSurplus}>⚖</span>
+                        ) : isMoved ? (
+                          <span className={styles.srcMoved}>↗</span>
+                        ) : order.source === 'bot' ? (
                           <span style={{ display: 'inline-flex', gap: '0.1rem' }}>
                             <span>🤖</span>
                             {order.bot_status === 'pending'   && <span>⏳</span>}
