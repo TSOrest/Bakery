@@ -244,112 +244,6 @@ function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: Retu
 
 // ─── Модальне вікно скасування рейсу ─────────────────────────────────────────
 
-interface CancelLine {
-  productId:   number
-  productName: string
-  qty:         number
-  disposition: 'to_shop' | 'to_next_day' | 'writeoff'
-}
-
-interface CancelModalProps {
-  routeName: string
-  workDate:  string
-  lines:     CancelLine[]
-  onClose:   () => void
-  onConfirm: (reason: string, lines: CancelLine[]) => Promise<void>
-}
-
-const DISP_LABELS: Record<string, string> = {
-  to_shop:     'На магазин',
-  to_next_day: 'Перенести на завтра',
-  writeoff:    'Списати',
-}
-
-function CancelModal({ routeName, workDate, lines: initLines, onClose, onConfirm }: CancelModalProps) {
-  const [reason,  setReason]  = useState('')
-  const [lines,   setLines]   = useState<CancelLine[]>(initLines)
-  const [saving,  setSaving]  = useState(false)
-
-  const setDisp = (productId: number, val: CancelLine['disposition']) => {
-    setLines((prev) => prev.map((l) => l.productId === productId ? { ...l, disposition: val } : l))
-  }
-
-  const handleConfirm = async () => {
-    setSaving(true)
-    await onConfirm(reason, lines)
-    setSaving(false)
-  }
-
-  return (
-    <Modal title={`Скасування рейсу — ${routeName}`} onClose={onClose}>
-      <div className={styles.returnDetail}>
-        <p className={styles.returnHint} style={{ background: '#fdf0ef', borderColor: '#f5c6cb', color: '#721c24' }}>
-          Всі накладні маршруту за <strong>{workDate}</strong> будуть скасовані.
-        </p>
-
-        <label className={styles.returnLabel}>
-          Причина скасування:
-          <input
-            type="text"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            className={styles.notesInput}
-            placeholder="необов'язково"
-          />
-        </label>
-
-        {lines.length > 0 && (
-          <>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#444', marginTop: '0.5rem' }}>
-              Розподіл товарів:
-            </div>
-            <table className={styles.linesTable}>
-              <thead>
-                <tr>
-                  <th>Виріб</th>
-                  <th>К-сть</th>
-                  <th>Що зробити</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l) => (
-                  <tr key={l.productId}>
-                    <td>{l.productName}</td>
-                    <td className={styles.numCell}>{l.qty}</td>
-                    <td>
-                      <select
-                        value={l.disposition}
-                        onChange={(e) => setDisp(l.productId, e.target.value as CancelLine['disposition'])}
-                        style={{ fontSize: '0.85rem', padding: '0.2rem 0.3rem', border: '1px solid #ccc', borderRadius: '3px' }}
-                      >
-                        {Object.entries(DISP_LABELS).map(([k, v]) => (
-                          <option key={k} value={k}>{v}</option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
-
-        <div className={styles.returnActions}>
-          <button className={styles.btnCancel} onClick={onClose}>Закрити</button>
-          <button
-            className={styles.btnReturn}
-            onClick={handleConfirm}
-            disabled={saving}
-            style={{ background: '#e74c3c' }}
-          >
-            {saving ? 'Скасовую...' : 'Скасувати рейс'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
 // ─── Головна сторінка ─────────────────────────────────────────────────────────
 
 export default function RoutesPage() {
@@ -370,11 +264,6 @@ export default function RoutesPage() {
 
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
   const [returnInvoice,   setReturnInvoice]   = useState<Invoice | null>(null)
-  const [showCancelModal, setShowCancelModal] = useState(false)
-
-  // Скасовані маршрути за поточну дату: route_id → cancellation_id
-  const [cancelledRoutes, setCancelledRoutes] = useState<Record<number, number>>({})
-
   // Вибрані накладні для друку (id → boolean)
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set())
 
@@ -382,20 +271,18 @@ export default function RoutesPage() {
 
   const load = async (date: string) => {
     setLoading(true)
-    const [r, c, p, o, inv, cancels] = await Promise.all([
+    const [r, c, p, o, inv] = await Promise.all([
       api.get<Route[]>('/routes/'),
       api.get<Client[]>('/clients/'),
       api.get<Product[]>('/products/'),
       api.get<Order[]>(`/orders/?order_date=${date}`),
       api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
-      api.get<{ id: number; route_id: number }[]>(`/cancellations/?cancel_date=${date}`),
     ])
     setRoutes(r)
     setClients(c)
     setProducts(p)
     setOrders(o)
     setInvoices(inv)
-    setCancelledRoutes(Object.fromEntries(cancels.map((c) => [c.route_id, c.id])))
     if (r.length > 0 && activeRouteId === null) setActiveRouteId(r[0].id)
     setLoading(false)
   }
@@ -453,47 +340,6 @@ export default function RoutesPage() {
     )
     const inv = await api.get<Invoice[]>(`/invoices/?invoice_date=${workDate}`)
     setInvoices(inv)
-  }
-
-  // ─── Скасування рейсу ───────────────────────────────────────────────────────
-
-  const handleCancelRoute = async (reason: string, lines: CancelLine[]) => {
-    if (!activeRouteId) return
-    const res = await api.post<{ id: number }>(`/cancellations/`, {
-      route_id:    activeRouteId,
-      cancel_date: workDate,
-      reason:      reason || null,
-    })
-    await api.post(`/cancellations/${res.id}/finalize`, {
-      lines: lines.map((l) => ({
-        product_id:  l.productId,
-        qty:         l.qty,
-        disposition: l.disposition,
-      })),
-    })
-    setShowCancelModal(false)
-    await load(workDate)
-  }
-
-  // Будуємо список товарів для модалу скасування
-  const buildCancelLines = (): CancelLine[] => {
-    if (!activeRouteId) return []
-    const routeClientIds = new Set(routeClients(activeRouteId).map((c) => c.id))
-    const qtyByProduct: Record<number, number> = {}
-    for (const o of orders) {
-      if (routeClientIds.has(o.client_id)) {
-        qtyByProduct[o.product_id] = (qtyByProduct[o.product_id] ?? 0) + o.qty
-      }
-    }
-    return Object.entries(qtyByProduct).map(([pid, qty]) => {
-      const p = products.find((p) => p.id === Number(pid))
-      return {
-        productId:   Number(pid),
-        productName: p?.short_name ?? p?.name ?? `#${pid}`,
-        qty,
-        disposition: 'to_shop' as const,
-      }
-    })
   }
 
   // ─── Обробка повернення ──────────────────────────────────────────────────────
@@ -617,16 +463,12 @@ export default function RoutesPage() {
               >
                 <span className={styles.routeName}>{route.name}</span>
                 <span className={styles.routeStats}>
-                  {cancelledRoutes[route.id] ? (
-                    <span className={styles.routeCancelled}>скасовано</span>
-                  ) : (
-                    <>
+                  <>
                       <span title="Накладних / із замовленнями">{withInv}/{withOrd}</span>
                       {rTotal > 0 && (
                         <span className={styles.routeSum}>{rTotal.toFixed(0)} ₴</span>
                       )}
-                    </>
-                  )}
+                  </>
                 </span>
               </button>
             )
@@ -707,17 +549,6 @@ export default function RoutesPage() {
                   >
                     🖨 Друкувати вибрані ({checkedCount})
                   </button>
-                )}
-                {activeRouteId && !cancelledRoutes[activeRouteId] && (
-                  <button
-                    className={styles.btnCancelRoute}
-                    onClick={() => setShowCancelModal(true)}
-                  >
-                    ✕ Скасувати рейс
-                  </button>
-                )}
-                {activeRouteId && cancelledRoutes[activeRouteId] && (
-                  <span className={styles.cancelledBadge}>Рейс скасовано</span>
                 )}
               </div>
             </div>
@@ -871,16 +702,6 @@ export default function RoutesPage() {
         />
       )}
 
-      {/* ── Модальне вікно: скасування рейсу ──────────────────────────────── */}
-      {showCancelModal && activeRoute && (
-        <CancelModal
-          routeName={activeRoute.name}
-          workDate={workDate}
-          lines={buildCancelLines()}
-          onClose={() => setShowCancelModal(false)}
-          onConfirm={handleCancelRoute}
-        />
-      )}
     </div>
   )
 }

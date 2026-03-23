@@ -253,9 +253,10 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       if (qty <= 0) return prev
       return [...prev, {
         id: -1, client_id: clientId, product_id: productId, qty, order_date: workDate,
-        status: 'draft', source: 'phone', exchange_type: 'none', exchange_qty: 0,
+        source: 'phone', exchange_type: 'none', exchange_qty: 0,
         exchange_price: null, exchange_notes: null, price_override: null, notes: null,
         created_at: null, parent_order_id: null, delivered_qty: null, origin_id: null,
+        bot_status: null, bot_rejection_reason: null, bot_original_qty: null,
       } as Order]
     })
 
