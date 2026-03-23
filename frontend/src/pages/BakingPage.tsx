@@ -732,13 +732,23 @@ export default function BakingPage() {
             <button
               className={styles.btnPrint}
               onClick={async () => {
-                if (withDiscrepancy.length > 0) {
+                const unresolved = withDiscrepancy.filter(t => {
+                  const baked      = bakedMap[t.product_id] ?? 0
+                  const rawDiff    = baked - t.ordered_qty
+                  const surplus    = Math.max(0,  rawDiff)
+                  const shortage   = Math.max(0, -rawDiff)
+                  const allocated  = surplusOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
+                  const reduced    = underbakedOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
+                  const hasConflict = rawDiff <= 0 && allocated > 0
+                  return hasConflict || (surplus > 0 && allocated < surplus) || (shortage > 0 && reduced < shortage)
+                })
+                if (unresolved.length > 0) {
                   const ok = window.confirm(
-                    `⚠️ Є ${withDiscrepancy.length} виробів з розбіжностями між замовленням і випічкою.\n\n` +
-                    withDiscrepancy.map(t => {
-                      const p = products.find(p => p.id === t.product_id)
-                      const baked = bakedMap[t.product_id] ?? 0
-                      const diff  = baked - t.ordered_qty
+                    `⚠️ Є ${unresolved.length} виробів з невирівняними розбіжностями:\n\n` +
+                    unresolved.map(t => {
+                      const p      = products.find(p => p.id === t.product_id)
+                      const baked  = bakedMap[t.product_id] ?? 0
+                      const diff   = baked - t.ordered_qty
                       return `• ${p?.name ?? `#${t.product_id}`}: ${diff > 0 ? '+' : ''}${diff}`
                     }).join('\n') +
                     '\n\nВсе одно роздрукувати звіт?'
