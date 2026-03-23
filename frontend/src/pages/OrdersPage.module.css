@@ -302,13 +302,13 @@
   border-bottom: 1px solid #eee;
   white-space: nowrap;
   color: #1a3a5c;
-  font-weight: 500;
   font-size: 0.85rem;
 }
 .tdProduct {
   padding: 0.28rem 0.7rem;
   border-bottom: 1px solid #eee;
   font-size: 0.87rem;
+  font-weight: 600;
 }
 .tdNum {
   padding: 0.28rem 0.5rem;
