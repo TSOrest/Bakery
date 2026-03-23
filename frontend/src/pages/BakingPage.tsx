@@ -249,7 +249,7 @@ function DiscrepancyPanel({
                     <th>Кому</th>
                     <th>Кількість</th>
                     <th>Нотатка</th>
-                    {surplusRowsEditable && <th />}
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -268,15 +268,13 @@ function DiscrepancyPanel({
                         ) : line.qty}
                       </td>
                       <td className={styles.lineNotes}>{line.notes ?? ''}</td>
-                      {surplusRowsEditable && (
-                        <td>
-                          <button
-                            className={styles.btnDelete}
-                            onClick={() => handleDeleteSurplus(line.id)}
-                            title="Видалити рядок"
-                          >🗑</button>
-                        </td>
-                      )}
+                      <td>
+                        <button
+                          className={styles.btnDelete}
+                          onClick={() => handleDeleteSurplus(line.id)}
+                          title="Видалити рядок"
+                        >🗑</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
