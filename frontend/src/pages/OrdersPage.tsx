@@ -322,7 +322,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const sidebarClients = clients
     .filter(c => {
       if (!c.is_active) return false
-      if (c.client_kind === 'writeoff' || c.client_kind === 'ration') return false
+      if (c.client_kind === 'writeoff' || c.client_kind === 'ration' || c.client_kind === 'underbaked') return false
       if (isShop(c)) return true   // магазин — завжди видно
       return selectedRouteId == null || c.route_id === selectedRouteId
     })
@@ -359,7 +359,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const routeBadge = (routeId: number | null) => {
     const visible = (c: typeof clients[0]) =>
-      c.is_active && c.client_kind !== 'writeoff' && c.client_kind !== 'ration'
+      c.is_active && c.client_kind !== 'writeoff' && c.client_kind !== 'ration' && c.client_kind !== 'underbaked'
     const rc = routeId == null
       ? clients.filter(visible)
       : clients.filter(c => visible(c) && (c.client_kind === 'shop' || c.route_id === routeId))
