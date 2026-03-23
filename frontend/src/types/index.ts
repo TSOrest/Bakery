@@ -113,6 +113,9 @@ export interface ShortageClientInfo {
   route_name: string
   ordered_qty: number
   existing_reduction: number
+  exchange_type: string
+  price_override: number | null
+  effective_price: number
 }
 
 export interface InvoiceLine {

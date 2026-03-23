@@ -178,13 +178,25 @@ def get_shortage_clients(task_date: str, product_id: int, db: Session = Depends(
             .scalar() or 0
         )
 
+        # Ефективна ціна для рядка
+        if o.exchange_type == "pre_order":
+            effective_price = 0.0
+        elif o.price_override is not None:
+            effective_price = float(o.price_override)
+        else:
+            from backend.services.prices import get_price
+            effective_price = get_price(db, o.product_id, o.client_id, task_date)
+
         result.append({
-            "order_id":          o.id,
-            "client_id":         o.client_id,
-            "client_name":       client.short_name or client.full_name,
-            "route_name":        route.name if route else "—",
-            "ordered_qty":       o.qty,
+            "order_id":           o.id,
+            "client_id":          o.client_id,
+            "client_name":        client.short_name or client.full_name,
+            "route_name":         route.name if route else "—",
+            "ordered_qty":        o.qty,
             "existing_reduction": float(existing_reduction),
+            "exchange_type":      o.exchange_type,
+            "price_override":     o.price_override,
+            "effective_price":    effective_price,
         })
 
     return sorted(result, key=lambda x: x["route_name"])

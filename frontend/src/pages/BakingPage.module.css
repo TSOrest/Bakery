@@ -315,6 +315,27 @@
 }
 .lineQty   { text-align: center; }
 .lineNotes { color: #888; font-size: 0.82rem; }
+.lineType  { white-space: nowrap; }
+.linePrice { text-align: right; color: #2a5080; font-size: 0.82rem; white-space: nowrap; }
+
+.typeExchange {
+  display: inline-block;
+  background: #e0f0ff;
+  color: #1a5090;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.78rem;
+  font-style: italic;
+}
+.typeCustom {
+  display: inline-block;
+  background: #fff3cd;
+  color: #7a5500;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.78rem;
+  font-style: italic;
+}
 
 /* ─── Форма додавання рядка ───────────────────────────────── */
 

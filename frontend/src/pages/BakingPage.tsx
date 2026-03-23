@@ -362,6 +362,8 @@ function DiscrepancyPanel({
               <tr>
                 <th>Клієнт</th>
                 <th>Маршрут</th>
+                <th>Тип</th>
+                <th>Ціна</th>
                 <th>Замовлено</th>
                 <th>Вже знято</th>
                 {!hasConflict && <th>Зняти ще</th>}
@@ -371,10 +373,22 @@ function DiscrepancyPanel({
               {clientRows.map(c => {
                 const maxReduce = c.ordered_qty - c.existing_reduction
                 const showEditDel = shortageRowsEditable && c.existing_reduction > 0
+                const isExchange  = c.exchange_type === 'pre_order'
+                const isCustom    = !isExchange && c.price_override != null
                 return (
                   <tr key={c.order_id}>
                     <td>{c.client_name}</td>
                     <td className={styles.lineNotes}>{c.route_name}</td>
+                    <td className={styles.lineType}>
+                      {isExchange
+                        ? <span className={styles.typeExchange}>↔ обмін</span>
+                        : isCustom
+                        ? <span className={styles.typeCustom}>% своя</span>
+                        : null}
+                    </td>
+                    <td className={styles.linePrice}>
+                      {isExchange ? '0.00' : c.effective_price.toFixed(2)}
+                    </td>
                     <td className={styles.lineQty}>{c.ordered_qty}</td>
                     <td className={styles.lineQty}>
                       {showEditDel ? (
