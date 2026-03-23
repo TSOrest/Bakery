@@ -373,9 +373,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const modalClient = modalClientId != null ? clientMap.get(modalClientId) : undefined
 
-  const showRouteCol  = selectedRouteId == null
-  const showClientCol = selectedClientId == null
-  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 5
+  const colCount = 7
 
   const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
@@ -584,8 +582,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           <table className={styles.ordersTable}>
             <thead>
               <tr>
-                {showRouteCol  && <th className={styles.thRoute}>Маршрут</th>}
-                {showClientCol && <th className={styles.thClient}>Клієнт</th>}
+                <th className={styles.thRoute}>Маршрут</th>
+                <th className={styles.thClient}>Клієнт</th>
                 <th className={styles.thProduct}>Виріб</th>
                 <th className={styles.thNum}>К-сть</th>
                 <th className={styles.thNum}>Ціна</th>
@@ -620,12 +618,10 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                       isRejected ? styles.orderRowRejected : '',
                     ].join(' ')}
                   >
-                    {showRouteCol  && <td className={styles.tdRoute}>{route?.name ?? '—'}</td>}
-                    {showClientCol && (
-                      <td className={styles.tdClient}>
-                        {client?.short_name ?? client?.full_name ?? '—'}
-                      </td>
-                    )}
+                    <td className={styles.tdRoute}>{route?.name ?? '—'}</td>
+                    <td className={styles.tdClient}>
+                      {client?.short_name ?? client?.full_name ?? '—'}
+                    </td>
                     <td className={styles.tdProduct}>
                       {isExchange && <span className={styles.exchangeTag}>↔ </span>}
                       {isDiscount && <span className={styles.discountTag}>% </span>}
