@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
@@ -110,6 +110,7 @@ export default function OrdersPage() {
   const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
   const [lockedClientIds,  setLockedClientIds]  = useState<Set<number>>(new Set())
+  const [expandedIds,      setExpandedIds]      = useState<Set<number>>(new Set())
 
 const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
@@ -294,6 +295,26 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const clientMap  = useMemo(() => new Map(clients.map(c => [c.id, c])),  [clients])
   const routeMap   = useMemo(() => new Map(routes.map(r => [r.id, r])),   [routes])
   const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products])
+
+  // Дочірні рядки: зняття нестачі (parent_order_id != null, origin_id == null)
+  const childOrdersMap = useMemo(() => {
+    const map = new Map<number, Order[]>()
+    for (const o of orders) {
+      if (o.parent_order_id != null && o.origin_id == null) {
+        const arr = map.get(o.parent_order_id) ?? []
+        arr.push(o)
+        map.set(o.parent_order_id, arr)
+      }
+    }
+    return map
+  }, [orders])
+
+  const toggleExpand = (id: number) =>
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
 
   // ─── Підрахунки по клієнту ────────────────────────────────────────────────
 
@@ -598,63 +619,104 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const product = productMap.get(order.product_id)
                 const isExchange = order.exchange_type !== 'none'
                 const isDiscount = order.exchange_type === 'none' && order.price_override != null
-                // Ціна: для exchange рядків — 0, для знижок — price_override, для основних — з кешу
                 const displayPrice = isExchange
                   ? 0
                   : (order.price_override ?? prices[order.client_id]?.[order.product_id])
-                const sum = displayPrice != null ? order.qty * displayPrice : null
+
+                // Дочірні рядки (знімання нестачі)
+                const children   = childOrdersMap.get(order.id) ?? []
+                const reduction  = children.reduce((s, c) => s + c.qty, 0)
+                const adjQty     = order.qty - reduction
+                const hasChildren = children.length > 0
+                const isExpanded  = expandedIds.has(order.id)
+
+                const sum = displayPrice != null ? adjQty * displayPrice : null
                 const isSel      = order.client_id === selectedClientId
                 const isPending  = order.source === 'bot' && order.bot_status === 'pending'
                 const isRejected = order.source === 'bot' && order.bot_status === 'rejected'
+
                 return (
-                  <tr
-                    key={order.id}
-                    className={[
-                      styles.orderRow,
-                      isExchange ? styles.orderRowExchange : '',
-                      isDiscount ? styles.orderRowDiscount : '',
-                      isSel      ? styles.orderRowSel     : '',
-                      isPending  ? styles.orderRowPending  : '',
-                      isRejected ? styles.orderRowRejected : '',
-                    ].join(' ')}
-                  >
-                    <td className={styles.tdRoute}>{route?.name ?? '—'}</td>
-                    <td className={styles.tdClient}>
-                      {client?.short_name ?? client?.full_name ?? '—'}
-                    </td>
-                    <td className={styles.tdProduct}>
-                      {isExchange && <span className={styles.exchangeTag}>↔ </span>}
-                      {isDiscount && <span className={styles.discountTag}>% </span>}
-                      {product?.name ?? '—'}
-                    </td>
-                    <td className={styles.tdNum}>{order.qty}</td>
-                    <td className={styles.tdPrice}>
-                      {isExchange ? '0.00' : displayPrice != null ? fmt(displayPrice) : '—'}
-                    </td>
-                    <td className={styles.tdSum}>
-                      {isExchange ? '—' : sum != null ? fmt(sum) : '—'}
-                    </td>
-                    <td className={styles.tdSrc} title={(() => {
-                      if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
-                      const lines: string[] = []
-                      if (order.bot_status === 'pending')   lines.push('Очікує підтвердження оператора')
-                      if (order.bot_status === 'confirmed') lines.push('Підтверджено оператором')
-                      if (order.bot_status === 'modified')  lines.push(`Змінено оператором\nБуло: ${order.bot_original_qty ?? '?'} шт → стало: ${order.qty} шт`)
-                      if (order.bot_status === 'rejected')  lines.push('Відхилено оператором')
-                      if (order.bot_rejection_reason)       lines.push(`Примітка: ${order.bot_rejection_reason}`)
-                      return lines.join('\n') || 'Бот'
-                    })()}>
-                      {order.source === 'bot' ? (
-                        <span style={{ display: 'inline-flex', gap: '0.1rem' }}>
-                          <span>🤖</span>
-                          {order.bot_status === 'pending'   && <span>⏳</span>}
-                          {order.bot_status === 'confirmed' && <span>✅</span>}
-                          {order.bot_status === 'modified'  && <span>✏️</span>}
-                          {order.bot_status === 'rejected'  && <span>❌</span>}
-                        </span>
-                      ) : order.source === 'paper' ? '📄' : null}
-                    </td>
-                  </tr>
+                  <Fragment key={order.id}>
+                    <tr
+                      className={[
+                        styles.orderRow,
+                        isExchange ? styles.orderRowExchange : '',
+                        isDiscount ? styles.orderRowDiscount : '',
+                        isSel      ? styles.orderRowSel     : '',
+                        isPending  ? styles.orderRowPending  : '',
+                        isRejected ? styles.orderRowRejected : '',
+                      ].join(' ')}
+                    >
+                      <td className={styles.tdRoute}>{route?.name ?? '—'}</td>
+                      <td className={styles.tdClient}>
+                        {client?.short_name ?? client?.full_name ?? '—'}
+                      </td>
+                      <td className={styles.tdProduct}>
+                        {hasChildren && (
+                          <button
+                            className={styles.expandBtn}
+                            onClick={() => toggleExpand(order.id)}
+                            title={isExpanded ? 'Згорнути' : 'Розгорнути деталі'}
+                          >{isExpanded ? '▼' : '▶'}</button>
+                        )}
+                        {isExchange && <span className={styles.exchangeTag}>↔ </span>}
+                        {isDiscount && <span className={styles.discountTag}>% </span>}
+                        {product?.name ?? '—'}
+                      </td>
+                      <td className={styles.tdNum}>
+                        {hasChildren ? (
+                          <span>
+                            <span className={reduction > 0 ? styles.adjQty : ''}>{adjQty}</span>
+                            {reduction > 0 && (
+                              <span className={styles.origQty}> із {order.qty}</span>
+                            )}
+                          </span>
+                        ) : order.qty}
+                      </td>
+                      <td className={styles.tdPrice}>
+                        {isExchange ? '0.00' : displayPrice != null ? fmt(displayPrice) : '—'}
+                      </td>
+                      <td className={styles.tdSum}>
+                        {isExchange ? '—' : sum != null ? fmt(sum) : '—'}
+                      </td>
+                      <td className={styles.tdSrc} title={(() => {
+                        if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
+                        const lines: string[] = []
+                        if (order.bot_status === 'pending')   lines.push('Очікує підтвердження оператора')
+                        if (order.bot_status === 'confirmed') lines.push('Підтверджено оператором')
+                        if (order.bot_status === 'modified')  lines.push(`Змінено оператором\nБуло: ${order.bot_original_qty ?? '?'} шт → стало: ${order.qty} шт`)
+                        if (order.bot_status === 'rejected')  lines.push('Відхилено оператором')
+                        if (order.bot_rejection_reason)       lines.push(`Примітка: ${order.bot_rejection_reason}`)
+                        return lines.join('\n') || 'Бот'
+                      })()}>
+                        {order.source === 'bot' ? (
+                          <span style={{ display: 'inline-flex', gap: '0.1rem' }}>
+                            <span>🤖</span>
+                            {order.bot_status === 'pending'   && <span>⏳</span>}
+                            {order.bot_status === 'confirmed' && <span>✅</span>}
+                            {order.bot_status === 'modified'  && <span>✏️</span>}
+                            {order.bot_status === 'rejected'  && <span>❌</span>}
+                          </span>
+                        ) : order.source === 'paper' ? '📄' : null}
+                      </td>
+                    </tr>
+
+                    {/* ── Дочірні рядки (знімання нестачі) ── */}
+                    {isExpanded && children.map(child => {
+                      const childClient = clientMap.get(child.client_id)
+                      const childName   = childClient?.short_name ?? childClient?.full_name ?? `#${child.client_id}`
+                      return (
+                        <tr key={child.id} className={styles.childRow}>
+                          <td />
+                          <td />
+                          <td className={styles.childLabel}>↳ {childName}</td>
+                          <td className={styles.childQty}>−{child.qty}</td>
+                          <td />
+                          <td className={styles.childNotes} colSpan={2}>{child.notes ?? ''}</td>
+                        </tr>
+                      )
+                    })}
+                  </Fragment>
                 )
               })}
               {ordersToShow.length === 0 && (

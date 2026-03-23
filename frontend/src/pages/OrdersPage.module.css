@@ -290,6 +290,29 @@
 .exchangeTag { font-style: italic; opacity: 0.75; }
 .discountTag { font-style: italic; opacity: 0.75; }
 
+/* Дерево дочірніх рядків (переміщення / повернення) */
+.expandBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 0.2rem;
+  color: #7090b0;
+  line-height: 1;
+  vertical-align: middle;
+}
+.expandBtn:hover { color: #1a3a5c; }
+
+.adjQty { font-weight: 600; color: #1a3a5c; }
+.origQty { font-size: 0.75rem; color: #9ab8d0; margin-left: 0.25rem; }
+
+.childRow { background: #f7fbff; }
+.childRow:hover { background: #eef5fc !important; }
+.childRow td { border-bottom: 1px solid #eaf0f8; font-size: 0.83rem; }
+.childLabel { padding: 0.18rem 0.6rem 0.18rem 2rem; color: #4a6a8a; font-style: italic; }
+.childQty   { padding: 0.18rem 0.6rem; text-align: right; color: #c0392b; font-weight: 600; white-space: nowrap; }
+.childNotes { padding: 0.18rem 0.6rem; color: #8fa8c0; }
+
 .tdRoute {
   padding: 0.28rem 0.7rem;
   border-bottom: 1px solid #eee;
