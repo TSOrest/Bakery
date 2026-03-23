@@ -62,7 +62,6 @@ export interface Order {
   product_id: number
   qty: number
   order_date: string
-  status: 'draft' | 'confirmed' | 'closed'
   source: 'phone' | 'paper' | 'bot'
   exchange_type: 'none' | 'pre_order' | 'post_delivery'
   exchange_qty: number

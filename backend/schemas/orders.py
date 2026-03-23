@@ -17,12 +17,6 @@ class ExchangeType(str, Enum):
     post_delivery = "post_delivery"
 
 
-class OrderStatus(str, Enum):
-    draft     = "draft"
-    confirmed = "confirmed"
-    closed    = "closed"
-
-
 class OrderCreate(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
     client_id: int
@@ -44,7 +38,6 @@ class OrderCreate(BaseModel):
 class OrderUpdate(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
     qty: Optional[float] = None
-    status: Optional[OrderStatus] = None
     exchange_type: Optional[ExchangeType] = None
     exchange_qty: Optional[float] = None
     exchange_price: Optional[float] = None
@@ -61,7 +54,6 @@ class OrderOut(BaseModel):
     product_id: int
     qty: float
     order_date: str
-    status: str
     source: str
     exchange_type: str
     exchange_qty: float

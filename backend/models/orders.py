@@ -13,7 +13,6 @@ class Order(Base):
     product_id       = Column(Integer, ForeignKey("products.id"), nullable=False)
     qty              = Column(Float, nullable=False, default=0)
     order_date       = Column(Text, nullable=False)
-    status           = Column(Text, default="draft")
     source           = Column(Text, default="phone")
     exchange_type    = Column(Text, default="none")
     exchange_qty     = Column(Float, default=0)
@@ -22,7 +21,6 @@ class Order(Base):
     price_override   = Column(Float)
     notes            = Column(Text)
     created_at       = Column(Text)
-    created_by       = Column(Text)
     # Split-замовлення: дочірній рядок посилається на батьківський
     parent_order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)
     delivered_qty        = Column(Float, nullable=True)

@@ -340,7 +340,7 @@ def _report_orders() -> str:
     with SessionLocal() as db:
         orders = (
             db.query(Order)
-            .filter(Order.order_date == today, Order.status != "closed")
+            .filter(Order.order_date == today)
             .all()
         )
 
@@ -718,12 +718,10 @@ def _save_order_item(token: str, chat_id: int, qty: float) -> None:
                 product_id=product_id,
                 qty=qty,
                 order_date=order_date,
-                status="draft",
                 source="bot",
                 bot_status="pending",
                 placed_by_chat_id=str(chat_id),
                 created_at=now,
-                created_by="bot",
             ))
         db.commit()
 

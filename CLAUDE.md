@@ -656,7 +656,7 @@ INSERT INTO settings VALUES
 - [x] Додати поля до clients (is_own_shop, print_invoice, receiver_name, delivery_agent, delivery_note_number, delivery_note_date, client_group)
 - [x] Додати `initial_stock` до products
 - [x] Замінити finance_type enum на таблицю `finance_articles`
-- [ ] UX вкладки Замовлення: дерево маршрут→клієнт, підказка середнього, швидка навігація
+- [x] UX вкладки Замовлення: дерево маршрут→клієнт, підказка середнього, швидка навігація
 - [ ] UX вкладки Випічка: пайок у рядку, Enter-навігація
 - [ ] UX вкладки Маршрути: акцент на "сума від водія", розгортання деталі замовлення
 - [ ] UX вкладки Магазин: компактний стан без прокручування + потокове внесення

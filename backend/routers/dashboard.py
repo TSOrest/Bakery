@@ -36,7 +36,7 @@ def get_dashboard(db: Session = Depends(get_db)):
     # ── Замовлення сьогодні ───────────────────────────────────────────────────
     orders_today = (
         db.query(Order)
-        .filter(Order.order_date == today, Order.status != 'closed')
+        .filter(Order.order_date == today)
         .all()
     )
     orders_client_count = len(set(o.client_id for o in orders_today))
@@ -45,7 +45,7 @@ def get_dashboard(db: Session = Depends(get_db)):
     # ── Замовлення за тиждень ─────────────────────────────────────────────────
     orders_week = (
         db.query(func.count(Order.id).label("cnt"), func.sum(Order.qty).label("qty"))
-        .filter(Order.order_date >= week_ago, Order.status != 'closed')
+        .filter(Order.order_date >= week_ago)
         .first()
     )
 

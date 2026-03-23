@@ -39,7 +39,6 @@ def copy_orders(
             product_id=src.product_id,
             qty=src.qty,
             order_date=target_date,
-            status="draft",
             source=src.source,
             # Обмін не копіюємо — це одноразова операція
         )
@@ -59,7 +58,6 @@ def aggregate_for_baking(db: Session, date: str) -> List[dict]:
         db.query(Order.product_id, func.sum(Order.qty).label("total_qty"))
         .filter(
             Order.order_date == date,
-            Order.status.in_(["confirmed", "draft"]),
             # Тільки звичайні замовлення клієнтів (не надлишки і не переміщення)
             Order.origin_id.is_(None),
             # Виключаємо bot-замовлення які ще не підтверджені оператором
