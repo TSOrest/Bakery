@@ -68,7 +68,13 @@ def generate_from_orders(
     for client in clients:
         orders = (
             db.query(Order)
-            .filter(Order.client_id == client.id, Order.order_date == invoice_date)
+            .filter(
+                Order.client_id == client.id,
+                Order.order_date == invoice_date,
+                # Тільки кореневі рядки — не знімання нестачі, не розподіл надлишку
+                Order.parent_order_id.is_(None),
+                Order.origin_id.is_(None),
+            )
             .all()
         )
         if not orders:
@@ -98,16 +104,30 @@ def generate_from_orders(
 
         total = 0.0
         for order in orders:
-            price = get_price(db, order.product_id, client.id, invoice_date)
-            line_sum = round(order.qty * price, 2)
-            total += line_sum
-            db.add(InvoiceLine(
-                invoice_id=inv.id,
-                product_id=order.product_id,
-                qty=order.qty,
-                price=price,
-                sum=line_sum,
-            ))
+            if order.exchange_type == "pre_order":
+                # Обмінний рядок: клієнт отримує безкоштовно
+                db.add(InvoiceLine(
+                    invoice_id=inv.id,
+                    product_id=order.product_id,
+                    qty=order.qty,
+                    price=0.0,
+                    is_exchange=1,
+                    sum=0.0,
+                ))
+            else:
+                price = get_price(db, order.product_id, client.id, invoice_date)
+                # Пріоритет: price_override на рядку > базова ціна
+                effective_price = order.price_override if order.price_override is not None else price
+                line_sum = round(order.qty * effective_price, 2)
+                total += line_sum
+                db.add(InvoiceLine(
+                    invoice_id=inv.id,
+                    product_id=order.product_id,
+                    qty=order.qty,
+                    price=price,
+                    price_override=order.price_override,
+                    sum=line_sum,
+                ))
 
         inv.total_sum = round(total, 2)
         db.flush()

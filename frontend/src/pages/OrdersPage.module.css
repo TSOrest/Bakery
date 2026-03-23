@@ -280,6 +280,16 @@
 .orderRow:hover { background: #f2f7fc; }
 .orderRowSel { background: #daeaf8 !important; }
 
+/* Exchange / discount рядки */
+.orderRowExchange { background: #f0f8ff; }
+.orderRowExchange:hover { background: #e6f2ff !important; }
+.orderRowExchange td { color: #2a6aac; font-size: 0.87rem; }
+.orderRowDiscount { background: #fdf8ee; }
+.orderRowDiscount:hover { background: #f8f0d8 !important; }
+.orderRowDiscount td { color: #7a5500; font-size: 0.87rem; }
+.exchangeTag { font-style: italic; opacity: 0.75; }
+.discountTag { font-style: italic; opacity: 0.75; }
+
 .tdRoute {
   padding: 0.28rem 0.7rem;
   border-bottom: 1px solid #eee;

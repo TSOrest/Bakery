@@ -111,8 +111,7 @@ export default function OrdersPage() {
   const [botStatusLoading, setBotStatusLoading] = useState(false)
   const [lockedClientIds,  setLockedClientIds]  = useState<Set<number>>(new Set())
 
-const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
-  const exTimers  = useRef<Record<string,  ReturnType<typeof setTimeout>>>({})
+const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -236,20 +235,26 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const handleQtyChange = (clientId: number, productId: number, qty: number) => {
     const key: CellKey = `${clientId}-${productId}`
 
+    // Знаходимо тільки основне замовлення (не exchange і не price_override рядки)
+    const isMainOrder = (o: Order) =>
+      o.client_id === clientId &&
+      o.product_id === productId &&
+      o.parent_order_id == null &&
+      o.origin_id == null &&
+      o.exchange_type === 'none' &&
+      o.price_override == null
+
     setOrders(prev => {
-      const exists = prev.find(o => o.client_id === clientId && o.product_id === productId && o.parent_order_id == null)
+      const exists = prev.find(isMainOrder)
       if (exists) {
-        return prev.map(o =>
-          o.client_id === clientId && o.product_id === productId && o.parent_order_id == null
-            ? { ...o, qty } : o
-        )
+        return prev.map(o => isMainOrder(o) ? { ...o, qty } : o)
       }
       if (qty <= 0) return prev
       return [...prev, {
         id: -1, client_id: clientId, product_id: productId, qty, order_date: workDate,
         status: 'draft', source: 'phone', exchange_type: 'none', exchange_qty: 0,
         exchange_price: null, exchange_notes: null, price_override: null, notes: null,
-        created_at: null, parent_order_id: null, delivered_qty: null,
+        created_at: null, parent_order_id: null, delivered_qty: null, origin_id: null,
       } as Order]
     })
 
@@ -258,7 +263,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     timers.current[key] = setTimeout(async () => {
       setSaving(s => ({ ...s, [key]: 'saving' }))
       try {
-        const existing = orders.find(o => o.client_id === clientId && o.product_id === productId && o.parent_order_id == null)
+        const existing = orders.find(isMainOrder)
         if (existing && existing.id !== -1) {
           if (qty <= 0) {
             await api.delete(`/orders/${existing.id}`)
@@ -272,34 +277,13 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
             client_id: clientId, product_id: productId, qty, order_date: workDate,
           })
           setOrders(prev => prev.map(o =>
-            o.client_id === clientId && o.product_id === productId && o.id === -1 ? created : o
+            isMainOrder(o) && o.id === -1 ? created : o
           ))
         }
         setSaving(s => ({ ...s, [key]: 'saved' }))
         setTimeout(() => setSaving(s => { const n = { ...s }; delete n[key]; return n }), 1500)
       } catch {
         setSaving(s => ({ ...s, [key]: 'error' }))
-      }
-    }, 600)
-  }
-
-  // ─── Зміна exchange_qty ────────────────────────────────────────────────────
-
-  const handleExchangeQtyChange = (clientId: number, productId: number, exQty: number) => {
-    setOrders(prev => prev.map(o =>
-      o.client_id === clientId && o.product_id === productId && o.parent_order_id == null
-        ? { ...o, exchange_qty: exQty }
-        : o
-    ))
-    const timerKey = `ex-${clientId}-${productId}`
-    if (exTimers.current[timerKey]) clearTimeout(exTimers.current[timerKey])
-    exTimers.current[timerKey] = setTimeout(async () => {
-      const existing = orders.find(o =>
-        o.client_id === clientId && o.product_id === productId && o.parent_order_id == null && o.id !== -1
-      )
-      if (existing) {
-        try { await api.put(`/orders/${existing.id}`, { exchange_qty: exQty >= 0 ? exQty : 0 }) }
-        catch {}
       }
     }, 600)
   }
@@ -319,7 +303,14 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   )
 
   const clientCategoryQty = (clientId: number, categoryId: number) =>
-    orders.filter(o => o.client_id === clientId && o.parent_order_id == null)
+    orders
+      .filter(o =>
+        o.client_id === clientId &&
+        o.parent_order_id == null &&
+        o.origin_id == null &&
+        o.exchange_type === 'none' &&
+        o.price_override == null
+      )
       .reduce((s, o) => s + (productMap.get(o.product_id)?.category_id === categoryId ? o.qty : 0), 0)
 
   // ─── Рендер ────────────────────────────────────────────────────────────────
@@ -345,7 +336,10 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const ordersToShow = orders
     .filter(o => {
-      if (o.parent_order_id != null || o.qty <= 0) return false
+      // Тільки кореневі рядки (не знімання нестачі, не розподіл надлишку)
+      if (o.parent_order_id != null) return false
+      if (o.origin_id != null) return false   // surplus allocation (origin_id=0)
+      if (o.qty <= 0) return false
       if (selectedRouteId != null) {
         const c = clientMap.get(o.client_id)
         if (!c || c.route_id !== selectedRouteId) return false
@@ -369,7 +363,11 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     const rc = routeId == null
       ? clients.filter(visible)
       : clients.filter(c => visible(c) && (c.client_kind === 'shop' || c.route_id === routeId))
-    const withOrders = rc.filter(c => orders.some(o => o.client_id === c.id && o.qty > 0 && o.parent_order_id == null))
+    const withOrders = rc.filter(c => orders.some(o =>
+      o.client_id === c.id && o.qty > 0 &&
+      o.parent_order_id == null && o.origin_id == null &&
+      o.exchange_type === 'none' && o.price_override == null
+    ))
     return `${withOrders.length}/${rc.length}`
   }
 
@@ -377,7 +375,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const showRouteCol  = selectedRouteId == null
   const showClientCol = selectedClientId == null
-  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 6
+  const colCount = (showRouteCol ? 1 : 0) + (showClientCol ? 1 : 0) + 5
 
   const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
@@ -589,10 +587,8 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 {showRouteCol  && <th className={styles.thRoute}>Маршрут</th>}
                 {showClientCol && <th className={styles.thClient}>Клієнт</th>}
                 <th className={styles.thProduct}>Виріб</th>
-                <th className={styles.thNum}>Замовл.</th>
+                <th className={styles.thNum}>К-сть</th>
                 <th className={styles.thNum}>Ціна</th>
-                <th className={styles.thNum}>Обмін</th>
-                <th className={styles.thNum}>Всього</th>
                 <th className={styles.thNum}>Сума</th>
                 <th className={styles.thSrc} title="Джерело / статус"></th>
               </tr>
@@ -602,10 +598,13 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const client  = clientMap.get(order.client_id)
                 const route   = routeMap.get(client?.route_id ?? 0)
                 const product = productMap.get(order.product_id)
-                const price   = prices[order.client_id]?.[order.product_id]
-                const exQty   = order.exchange_qty ?? 0
-                const total   = order.qty + exQty
-                const sum     = price != null ? order.qty * price : null
+                const isExchange = order.exchange_type !== 'none'
+                const isDiscount = order.exchange_type === 'none' && order.price_override != null
+                // Ціна: для exchange рядків — 0, для знижок — price_override, для основних — з кешу
+                const displayPrice = isExchange
+                  ? 0
+                  : (order.price_override ?? prices[order.client_id]?.[order.product_id])
+                const sum = displayPrice != null ? order.qty * displayPrice : null
                 const isSel      = order.client_id === selectedClientId
                 const isPending  = order.source === 'bot' && order.bot_status === 'pending'
                 const isRejected = order.source === 'bot' && order.bot_status === 'rejected'
@@ -614,6 +613,8 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                     key={order.id}
                     className={[
                       styles.orderRow,
+                      isExchange ? styles.orderRowExchange : '',
+                      isDiscount ? styles.orderRowDiscount : '',
                       isSel      ? styles.orderRowSel     : '',
                       isPending  ? styles.orderRowPending  : '',
                       isRejected ? styles.orderRowRejected : '',
@@ -625,15 +626,17 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                         {client?.short_name ?? client?.full_name ?? '—'}
                       </td>
                     )}
-                    <td className={styles.tdProduct}>{product?.name ?? '—'}</td>
+                    <td className={styles.tdProduct}>
+                      {isExchange && <span className={styles.exchangeTag}>↔ </span>}
+                      {isDiscount && <span className={styles.discountTag}>% </span>}
+                      {product?.name ?? '—'}
+                    </td>
                     <td className={styles.tdNum}>{order.qty}</td>
                     <td className={styles.tdPrice}>
-                      {price != null ? fmt(price) : '—'}
+                      {isExchange ? '0.00' : displayPrice != null ? fmt(displayPrice) : '—'}
                     </td>
-                    <td className={styles.tdNum}>{exQty > 0 ? exQty : ''}</td>
-                    <td className={styles.tdNum}>{total}</td>
                     <td className={styles.tdSum}>
-                      {sum != null ? fmt(sum) : '—'}
+                      {isExchange ? '—' : sum != null ? fmt(sum) : '—'}
                     </td>
                     <td className={styles.tdSrc} title={(() => {
                       if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
@@ -680,7 +683,7 @@ const timers    = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           saving={saving}
           locked={lockedClientIds.has(modalClient.id)}
           onQtyChange={handleQtyChange}
-          onExchangeQtyChange={handleExchangeQtyChange}
+          onOrdersChange={() => loadAll(workDate)}
           onClose={() => setModalClientId(null)}
         />
       )}
