@@ -387,7 +387,7 @@ function DiscrepancyPanel({
                         : null}
                     </td>
                     <td className={styles.linePrice}>
-                      {isExchange ? '0.00' : c.effective_price.toFixed(2)}
+                      {isExchange ? '0.00' : (c.effective_price ?? 0).toFixed(2)}
                     </td>
                     <td className={styles.lineQty}>{c.ordered_qty}</td>
                     <td className={styles.lineQty}>
