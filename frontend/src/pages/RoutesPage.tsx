@@ -1,287 +1,420 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
-import type { Client, Invoice, InvoiceLine, Order, Product, Route } from '../types'
-import Modal from '../components/Modal'
+import type { Client, Invoice, InvoiceLine, Product, Route } from '../types'
 import styles from './RoutesPage.module.css'
 
-// ─── Статус накладної ─────────────────────────────────────────────────────────
+// ─── Лейбли статусів ───────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<string, string> = {
-  draft:     'Чернетка',
-  printed:   'Надруковано',
-  delivered: 'Доставлено',
-  cancelled: 'Скасовано',
+  draft:      'Чернетка',
+  sent:       'Відправлено',
+  processing: 'Опрацювання',
+  accepted:   'Прийнято',
+  cancelled:  'Скасовано',
 }
 
-// ─── Модальне вікно деталей накладної ────────────────────────────────────────
+// ─── Панель деталей накладної (права 50%) ──────────────────────────────────────
 
-interface InvoiceModalProps {
+interface DetailPanelProps {
   invoice: Invoice
+  corrective: Invoice | null
+  client: Client
   products: Product[]
-  clientName: string
-  onClose: () => void
+  onStatusChange: (inv: Invoice) => void
+  onRefresh: () => void
 }
 
-function InvoiceModal({ invoice, products, clientName, onClose }: InvoiceModalProps) {
+function InvoiceDetailPanel({
+  invoice, corrective, client, products, onStatusChange, onRefresh,
+}: DetailPanelProps) {
   const productName = (id: number) => {
     const p = products.find((p) => p.id === id)
     return p?.short_name ?? p?.name ?? `#${id}`
   }
 
+  // ── Стан редагування qty (draft-режим) ──────────────────────────────────────
+  const [editMode,    setEditMode]    = useState(false)
+  const [editQtys,    setEditQtys]    = useState<Record<number, number>>({})
+  const [savingEdit,  setSavingEdit]  = useState(false)
+
+  const startEdit = () => {
+    const qtys: Record<number, number> = {}
+    invoice.lines.forEach((l) => { qtys[l.id] = l.qty })
+    setEditQtys(qtys)
+    setEditMode(true)
+  }
+
+  const saveEdit = async () => {
+    setSavingEdit(true)
+    const lines = Object.entries(editQtys).map(([id, qty]) => ({ id: Number(id), qty }))
+    await api.put<Invoice>(`/invoices/${invoice.id}/lines`, { lines })
+    setSavingEdit(false)
+    setEditMode(false)
+    onRefresh()
+  }
+
+  // ── Відправити (draft → sent) ────────────────────────────────────────────────
+  const [sending, setSending] = useState(false)
+
+  const handleSend = async () => {
+    setSending(true)
+    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=sent`, {})
+    setSending(false)
+    onStatusChange(updated)
+    // Відкриваємо друк
+    window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')
+  }
+
+  // ── Пряме прийняття (sent/processing → accepted) ─────────────────────────────
+  const [accepting, setAccepting] = useState(false)
+
+  const handleAccept = async () => {
+    setAccepting(true)
+    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=accepted`, {})
+    setAccepting(false)
+    onStatusChange(updated)
+  }
+
+  // ── Перехід в Опрацювання (sent → processing) ────────────────────────────────
+  const handleProcess = async () => {
+    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=processing`, {})
+    onStatusChange(updated)
+  }
+
+  // ── Форма Опрацювання ─────────────────────────────────────────────────────────
+  const [showProc,    setShowProc]    = useState(false)
+  const [procQtys,    setProcQtys]    = useState<Record<number, number>>({})
+  const [cashReceived, setCashReceived] = useState(0)
+  const [procNotes,   setProcNotes]   = useState('')
+  const [confirming,  setConfirming]  = useState(false)
+
+  const openProc = () => {
+    const qtys: Record<number, number> = {}
+    invoice.lines.forEach((l) => { qtys[l.product_id] = l.qty })
+    setProcQtys(qtys)
+    setShowProc(true)
+  }
+
+  const handleConfirmProc = async () => {
+    setConfirming(true)
+    const lines = Object.entries(procQtys).map(([pid, qty]) => ({
+      product_id: Number(pid),
+      qty_delivered: qty,
+    }))
+    await api.post<Invoice>(`/invoices/${invoice.id}/corrective`, {
+      cash_received: cashReceived,
+      notes: procNotes,
+      lines,
+    })
+    setConfirming(false)
+    setShowProc(false)
+    onRefresh()
+  }
+
+  const { status } = invoice
+
+  // ── Форматування дати ─────────────────────────────────────────────────────────
+  const formatDate = (d: string) => {
+    const [y, m, day] = d.split('-')
+    const months = ['','січня','лютого','березня','квітня','травня','червня',
+                    'липня','серпня','вересня','жовтня','листопада','грудня']
+    return `${parseInt(day)} ${months[parseInt(m)]} ${y}`
+  }
+
   return (
-    <Modal title={`Накладна ${invoice.invoice_number}`} onClose={onClose}>
-      <div className={styles.invoiceDetail}>
-        <div className={styles.invoiceMeta}>
-          <span><strong>Клієнт:</strong> {clientName}</span>
-          <span><strong>Дата:</strong> {invoice.invoice_date}</span>
-          <span><strong>Статус:</strong> {STATUS_LABELS[invoice.status]}</span>
+    <>
+      <div className={styles.paper}>
+        {/* ── Шапка ── */}
+        <div className={styles.paperHeader}>
+          <div>
+            <div className={styles.paperInvNum}>
+              Накладна №{invoice.invoice_number}
+              {invoice.corrective_for_id && (
+                <span className={styles.correctiveBadge}>↩ коригуюча</span>
+              )}
+            </div>
+            <div className={styles.paperDate}>{formatDate(invoice.invoice_date)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span className={`${styles.statusBadge} ${styles[`status_${status}`]}`}>
+              {STATUS_LABELS[status] ?? status}
+            </span>
+            <div className={styles.paperClientName}>
+              {client.short_name ?? client.full_name}
+            </div>
+            {client.address && (
+              <div className={styles.paperClientAddr}>{client.address}</div>
+            )}
+          </div>
         </div>
 
-        <table className={styles.linesTable}>
+        {/* ── Рядки ── */}
+        <table className={styles.paperTable}>
           <thead>
             <tr>
               <th>Виріб</th>
-              <th>Кількість</th>
-              <th>Ціна</th>
-              <th>Сума</th>
+              <th className={styles.numTh}>Кільк.</th>
+              <th className={styles.numTh}>Ціна</th>
+              <th className={styles.numTh}>Сума</th>
             </tr>
           </thead>
           <tbody>
             {invoice.lines.map((line: InvoiceLine) => (
               <tr key={line.id}>
-                <td>{productName(line.product_id)}</td>
-                <td className={styles.numCell}>{line.qty}</td>
-                <td className={styles.numCell}>
+                <td>
+                  {productName(line.product_id)}
+                  {line.is_exchange === 1 && (
+                    <span style={{ color: '#e67e22', fontSize: '0.75rem', marginLeft: '0.3rem' }}>
+                      (обмін)
+                    </span>
+                  )}
+                </td>
+                <td className={styles.numTd}>
+                  {editMode ? (
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={editQtys[line.id] ?? line.qty}
+                      onChange={(e) =>
+                        setEditQtys((p) => ({ ...p, [line.id]: Number(e.target.value) }))
+                      }
+                      className={styles.qtyInput}
+                    />
+                  ) : line.qty}
+                </td>
+                <td className={styles.numTd}>
                   {(line.price_override ?? line.price).toFixed(2)} ₴
                 </td>
-                <td className={styles.numCell}>{line.sum.toFixed(2)} ₴</td>
+                <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3} style={{ textAlign: 'right', fontWeight: 700 }}>Разом:</td>
-              <td className={styles.numCell} style={{ fontWeight: 700 }}>
-                {invoice.total_sum.toFixed(2)} ₴
-              </td>
+              <td colSpan={3} style={{ textAlign: 'right' }}>Разом:</td>
+              <td className={styles.numTd}>{invoice.total_sum.toFixed(2)} ₴</td>
             </tr>
           </tfoot>
         </table>
 
-        {invoice.notes && (
-          <p className={styles.invoiceNotes}>Примітка: {invoice.notes}</p>
+        {/* ── Панель Опрацювання ── */}
+        {showProc && (
+          <div className={styles.processingPanel}>
+            <div className={styles.processingTitle}>Опрацювання після повернення водія</div>
+
+            <div className={styles.cashRow}>
+              <span className={styles.cashLabel}>Готівка від водія (₴):</span>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={cashReceived || ''}
+                onChange={(e) => setCashReceived(Number(e.target.value))}
+                className={styles.cashInput}
+                placeholder="0.00"
+              />
+              <span className={styles.cashLabel}>Нотатка:</span>
+              <input
+                type="text"
+                value={procNotes}
+                onChange={(e) => setProcNotes(e.target.value)}
+                className={styles.notesInput}
+                placeholder="необов'язково"
+              />
+            </div>
+
+            <table className={styles.procTable}>
+              <thead>
+                <tr>
+                  <th>Виріб</th>
+                  <th className={styles.numTh}>Відправлено</th>
+                  <th className={styles.numTh}>Прийнято</th>
+                  <th className={styles.numTh}>Різниця</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoice.lines.map((line: InvoiceLine) => {
+                  const delivered = procQtys[line.product_id] ?? line.qty
+                  const diff = line.qty - delivered
+                  return (
+                    <tr key={line.id}>
+                      <td>{productName(line.product_id)}</td>
+                      <td className={styles.numTd}>{line.qty}</td>
+                      <td className={styles.numTd}>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={delivered}
+                          onChange={(e) =>
+                            setProcQtys((p) => ({
+                              ...p,
+                              [line.product_id]: Math.max(0, Number(e.target.value)),
+                            }))
+                          }
+                          className={styles.procInput}
+                        />
+                      </td>
+                      <td className={`${styles.numTd} ${diff > 0 ? styles.diffPos : diff < 0 ? styles.diffNeg : ''}`}>
+                        {diff !== 0 ? (diff > 0 ? `−${diff}` : `+${Math.abs(diff)}`) : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+
+            <div className={styles.procActions}>
+              <button className={styles.btnCancel} onClick={() => setShowProc(false)}>
+                Скасувати
+              </button>
+              <button
+                className={styles.btnConfirm}
+                onClick={handleConfirmProc}
+                disabled={confirming}
+              >
+                {confirming ? 'Збереження...' : '✓ Підтвердити'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Кнопки дій ── */}
+        {!showProc && (
+          <div className={styles.paperActions}>
+            <button
+              className={styles.btnPrintSingle}
+              onClick={() => window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')}
+              title="Друкувати накладну"
+            >
+              🖨 Друкувати
+            </button>
+
+            {status === 'draft' && !editMode && (
+              <>
+                <button className={styles.btnEdit} onClick={startEdit}>
+                  ✏ Редагувати
+                </button>
+                <button className={styles.btnSend} onClick={handleSend} disabled={sending}>
+                  {sending ? 'Відправляємо...' : '▶ Відправити'}
+                </button>
+              </>
+            )}
+
+            {status === 'draft' && editMode && (
+              <>
+                <button className={styles.btnCancel} onClick={() => setEditMode(false)}>
+                  Скасувати
+                </button>
+                <button className={styles.btnSaveEdit} onClick={saveEdit} disabled={savingEdit}>
+                  {savingEdit ? 'Збереження...' : '💾 Зберегти'}
+                </button>
+              </>
+            )}
+
+            {status === 'sent' && !showProc && (
+              <>
+                <button className={styles.btnProcess} onClick={handleProcess}>
+                  📦 Опрацювати
+                </button>
+                <button
+                  className={styles.btnAccept}
+                  onClick={handleAccept}
+                  disabled={accepting}
+                >
+                  {accepting ? '...' : '✓ Прийнято'}
+                </button>
+              </>
+            )}
+
+            {status === 'processing' && !showProc && (
+              <>
+                <button className={styles.btnProcess} onClick={openProc}>
+                  ✏ Внести корекції
+                </button>
+                <button
+                  className={styles.btnAccept}
+                  onClick={handleAccept}
+                  disabled={accepting}
+                >
+                  {accepting ? '...' : '✓ Прийнято'}
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
-    </Modal>
-  )
-}
 
-// ─── Модальне вікно повернення (post-delivery) ────────────────────────────────
-
-interface ReturnModalProps {
-  invoice: Invoice
-  products: Product[]
-  clientName: string
-  onClose: () => void
-  onConfirm: (invoiceId: number, returns: ReturnLine[], cash: number, notes: string) => Promise<void>
-}
-
-interface ReturnLine {
-  lineId: number
-  productId: number
-  productName: string
-  delivered: number
-  returned: number
-  stalePrice: number | null
-}
-
-function ReturnModal({ invoice, products, clientName, onClose, onConfirm }: ReturnModalProps) {
-  const productName = (id: number) => {
-    const p = products.find((p) => p.id === id)
-    return p?.short_name ?? p?.name ?? `#${id}`
-  }
-
-  const [lines, setLines] = useState<ReturnLine[]>(
-    invoice.lines.map((l: InvoiceLine) => ({
-      lineId: l.id,
-      productId: l.product_id,
-      productName: productName(l.product_id),
-      delivered: l.qty,
-      returned: 0,
-      stalePrice: null,
-    }))
-  )
-  const [cash, setCash] = useState(0)
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const setReturned = (lineId: number, val: number) => {
-    setLines((prev) =>
-      prev.map((l) => l.lineId === lineId ? { ...l, returned: Math.max(0, Math.min(val, l.delivered)) } : l)
-    )
-  }
-
-  const setStalePrice = (lineId: number, val: string) => {
-    setLines((prev) =>
-      prev.map((l) => l.lineId === lineId ? { ...l, stalePrice: val === '' ? null : Number(val) } : l)
-    )
-  }
-
-  const hasReturns = lines.some((l) => l.returned > 0)
-  const totalReturned = lines.reduce((s, l) => s + l.returned, 0)
-
-  const handleConfirm = async () => {
-    setSaving(true)
-    await onConfirm(invoice.id, lines, cash, notes)
-    setSaving(false)
-  }
-
-  return (
-    <Modal title={`Повернення — ${invoice.invoice_number}`} onClose={onClose}>
-      <div className={styles.returnDetail}>
-        <div className={styles.invoiceMeta}>
-          <span><strong>Клієнт:</strong> {clientName}</span>
-          <span><strong>Сума накладної:</strong> {invoice.total_sum.toFixed(2)} ₴</span>
-        </div>
-
-        <p className={styles.returnHint}>
-          Повернений товар перейде до магазину як несвіжий.
-        </p>
-
-        <table className={styles.linesTable}>
-          <thead>
-            <tr>
-              <th>Виріб</th>
-              <th>Відвант.</th>
-              <th>Повернуто</th>
-              <th>Ціна несвіж., ₴</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l) => (
-              <tr key={l.lineId}>
-                <td>{l.productName}</td>
-                <td className={styles.numCell}>{l.delivered}</td>
-                <td className={styles.numCell}>
-                  <input
-                    type="number"
-                    min={0}
-                    max={l.delivered}
-                    value={l.returned || ''}
-                    onChange={(e) => setReturned(l.lineId, Number(e.target.value))}
-                    className={styles.returnInput}
-                  />
-                </td>
-                <td className={styles.numCell}>
-                  {l.returned > 0 && (
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={l.stalePrice ?? ''}
-                      onChange={(e) => setStalePrice(l.lineId, e.target.value)}
-                      className={styles.returnInput}
-                      placeholder="—"
-                    />
-                  )}
-                </td>
+      {/* ── Коригуюча накладна ── */}
+      {corrective && (
+        <div className={styles.correctivePaper}>
+          <div className={styles.correctiveHeader}>
+            ↩ Коригуюча накладна №{corrective.invoice_number}
+          </div>
+          <table className={styles.paperTable}>
+            <thead>
+              <tr>
+                <th>Виріб</th>
+                <th className={styles.numTh}>Різниця</th>
+                <th className={styles.numTh}>Ціна</th>
+                <th className={styles.numTh}>Сума</th>
               </tr>
-            ))}
-          </tbody>
-          {hasReturns && (
+            </thead>
+            <tbody>
+              {corrective.lines.map((line: InvoiceLine) => (
+                <tr key={line.id}>
+                  <td>{productName(line.product_id)}</td>
+                  <td className={styles.numTd}>{line.qty}</td>
+                  <td className={styles.numTd}>{line.price.toFixed(2)} ₴</td>
+                  <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
+                </tr>
+              ))}
+            </tbody>
             <tfoot>
               <tr>
-                <td colSpan={2} style={{ textAlign: 'right', fontWeight: 600 }}>Всього повернуто:</td>
-                <td className={styles.numCell} style={{ fontWeight: 600 }}>{totalReturned}</td>
-                <td />
+                <td colSpan={3} style={{ textAlign: 'right' }}>Різниця:</td>
+                <td className={styles.numTd}>{corrective.total_sum.toFixed(2)} ₴</td>
               </tr>
             </tfoot>
-          )}
-        </table>
-
-        <div className={styles.returnForm}>
-          <label className={styles.returnLabel}>
-            Готівка від водія (₴):
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              value={cash || ''}
-              onChange={(e) => setCash(Number(e.target.value))}
-              className={styles.cashInput}
-              placeholder="0.00"
-            />
-          </label>
-          <label className={styles.returnLabel}>
-            Нотатка:
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className={styles.notesInput}
-              placeholder="необов'язково"
-            />
-          </label>
+          </table>
         </div>
-
-        <div className={styles.returnActions}>
-          <button className={styles.btnCancel} onClick={onClose}>
-            Скасувати
-          </button>
-          <button
-            className={styles.btnConfirmReturn}
-            onClick={handleConfirm}
-            disabled={saving}
-          >
-            {saving ? 'Збереження...' : 'Підтвердити доставку'}
-          </button>
-        </div>
-      </div>
-    </Modal>
+      )}
+    </>
   )
 }
 
-// ─── Модальне вікно скасування рейсу ─────────────────────────────────────────
-
-// ─── Головна сторінка ─────────────────────────────────────────────────────────
+// ─── Головна сторінка ──────────────────────────────────────────────────────────
 
 export default function RoutesPage() {
   const { workDate } = useWorkDate()
 
-  const [routes,    setRoutes]    = useState<Route[]>([])
-  const [clients,   setClients]   = useState<Client[]>([])
-  const [products,  setProducts]  = useState<Product[]>([])
-  const [orders,    setOrders]    = useState<Order[]>([])
-  const [invoices,  setInvoices]  = useState<Invoice[]>([])
-  const [loading,   setLoading]   = useState(true)
+  const [routes,   setRoutes]   = useState<Route[]>([])
+  const [clients,  setClients]  = useState<Client[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [loading,  setLoading]  = useState(true)
 
   const [activeRouteId,  setActiveRouteId]  = useState<number | null>(null)
-  const [activeClientId, setActiveClientId] = useState<number | null>(null)
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null)
 
-  const [generating,     setGenerating]     = useState(false)
-  const [genResult,      setGenResult]      = useState<string | null>(null)
+  const [generating,  setGenerating]  = useState(false)
+  const [checkedIds,  setCheckedIds]  = useState<Set<number>>(new Set())
 
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
-  const [returnInvoice,   setReturnInvoice]   = useState<Invoice | null>(null)
-  // Вибрані накладні для друку (id → boolean)
-  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set())
-
-  // ─── Завантаження ───────────────────────────────────────────────────────────
+  // ── Завантаження ─────────────────────────────────────────────────────────────
 
   const load = async (date: string) => {
     setLoading(true)
-    const [r, c, p, o, inv] = await Promise.all([
+    const [r, c, p, inv] = await Promise.all([
       api.get<Route[]>('/routes/'),
       api.get<Client[]>('/clients/'),
       api.get<Product[]>('/products/'),
-      api.get<Order[]>(`/orders/?order_date=${date}`),
       api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
     ])
     setRoutes(r)
     setClients(c)
     setProducts(p)
-    setOrders(o)
     setInvoices(inv)
     if (r.length > 0 && activeRouteId === null) setActiveRouteId(r[0].id)
     setLoading(false)
@@ -289,138 +422,122 @@ export default function RoutesPage() {
 
   useEffect(() => { load(workDate) }, [workDate])
 
-  // При зміні маршруту — скидаємо вибраного клієнта
-  const selectRoute = (routeId: number) => {
-    setActiveRouteId(routeId)
-    setActiveClientId(null)
-    setGenResult(null)
-  }
+  // ── Автовибір галочок після завантаження ─────────────────────────────────────
+  useEffect(() => {
+    const ids = new Set(
+      invoices
+        .filter((i) => i.corrective_for_id === null && i.status !== 'cancelled')
+        .map((i) => i.id)
+    )
+    setCheckedIds(ids)
+  }, [invoices])
 
-  // ─── Генерація накладних ─────────────────────────────────────────────────────
+  // ── Генерація накладних ───────────────────────────────────────────────────────
 
   const handleGenerate = async () => {
     if (!activeRouteId) return
     setGenerating(true)
-    setGenResult(null)
-    const res = await api.post<{ created: number; skipped: number; no_orders: number }>(
-      `/invoices/generate-from-orders?invoice_date=${workDate}&route_id=${activeRouteId}`, {}
-    )
-    setGenResult(`Створено: ${res.created}, вже існували: ${res.skipped}, без замовлень: ${res.no_orders}`)
-    const inv = await api.get<Invoice[]>(`/invoices/?invoice_date=${workDate}`)
-    setInvoices(inv)
+    await api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&route_id=${activeRouteId}`, {})
+    await load(workDate)
     setGenerating(false)
   }
 
-  // ─── Зміна статусу ──────────────────────────────────────────────────────────
-
-  const handleStatusAdvance = async (invoice: Invoice) => {
-    const map: Partial<Record<Invoice['status'], Invoice['status']>> = { draft: 'printed', printed: 'delivered' }
-    const next = map[invoice.status]
-    if (!next) return
-    await api.put(`/invoices/${invoice.id}/status?status=${next}`, {})
-    setInvoices((prev) =>
-      prev.map((inv) => (inv.id === invoice.id ? { ...inv, status: next } : inv))
-    )
-  }
-
-  // ─── Друк вибраних ─────────────────────────────────────────────────────────
+  // ── Друк вибраних ──────────────────────────────────────────────────────────────
 
   const printChecked = async () => {
     if (checkedIds.size === 0) return
     const ids = [...checkedIds].join(',')
     window.open(`/api/v1/print/invoices?invoice_date=${workDate}&ids=${ids}`, '_blank')
-    // Переводимо в printed
+    // Переводимо draft → sent
     await Promise.all(
       [...checkedIds].map(async (id) => {
         const inv = invoices.find((i) => i.id === id)
         if (inv && inv.status === 'draft') {
-          await api.put(`/invoices/${id}/status?status=printed`, {})
+          await api.put(`/invoices/${id}/status?status=sent`, {})
         }
       })
     )
-    const inv = await api.get<Invoice[]>(`/invoices/?invoice_date=${workDate}`)
-    setInvoices(inv)
+    await load(workDate)
   }
 
-  // ─── Обробка повернення ──────────────────────────────────────────────────────
+  // ── Оновлення одного invoice в стані ─────────────────────────────────────────
 
-  const handleConfirmReturn = async (
-    invoiceId: number,
-    returns: ReturnLine[],
-    _cash: number,
-    _notes: string
-  ) => {
-    // Відправляємо повернення → backend записує несвіжий товар у shop_counts
-    await api.post(`/invoices/${invoiceId}/process-return`, { returns })
-    setInvoices((prev) =>
-      prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'delivered' } : inv))
-    )
-    setReturnInvoice(null)
+  const handleStatusChange = (updated: Invoice) => {
+    setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
   }
 
-  // ─── Допоміжні ──────────────────────────────────────────────────────────────
+  // ── Допоміжні ─────────────────────────────────────────────────────────────────
 
-  const clientName = (id: number) => {
-    const c = clients.find((c) => c.id === id)
-    return c?.short_name ?? c?.full_name ?? `#${id}`
-  }
+  const baseInvoices  = invoices.filter((i) => i.corrective_for_id === null)
+  const clientInvoice = (clientId: number) =>
+    baseInvoices.find((i) => i.client_id === clientId && i.status !== 'cancelled')
+
+  const correctiveFor = (invoiceId: number) =>
+    invoices.find((i) => i.corrective_for_id === invoiceId) ?? null
 
   const routeClients = (routeId: number) =>
     clients.filter((c) => c.route_id === routeId && c.is_active)
 
-  const clientOrders = (clientId: number) =>
-    orders.filter((o) => o.client_id === clientId)
+  // ── Список клієнтів у лівій панелі ───────────────────────────────────────────
 
-  const clientInvoice = (clientId: number) =>
-    invoices.find((inv) => inv.client_id === clientId && inv.status !== 'cancelled')
+  const listClients: Client[] = activeRouteId
+    ? routeClients(activeRouteId)
+    : clients.filter((c) => !!clientInvoice(c.id))
 
-  // При зміні накладних — вибрати всі (хуки МАЮТЬ бути до умовного return)
-  useEffect(() => {
-    if (invoices.length > 0) {
-      const allInvIds = new Set(
-        invoices.filter((i) => i.status !== 'cancelled').map((i) => i.id)
-      )
-      setCheckedIds(allInvIds)
-    }
-  }, [invoices])
+  // Сортуємо: спочатку ті з накладними
+  const sortedClients = [...listClients].sort((a, b) => {
+    const ai = clientInvoice(a.id)
+    const bi = clientInvoice(b.id)
+    if (ai && !bi) return -1
+    if (!ai && bi) return 1
+    return 0
+  })
 
-  if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
+  // Підрахунок для "Друкувати вибрані"
+  const checkedCount = [...checkedIds].filter((id) =>
+    invoices.some((i) => i.id === id)
+  ).length
 
-  const activeRoute = routes.find((r) => r.id === activeRouteId)
-  const activeClients = activeRouteId ? routeClients(activeRouteId) : []
-
-  // Фільтрація по клієнту (якщо обраний)
-  const visibleClients = activeClientId
-    ? activeClients.filter((c) => c.id === activeClientId)
-    : activeClients
-
-  // Накладні маршруту
-  const routeInvoices = invoices.filter(
-    (inv) => inv.route_id === activeRouteId && inv.status !== 'cancelled'
+  // Сума по маршруту/всіх
+  const routeTotal = (activeRouteId
+    ? baseInvoices.filter((i) => i.route_id === activeRouteId)
+    : baseInvoices
   )
-  const routeTotal = routeInvoices.reduce((s, i) => s + i.total_sum, 0)
+    .filter((i) => i.status !== 'cancelled')
+    .reduce((s, i) => s + i.total_sum, 0)
 
-  // Накладні вибраних клієнтів
-  const visibleInvoices = visibleClients
+  // Чи є клієнти без накладних в активному маршруті
+  const hasMissing = activeRouteId
+    ? routeClients(activeRouteId).some((c) => !clientInvoice(c.id))
+    : false
+
+  // Checkbox "Виділити всі"
+  const allCheckable = sortedClients
     .map((c) => clientInvoice(c.id))
-    .filter((inv): inv is Invoice => !!inv)
+    .filter((i): i is Invoice => !!i && i.status !== 'cancelled')
 
-  // Управління галочками
-  const allChecked = visibleInvoices.length > 0 &&
-    visibleInvoices.every((inv) => checkedIds.has(inv.id))
-  const someChecked = visibleInvoices.some((inv) => checkedIds.has(inv.id))
+  const allChecked = allCheckable.length > 0 &&
+    allCheckable.every((i) => checkedIds.has(i.id))
+  const someChecked = allCheckable.some((i) => checkedIds.has(i.id))
+
+  const headerCheckRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (headerCheckRef.current) {
+      headerCheckRef.current.indeterminate = !allChecked && someChecked
+    }
+  }, [allChecked, someChecked])
 
   const toggleAll = () => {
     if (allChecked) {
       setCheckedIds((prev) => {
         const next = new Set(prev)
-        visibleInvoices.forEach((inv) => next.delete(inv.id))
+        allCheckable.forEach((i) => next.delete(i.id))
         return next
       })
     } else {
       setCheckedIds((prev) => {
         const next = new Set(prev)
-        visibleInvoices.forEach((inv) => next.add(inv.id))
+        allCheckable.forEach((i) => next.add(i.id))
         return next
       })
     }
@@ -435,273 +552,182 @@ export default function RoutesPage() {
     })
   }
 
-  const checkedCount = visibleInvoices.filter((inv) => checkedIds.has(inv.id)).length
+  if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
+
+  const selectedInvoice = selectedClient ? clientInvoice(selectedClient.id) : null
 
   return (
     <div className={styles.page}>
 
-      {/* ── Ліва панель ────────────────────────────────────────────────────── */}
-      <aside className={styles.sidebar}>
+      {/* ── Горизонтальний фільтр маршрутів ──────────────────────────────────── */}
+      <div className={styles.routeFilters}>
+        <button
+          className={`${styles.filterBtn} ${activeRouteId === null ? styles.filterBtnActive : ''}`}
+          onClick={() => { setActiveRouteId(null); setSelectedClient(null) }}
+        >
+          Всі
+        </button>
 
-        {/* Маршрути */}
-        <div className={styles.sidebarSection}>
-          <div className={styles.sidebarTitle}>Маршрути</div>
-          {routes.map((route) => {
-            const rc = routeClients(route.id)
-            const rInvoices = invoices.filter(
-              (inv) => inv.route_id === route.id && inv.status !== 'cancelled'
-            )
-            const rTotal = rInvoices.reduce((s, i) => s + i.total_sum, 0)
-            const withInv = rc.filter((c) => !!clientInvoice(c.id)).length
-            const withOrd = rc.filter((c) => clientOrders(c.id).length > 0).length
-
-            return (
-              <button
-                key={route.id}
-                className={`${styles.routeBtn} ${activeRouteId === route.id ? styles.routeBtnActive : ''}`}
-                onClick={() => selectRoute(route.id)}
-              >
-                <span className={styles.routeName}>{route.name}</span>
-                <span className={styles.routeStats}>
-                  <>
-                      <span title="Накладних / із замовленнями">{withInv}/{withOrd}</span>
-                      {rTotal > 0 && (
-                        <span className={styles.routeSum}>{rTotal.toFixed(0)} ₴</span>
-                      )}
-                  </>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-
-        {/* Клієнти вибраного маршруту */}
-        {activeRouteId && activeClients.length > 0 && (
-          <div className={styles.sidebarSection}>
-            <div className={styles.sidebarTitle}>Клієнти</div>
+        {routes.map((route) => {
+          const rInv = baseInvoices.filter(
+            (i) => i.route_id === route.id && i.status !== 'cancelled'
+          )
+          const rTotal = rInv.reduce((s, i) => s + i.total_sum, 0)
+          return (
             <button
-              className={`${styles.clientBtn} ${activeClientId === null ? styles.clientBtnActive : ''}`}
-              onClick={() => setActiveClientId(null)}
+              key={route.id}
+              className={`${styles.filterBtn} ${activeRouteId === route.id ? styles.filterBtnActive : ''}`}
+              onClick={() => { setActiveRouteId(route.id); setSelectedClient(null) }}
             >
-              <span className={styles.clientName}>Всі</span>
-              <span className={styles.clientStats}>{routeInvoices.length} накл.</span>
+              {route.name}
+              {rTotal > 0 && <span style={{ marginLeft: '0.35rem', opacity: 0.8 }}>
+                {rTotal.toFixed(0)} ₴
+              </span>}
             </button>
-            {activeClients.map((client) => {
+          )
+        })}
+
+        <div className={styles.filterSep} />
+
+        {routeTotal > 0 && (
+          <span style={{ fontSize: '0.82rem', color: '#555' }}>
+            Разом: <strong>{routeTotal.toFixed(2)} ₴</strong>
+          </span>
+        )}
+
+        {activeRouteId && hasMissing && (
+          <button
+            className={styles.genBtn}
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            {generating ? 'Генерую...' : '⟳ Генерувати накладні'}
+          </button>
+        )}
+
+        {checkedCount > 0 && (
+          <button className={styles.printSelBtn} onClick={printChecked}>
+            🖨 Друкувати вибрані ({checkedCount})
+          </button>
+        )}
+      </div>
+
+      {/* ── Основний layout 50/50 ────────────────────────────────────────────── */}
+      <div className={styles.body}>
+
+        {/* ── Ліва панель: список клієнтів ────────────────────────────────────── */}
+        <div className={styles.invoiceList}>
+          <div className={styles.listHeader}>
+            <span className={styles.listTitle}>
+              {activeRouteId
+                ? routes.find((r) => r.id === activeRouteId)?.name ?? 'Клієнти'
+                : 'Всі накладні'}
+            </span>
+            <input
+              ref={headerCheckRef}
+              type="checkbox"
+              checked={allChecked}
+              onChange={toggleAll}
+              title="Виділити всі"
+            />
+          </div>
+
+          <div className={styles.listScroll}>
+            {sortedClients.map((client) => {
               const inv = clientInvoice(client.id)
-              const ord = clientOrders(client.id)
+              const hasInv = !!inv
+              const isActive = selectedClient?.id === client.id
+
               return (
-                <button
+                <div
                   key={client.id}
-                  className={`${styles.clientBtn} ${activeClientId === client.id ? styles.clientBtnActive : ''} ${!ord.length ? styles.clientNoOrder : ''}`}
-                  onClick={() => setActiveClientId(client.id)}
+                  className={`${styles.invoiceRow}
+                    ${isActive ? styles.invoiceRowActive : ''}
+                    ${!hasInv ? styles.invoiceRowDimmed : ''}`}
+                  onClick={() => hasInv || activeRouteId
+                    ? setSelectedClient(client)
+                    : undefined
+                  }
                 >
-                  <span className={styles.clientName}>
+                  {hasInv ? (
+                    <input
+                      type="checkbox"
+                      className={styles.rowCheck}
+                      checked={checkedIds.has(inv!.id)}
+                      onChange={(e) => { e.stopPropagation(); toggleOne(inv!.id) }}
+                    />
+                  ) : (
+                    <span className={styles.rowCheck} style={{ width: 16 }} />
+                  )}
+
+                  <span className={styles.rowClientName}>
                     {client.short_name ?? client.full_name}
                   </span>
-                  <span className={styles.clientStats}>
-                    {inv ? (
-                      <span className={`${styles.clientStatus} ${styles[`cs_${inv.status}`]}`}>
-                        {inv.total_sum.toFixed(0)} ₴
+
+                  {hasInv ? (
+                    <>
+                      <span className={styles.rowInvNum}>{inv!.invoice_number}</span>
+                      <span className={`${styles.statusBadge} ${styles[`status_${inv!.status}`]}`}>
+                        {STATUS_LABELS[inv!.status]}
                       </span>
-                    ) : ord.length > 0 ? (
-                      <span className={styles.clientNoInv}>—</span>
-                    ) : null}
-                  </span>
-                </button>
+                      <span className={styles.rowSum}>{inv!.total_sum.toFixed(2)} ₴</span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: '0.75rem', color: '#aaa', marginLeft: 'auto' }}>
+                      немає накладної
+                    </span>
+                  )}
+                </div>
               )
             })}
+
+            {sortedClients.length === 0 && (
+              <div style={{ padding: '1rem', color: '#aaa', fontSize: '0.88rem' }}>
+                {activeRouteId ? 'Немає клієнтів у маршруті' : 'Немає накладних за цей день'}
+              </div>
+            )}
           </div>
-        )}
-      </aside>
+        </div>
 
-      {/* ── Права панель ───────────────────────────────────────────────────── */}
-      <main className={styles.main}>
-        {activeRoute ? (
-          <>
-            {/* Тулбар */}
-            <div className={styles.toolbar}>
-              <h2 className={styles.title}>
-                {activeRoute.name}
-                {activeClientId && (
-                  <span className={styles.titleClient}>
-                    {' / '}{clientName(activeClientId)}
-                  </span>
-                )}
-              </h2>
-
-              <div className={styles.toolbarRight}>
-                {routeTotal > 0 && (
-                  <span className={styles.routeTotalLabel}>
-                    Сума: <strong>{routeTotal.toFixed(2)} ₴</strong>
-                  </span>
-                )}
-                <button
-                  className={styles.btnGenerate}
-                  onClick={handleGenerate}
-                  disabled={generating}
-                >
-                  {generating ? 'Генерую...' : '⟳ Генерувати накладні'}
-                </button>
-                {checkedCount > 0 && (
+        {/* ── Права панель: деталь накладної ──────────────────────────────────── */}
+        <div className={styles.invoiceDetail}>
+          {selectedClient && selectedInvoice ? (
+            <InvoiceDetailPanel
+              key={selectedInvoice.id}
+              invoice={selectedInvoice}
+              corrective={correctiveFor(selectedInvoice.id)}
+              client={selectedClient}
+              products={products}
+              onStatusChange={handleStatusChange}
+              onRefresh={() => load(workDate)}
+            />
+          ) : selectedClient && !selectedInvoice ? (
+            <div className={styles.emptyDetail}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ marginBottom: '0.75rem', color: '#666' }}>
+                  Накладну не знайдено для{' '}
+                  <strong>{selectedClient.short_name ?? selectedClient.full_name}</strong>
+                </div>
+                {activeRouteId && (
                   <button
-                    className={styles.btnPrint}
-                    onClick={printChecked}
+                    className={styles.genBtn}
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    style={{ borderRadius: 4 }}
                   >
-                    🖨 Друкувати вибрані ({checkedCount})
+                    {generating ? 'Генерую...' : '⟳ Створити накладні для маршруту'}
                   </button>
                 )}
               </div>
             </div>
-
-            {genResult && (
-              <div className={styles.genResult}>{genResult}</div>
-            )}
-
-            {/* Таблиця клієнтів */}
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th className={styles.thCheck}>
-                      <input
-                        type="checkbox"
-                        checked={allChecked}
-                        ref={(el) => { if (el) el.indeterminate = !allChecked && someChecked }}
-                        onChange={toggleAll}
-                      />
-                    </th>
-                    <th className={styles.thClient}>Клієнт</th>
-                    <th className={styles.thNum}>Позицій</th>
-                    <th className={styles.thNum}>Штук</th>
-                    <th className={styles.thInv}>Накладна</th>
-                    <th className={styles.thNum}>Сума</th>
-                    <th className={styles.thStatus}>Статус</th>
-                    <th className={styles.thActions}>Дії</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleClients.map((client) => {
-                    const ord = clientOrders(client.id)
-                    const inv = clientInvoice(client.id)
-                    const totalQty = ord.reduce((s, o) => s + o.qty, 0)
-                    const hasOrders = ord.length > 0
-                    const isChecked = inv ? checkedIds.has(inv.id) : false
-
-                    return (
-                      <tr
-                        key={client.id}
-                        className={`${styles.row} ${!hasOrders ? styles.rowNoOrder : ''}`}
-                      >
-                        <td className={styles.tdCheck}>
-                          {inv && (
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleOne(inv.id)}
-                            />
-                          )}
-                        </td>
-                        <td className={styles.tdClient}>
-                          {client.short_name ?? client.full_name}
-                        </td>
-                        <td className={styles.tdNum}>
-                          {hasOrders ? ord.length : '—'}
-                        </td>
-                        <td className={styles.tdNum}>
-                          {hasOrders ? totalQty : '—'}
-                        </td>
-                        <td className={styles.tdInv}>
-                          {inv ? (
-                            <span className={styles.invNumber}>{inv.invoice_number}</span>
-                          ) : hasOrders ? (
-                            <span className={styles.noInv}>не створено</span>
-                          ) : (
-                            <span className={styles.noOrder}>—</span>
-                          )}
-                        </td>
-                        <td className={styles.tdNum}>
-                          {inv ? `${inv.total_sum.toFixed(2)} ₴` : '—'}
-                        </td>
-                        <td className={styles.tdStatus}>
-                          {inv && (
-                            <span className={`${styles.statusBadge} ${styles[`status_${inv.status}`]}`}>
-                              {STATUS_LABELS[inv.status]}
-                            </span>
-                          )}
-                        </td>
-                        <td className={styles.tdActions}>
-                          {inv && (
-                            <>
-                              <button
-                                className={styles.btnView}
-                                onClick={() => setSelectedInvoice(inv)}
-                              >
-                                Переглянути
-                              </button>
-                              <button
-                                className={styles.btnPrintSingle}
-                                onClick={() => window.open(`/api/v1/print/invoice/${inv.id}`, '_blank')}
-                                title="Друкувати накладну"
-                              >
-                                🖨
-                              </button>
-                              {inv.status === 'printed' && (
-                                <button
-                                  className={styles.btnReturn}
-                                  onClick={() => setReturnInvoice(inv)}
-                                  title="Обробити повернення"
-                                >
-                                  Повернення
-                                </button>
-                              )}
-                              {inv.status === 'draft' && (
-                                <button
-                                  className={styles.btnAdvance}
-                                  onClick={() => handleStatusAdvance(inv)}
-                                >
-                                  → Надруковано
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          ) : (
+            <div className={styles.emptyDetail}>
+              Оберіть клієнта зі списку
             </div>
+          )}
+        </div>
 
-            {visibleClients.length === 0 && (
-              <p className={styles.empty}>Немає клієнтів у маршруті</p>
-            )}
-          </>
-        ) : (
-          <p className={styles.empty}>Оберіть маршрут</p>
-        )}
-      </main>
-
-      {/* ── Модальне вікно: деталі накладної ──────────────────────────────── */}
-      {selectedInvoice && (
-        <InvoiceModal
-          invoice={selectedInvoice}
-          products={products}
-          clientName={clientName(selectedInvoice.client_id)}
-          onClose={() => setSelectedInvoice(null)}
-        />
-      )}
-
-      {/* ── Модальне вікно: повернення ─────────────────────────────────────── */}
-      {returnInvoice && (
-        <ReturnModal
-          invoice={returnInvoice}
-          products={products}
-          clientName={clientName(returnInvoice.client_id)}
-          onClose={() => setReturnInvoice(null)}
-          onConfirm={handleConfirmReturn}
-        />
-      )}
-
+      </div>
     </div>
   )
 }

@@ -1,473 +1,517 @@
-/* Вкладка Маршрути */
+/* Вкладка Маршрути — редизайн */
+
+/* ─── Root ─────────────────────────────────────────────────── */
 
 .page {
   display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
+  font-size: 0.875rem;
 }
 
-/* ─── Ліва панель ─────────────────────────────────────────── */
+/* ─── Фільтри маршрутів (горизонтальна панель) ─────────────── */
 
-.sidebar {
-  width: 210px;
-  min-width: 170px;
+.routeFilters {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #dce4ef;
+  flex-shrink: 0;
+  background: #f8fafc;
+  flex-wrap: wrap;
+}
+
+.filterBtn {
+  padding: 0.28rem 0.75rem;
+  border: 1px solid #c5d8ed;
+  border-radius: 14px;
+  background: #fff;
+  color: #444;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+.filterBtn:hover { background: #edf2f8; }
+.filterBtnActive {
+  background: #1a3a5c;
+  border-color: #1a3a5c;
+  color: #fff;
+}
+.filterBtnActive:hover { background: #142d48; }
+
+.filterSep {
+  width: 1px;
+  height: 16px;
+  background: #dce4ef;
+  margin: 0 0.25rem;
+}
+
+.genBtn {
+  margin-left: auto;
+  padding: 0.28rem 0.85rem;
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.genBtn:hover { background: #219a52; }
+.genBtn:disabled { opacity: 0.5; cursor: default; }
+
+.printSelBtn {
+  padding: 0.28rem 0.85rem;
+  background: #5c7a9c;
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.printSelBtn:hover { background: #486282; }
+.printSelBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Основний 50/50 layout ────────────────────────────────── */
+
+.body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ─── Ліва панель: список накладних ───────────────────────── */
+
+.invoiceList {
+  width: 50%;
+  flex-shrink: 0;
   border-right: 1px solid #dce4ef;
   display: flex;
   flex-direction: column;
-  background: #f8fafc;
+  overflow: hidden;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #e5eaf0;
+  flex-shrink: 0;
+  background: #fff;
+  gap: 0.5rem;
+}
+
+.listTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+}
+
+.listScroll {
+  flex: 1;
   overflow-y: auto;
 }
 
-.sidebarSection {
-  border-bottom: 1px solid #e5eaf0;
-  padding-bottom: 0.35rem;
-}
-.sidebarSection:last-child { border-bottom: none; }
-
-.sidebarTitle {
-  padding: 0.6rem 1rem 0.3rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #aaa;
-}
-
-/* Маршрутна кнопка */
-.routeBtn {
+/* Рядок накладної */
+.invoiceRow {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 0.55rem 0.9rem;
-  background: none;
-  border: none;
-  border-left: 3px solid transparent;
-  text-align: left;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
   cursor: pointer;
-  width: 100%;
+  border-left: 3px solid transparent;
   transition: background 0.1s;
-  gap: 0.3rem;
 }
-.routeBtn:hover { background: #edf2f8; }
-.routeBtnActive {
+.invoiceRow:hover { background: #f0f4f8; }
+.invoiceRowActive {
   background: #e8eef5;
   border-left-color: #1a3a5c;
 }
+.invoiceRowDimmed {
+  opacity: 0.45;
+  cursor: default;
+}
+.invoiceRowDimmed:hover { background: transparent; }
 
-.routeName {
-  font-size: 0.88rem;
-  color: #222;
+.rowCheck {
+  flex-shrink: 0;
+}
+
+.rowClientName {
   flex: 1;
-  line-height: 1.3;
-}
-.routeStats {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.1rem;
-  font-size: 0.76rem;
-  color: #888;
-  white-space: nowrap;
-}
-.routeSum {
-  font-size: 0.76rem;
-  color: #1a3a5c;
-  font-weight: 600;
-}
-
-/* Клієнтська кнопка */
-.clientBtn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.4rem 0.9rem 0.4rem 1.3rem;
-  background: none;
-  border: none;
-  border-left: 3px solid transparent;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-  transition: background 0.1s;
-  gap: 0.3rem;
-}
-.clientBtn:hover { background: #edf2f8; }
-.clientBtnActive {
-  background: #e8eef5;
-  border-left-color: #5c7a9c;
-}
-.clientNoOrder { opacity: 0.55; }
-
-.clientName {
-  font-size: 0.83rem;
-  color: #333;
-  flex: 1;
-  line-height: 1.25;
-}
-.clientStats {
-  font-size: 0.76rem;
-  white-space: nowrap;
-}
-.clientStatus { font-weight: 600; color: #1a3a5c; }
-.cs_draft     { color: #856404; }
-.cs_printed   { color: #004085; }
-.cs_delivered { color: #155724; }
-.cs_cancelled { color: #721c24; }
-.clientNoInv  { color: #e67e22; }
-
-/* ─── Головна область ─────────────────────────────────────── */
-
-.main {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem 1.5rem;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.title {
-  margin: 0;
-  font-size: 1.1rem;
-  color: #1a3a5c;
-}
-.titleClient {
-  font-size: 0.95rem;
-  font-weight: 400;
-  color: #5c7a9c;
-}
-
-.toolbarRight {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.routeTotalLabel {
-  font-size: 0.88rem;
-  color: #555;
-}
-
-.genResult {
-  background: #edf7ea;
-  border: 1px solid #b8d4b0;
-  border-radius: 4px;
-  padding: 0.4rem 0.75rem;
   font-size: 0.85rem;
-  color: #2a6b3a;
-  margin-bottom: 0.75rem;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.empty { color: #888; margin-top: 2rem; font-size: 0.95rem; }
-
-/* ─── Таблиця ─────────────────────────────────────────────── */
-
-.tableWrap { overflow-x: auto; }
-
-.table {
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 0.9rem;
-}
-.table thead tr { background: #e8eef5; }
-
-.thCheck {
-  padding: 0.4rem 0.5rem;
-  border-bottom: 2px solid #c5d8ed;
-  width: 32px;
-  text-align: center;
-}
-.thClient {
-  padding: 0.4rem 0.75rem;
-  text-align: left;
-  font-weight: 600;
-  border-bottom: 2px solid #c5d8ed;
-  min-width: 140px;
-}
-.thNum {
-  padding: 0.4rem 0.5rem;
-  text-align: center;
-  font-weight: 600;
-  border-bottom: 2px solid #c5d8ed;
-  min-width: 65px;
-}
-.thInv {
-  padding: 0.4rem 0.75rem;
-  text-align: left;
-  font-weight: 600;
-  border-bottom: 2px solid #c5d8ed;
-  min-width: 130px;
-}
-.thStatus {
-  padding: 0.4rem 0.5rem;
-  text-align: center;
-  font-weight: 600;
-  border-bottom: 2px solid #c5d8ed;
-  min-width: 110px;
-}
-.thActions {
-  padding: 0.4rem 0.5rem;
-  font-weight: 600;
-  border-bottom: 2px solid #c5d8ed;
-  min-width: 200px;
-}
-
-.row:hover { background: #fafcff; }
-.rowNoOrder { opacity: 0.5; }
-
-.tdCheck {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid #e8e8e8;
-  text-align: center;
-}
-.tdClient {
-  padding: 0.35rem 0.75rem;
-  border-bottom: 1px solid #e8e8e8;
-}
-.tdNum {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid #e8e8e8;
-  text-align: center;
-}
-.tdInv {
-  padding: 0.35rem 0.75rem;
-  border-bottom: 1px solid #e8e8e8;
-}
-.tdStatus {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid #e8e8e8;
-  text-align: center;
-}
-.tdActions {
-  padding: 0.25rem 0.5rem;
-  border-bottom: 1px solid #e8e8e8;
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-/* ─── Накладна ────────────────────────────────────────────── */
-
-.invNumber {
+.rowInvNum {
   font-family: monospace;
-  font-size: 0.88rem;
-  color: #1a3a5c;
-  font-weight: 600;
+  font-size: 0.78rem;
+  color: #5c7a9c;
+  white-space: nowrap;
 }
-.noInv  { font-size: 0.82rem; color: #e67e22; }
-.noOrder { color: #ccc; }
 
-/* ─── Статус-бейдж ────────────────────────────────────────── */
+.rowSum {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1a3a5c;
+  white-space: nowrap;
+  min-width: 70px;
+  text-align: right;
+}
 
+/* Статус-бейдж */
 .statusBadge {
   display: inline-block;
-  padding: 0.15rem 0.5rem;
+  padding: 0.1rem 0.45rem;
   border-radius: 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.status_draft     { background: #fff3cd; color: #856404; }
-.status_printed   { background: #cce5ff; color: #004085; }
-.status_delivered { background: #d4edda; color: #155724; }
-.status_cancelled { background: #f8d7da; color: #721c24; }
+.status_draft      { background: #fff3cd; color: #856404; }
+.status_sent       { background: #cce5ff; color: #004085; }
+.status_processing { background: #fff0a0; color: #7a5800; }
+.status_accepted   { background: #d4edda; color: #155724; }
+.status_cancelled  { background: #f8d7da; color: #721c24; }
 
-/* ─── Модальне вікно накладної ────────────────────────────── */
+/* ─── Права панель: деталь накладної ─────────────────────── */
 
-.invoiceDetail { display: flex; flex-direction: column; gap: 0.75rem; }
+.invoiceDetail {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem 1.5rem;
+  background: #f4f6f9;
+}
 
-.invoiceMeta {
+.emptyDetail {
   display: flex;
-  gap: 1.25rem;
-  font-size: 0.88rem;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #aaa;
+  font-size: 0.95rem;
 }
 
-.linesTable {
+/* Паперова накладна */
+.paper {
+  background: #fff;
+  border: 1px solid #d5dce6;
+  border-radius: 6px;
+  padding: 1.5rem;
+  max-width: 640px;
+  margin: 0 auto;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+
+.paperHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid #c5d8ed;
+}
+
+.paperInvNum {
+  font-family: monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1a3a5c;
+}
+
+.paperDate {
+  font-size: 0.82rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+
+.paperClientName {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #222;
+}
+
+.paperClientAddr {
+  font-size: 0.78rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+
+/* Таблиця рядків */
+.paperTable {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
 }
-.linesTable th {
-  padding: 0.35rem 0.6rem;
+.paperTable th {
+  padding: 0.35rem 0.5rem;
   background: #e8eef5;
   text-align: left;
   font-weight: 600;
   border-bottom: 2px solid #c5d8ed;
 }
-.linesTable td {
-  padding: 0.3rem 0.6rem;
-  border-bottom: 1px solid #e8e8e8;
+.paperTable th.numTh { text-align: right; }
+.paperTable td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #eef0f2;
 }
-.linesTable tfoot td {
+.paperTable td.numTd { text-align: right; }
+.paperTable tfoot td {
   border-top: 2px solid #c5d8ed;
   border-bottom: none;
   background: #f5f8fb;
-}
-.numCell { text-align: right; }
-
-.invoiceNotes { font-size: 0.85rem; color: #666; margin: 0; }
-
-/* ─── Модальне вікно повернення ───────────────────────────── */
-
-.returnDetail { display: flex; flex-direction: column; gap: 0.9rem; }
-
-.returnHint {
-  font-size: 0.88rem;
-  color: #555;
-  margin: 0;
-  background: #fff8e1;
-  border: 1px solid #ffe082;
-  border-radius: 4px;
-  padding: 0.4rem 0.75rem;
+  font-weight: 700;
 }
 
-.returnInput {
+/* Режим редагування qty */
+.qtyInput {
   width: 64px;
-  text-align: center;
-  padding: 0.25rem 0.2rem;
-  border: 1px solid #ccc;
+  text-align: right;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid #c5d8ed;
   border-radius: 3px;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   outline: none;
 }
-.returnInput:focus { border-color: #1a3a5c; }
+.qtyInput:focus { border-color: #1a3a5c; }
 
-.returnForm {
-  display: flex;
-  gap: 1.25rem;
-  flex-wrap: wrap;
+/* Коригуюча накладна */
+.correctiveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: #e67e22;
+  margin-left: 0.5rem;
 }
-.returnLabel {
+
+/* ─── Дії ─────────────────────────────────────────────────── */
+
+.paperActions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btnSend {
+  padding: 0.38rem 1rem;
+  background: #1a3a5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.btnSend:hover { background: #142d48; }
+.btnSend:disabled { opacity: 0.5; cursor: default; }
+
+.btnProcess {
+  padding: 0.38rem 1rem;
+  background: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnProcess:hover { background: #ca6f1e; }
+
+.btnAccept {
+  padding: 0.38rem 1rem;
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.btnAccept:hover { background: #219a52; }
+.btnAccept:disabled { opacity: 0.5; cursor: default; }
+
+.btnEdit {
+  padding: 0.38rem 0.85rem;
+  background: #fff;
+  color: #1a3a5c;
+  border: 1px solid #1a3a5c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnEdit:hover { background: #e8eef5; }
+
+.btnSaveEdit {
+  padding: 0.38rem 0.85rem;
+  background: #4f6ef7;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnSaveEdit:hover { background: #3a56d4; }
+.btnSaveEdit:disabled { opacity: 0.5; cursor: default; }
+
+.btnCancel {
+  padding: 0.38rem 0.85rem;
+  background: #fff;
+  color: #555;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnCancel:hover { background: #f0f0f0; }
+
+.btnPrintSingle {
+  padding: 0.38rem 0.85rem;
+  background: #f0f4f8;
+  color: #333;
+  border: 1px solid #bcd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnPrintSingle:hover { background: #dde8f4; }
+
+/* ─── Панель Опрацювання ──────────────────────────────────── */
+
+.processingPanel {
+  margin-top: 1rem;
+  border: 1px solid #ffe082;
+  border-radius: 4px;
+  background: #fffde7;
+  padding: 0.75rem 1rem;
+}
+
+.processingTitle {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #7a5800;
+  margin-bottom: 0.6rem;
+}
+
+.cashRow {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.88rem;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.cashLabel {
+  font-size: 0.85rem;
   color: #444;
 }
+
 .cashInput {
-  width: 90px;
+  width: 100px;
   padding: 0.3rem 0.4rem;
   border: 1px solid #ccc;
   border-radius: 3px;
   font-size: 0.88rem;
   outline: none;
 }
-.cashInput:focus { border-color: #1a3a5c; }
+.cashInput:focus { border-color: #7a5800; }
+
 .notesInput {
   flex: 1;
   min-width: 150px;
   padding: 0.3rem 0.4rem;
   border: 1px solid #ccc;
   border-radius: 3px;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   outline: none;
 }
-.notesInput:focus { border-color: #1a3a5c; }
+.notesInput:focus { border-color: #7a5800; }
 
-.returnActions {
+.procTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+  margin-bottom: 0.6rem;
+}
+.procTable th {
+  padding: 0.3rem 0.5rem;
+  background: #fff8e1;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid #ffe082;
+}
+.procTable th.numTh { text-align: right; }
+.procTable td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid #fff3cd;
+}
+.procTable td.numTd { text-align: right; }
+
+.procInput {
+  width: 64px;
+  text-align: right;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.83rem;
+  outline: none;
+}
+.procInput:focus { border-color: #7a5800; }
+
+.diffPos { color: #c0392b; font-size: 0.78rem; }
+.diffNeg { color: #27ae60; font-size: 0.78rem; }
+
+.procActions {
   display: flex;
+  gap: 0.6rem;
   justify-content: flex-end;
-  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 
-/* ─── Кнопки ──────────────────────────────────────────────── */
-
-.btnGenerate {
-  padding: 0.42rem 1rem;
-  background: #1a3a5c;
+.btnConfirm {
+  padding: 0.38rem 1.1rem;
+  background: #27ae60;
   color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.88rem;
+  font-weight: 600;
 }
-.btnGenerate:hover { background: #142d48; }
-.btnGenerate:disabled { opacity: 0.5; cursor: default; }
+.btnConfirm:hover { background: #219a52; }
+.btnConfirm:disabled { opacity: 0.5; cursor: default; }
 
-.btnPrint {
-  padding: 0.3rem 0.9rem;
-  background: #5c7a9c;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  white-space: nowrap;
-}
-.btnPrint:hover { background: #486282; }
+/* ─── Коригуюча накладна (зелений заголовок) ──────────────── */
 
-.btnView {
-  padding: 0.25rem 0.6rem;
+.correctivePaper {
+  max-width: 640px;
+  margin: 1rem auto 0;
   background: #fff;
-  color: #1a3a5c;
-  border: 1px solid #1a3a5c;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
+  border: 1px solid #b8d4b0;
+  border-radius: 6px;
+  padding: 1rem 1.5rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
-.btnView:hover { background: #e8eef5; }
 
-.btnAdvance {
-  padding: 0.25rem 0.6rem;
-  background: #27ae60;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  white-space: nowrap;
+.correctiveHeader {
+  font-size: 0.82rem;
+  color: #2a6b3a;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
-.btnAdvance:hover { background: #219a52; }
-
-.btnReturn {
-  padding: 0.25rem 0.6rem;
-  background: #e67e22;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-.btnReturn:hover { background: #ca6f1e; }
-
-.btnPrintSingle {
-  padding: 0.25rem 0.5rem;
-  background: #f0f4f8;
-  border: 1px solid #bcd;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-}
-.btnPrintSingle:hover { background: #dde8f4; }
-
-
-.btnCancel {
-  padding: 0.35rem 0.9rem;
-  background: #fff;
-  color: #555;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.btnCancel:hover { background: #f5f5f5; }
-
-.btnConfirmReturn {
-  padding: 0.35rem 1.1rem;
-  background: #27ae60;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-.btnConfirmReturn:hover { background: #219a52; }
-.btnConfirmReturn:disabled { opacity: 0.5; cursor: default; }

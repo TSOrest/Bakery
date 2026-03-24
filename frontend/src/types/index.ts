@@ -128,13 +128,16 @@ export interface InvoiceLine {
   sum: number
 }
 
+export type InvoiceStatus = 'draft' | 'sent' | 'processing' | 'accepted' | 'cancelled'
+
 export interface Invoice {
   id: number
   invoice_number: string
   invoice_date: string
   client_id: number
   route_id: number | null
-  status: 'draft' | 'printed' | 'delivered' | 'cancelled'
+  status: InvoiceStatus
+  corrective_for_id: number | null
   total_sum: number
   notes: string | null
   lines: InvoiceLine[]

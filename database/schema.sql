@@ -169,15 +169,17 @@ CREATE TABLE IF NOT EXISTS surplus_allocation_lines (
 -- -------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS invoices (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    invoice_number  TEXT    NOT NULL UNIQUE,
-    invoice_date    TEXT    NOT NULL,
-    route_id        INTEGER REFERENCES routes(id),
-    client_id       INTEGER NOT NULL REFERENCES clients(id),
-    status          TEXT    DEFAULT 'draft' CHECK(status IN ('draft','printed','delivered','cancelled')),
-    total_sum       REAL    DEFAULT 0,
-    notes           TEXT,
-    created_at      TEXT    DEFAULT (datetime('now'))
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number    TEXT    NOT NULL UNIQUE,
+    invoice_date      TEXT    NOT NULL,
+    route_id          INTEGER REFERENCES routes(id),
+    client_id         INTEGER NOT NULL REFERENCES clients(id),
+    status            TEXT    DEFAULT 'draft'
+                              CHECK(status IN ('draft','sent','processing','accepted','cancelled')),
+    corrective_for_id INTEGER REFERENCES invoices(id),
+    total_sum         REAL    DEFAULT 0,
+    notes             TEXT,
+    created_at        TEXT    DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS invoice_lines (

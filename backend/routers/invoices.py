@@ -6,11 +6,23 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from backend.database import get_db
 from backend.models.invoices import Invoice, InvoiceLine
-from backend.schemas.invoices import InvoiceCreate, InvoiceOut
-from backend.services.invoices import generate_invoice_number
+from backend.schemas.invoices import (
+    InvoiceCreate, InvoiceOut,
+    InvoiceLinesUpdate, ProcessingUpdate,
+)
+from backend.services.invoices import generate_invoice_number, generate_corrective_number
 from backend.services.prices import get_price
 
 router = APIRouter(prefix="/invoices", tags=["Накладні"])
+
+# Допустимі переходи статусів
+_TRANSITIONS = {
+    "draft":      {"sent", "cancelled"},
+    "sent":       {"processing", "accepted", "cancelled"},
+    "processing": {"accepted", "cancelled"},
+    "accepted":   set(),
+    "cancelled":  set(),
+}
 
 
 @router.get("/", response_model=List[InvoiceOut])
@@ -27,7 +39,7 @@ def list_invoices(
         q = q.filter(Invoice.client_id == client_id)
     if route_id:
         q = q.filter(Invoice.route_id == route_id)
-    return q.order_by(Invoice.invoice_number.desc()).all()
+    return q.order_by(Invoice.invoice_number).all()
 
 
 @router.get("/locked-clients")
@@ -49,7 +61,7 @@ def generate_from_orders(
     db: Session = Depends(get_db),
 ):
     """
-    Автоматично генерує накладні на основі замовлень для всіх клієнтів маршруту.
+    Автоматично генерує draft-накладні на основі замовлень для всіх клієнтів маршруту.
     Пропускає клієнтів у яких вже є накладна за цю дату.
     Ціну бере через get_price() з урахуванням знижок і індивідуальних цін.
     """
@@ -71,9 +83,9 @@ def generate_from_orders(
             .filter(
                 Order.client_id == client.id,
                 Order.order_date == invoice_date,
-                # Тільки кореневі рядки — не знімання нестачі, не розподіл надлишку
                 Order.parent_order_id.is_(None),
                 Order.origin_id.is_(None),
+                Order.bot_status.isnot("pending"),
             )
             .all()
         )
@@ -83,7 +95,11 @@ def generate_from_orders(
 
         existing = (
             db.query(Invoice)
-            .filter(Invoice.client_id == client.id, Invoice.invoice_date == invoice_date)
+            .filter(
+                Invoice.client_id == client.id,
+                Invoice.invoice_date == invoice_date,
+                Invoice.corrective_for_id.is_(None),
+            )
             .first()
         )
         if existing:
@@ -105,7 +121,6 @@ def generate_from_orders(
         total = 0.0
         for order in orders:
             if order.exchange_type == "pre_order":
-                # Обмінний рядок: клієнт отримує безкоштовно
                 db.add(InvoiceLine(
                     invoice_id=inv.id,
                     product_id=order.product_id,
@@ -116,7 +131,6 @@ def generate_from_orders(
                 ))
             else:
                 price = get_price(db, order.product_id, client.id, invoice_date)
-                # Пріоритет: price_override на рядку > базова ціна
                 effective_price = order.price_override if order.price_override is not None else price
                 line_sum = round(order.qty * effective_price, 2)
                 total += line_sum
@@ -136,9 +150,9 @@ def generate_from_orders(
 
     db.commit()
     return {
-        "created":   created_count,
-        "skipped":   skipped_count,
-        "no_orders": no_orders_count,
+        "created":    created_count,
+        "skipped":    skipped_count,
+        "no_orders":  no_orders_count,
         "invoice_ids": invoice_ids,
     }
 
@@ -164,16 +178,15 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         created_at=datetime.now().isoformat(),
     )
     db.add(inv)
-    db.flush()  # щоб отримати inv.id
+    db.flush()
 
     total = 0.0
     for line_data in data.lines:
-        # Ціна: override або автоматична
         unit_price = line_data.price_override if line_data.price_override else line_data.price
         line_sum = round(line_data.qty * unit_price, 2)
         total += line_sum
 
-        line = InvoiceLine(
+        db.add(InvoiceLine(
             invoice_id=inv.id,
             product_id=line_data.product_id,
             qty=line_data.qty,
@@ -182,11 +195,168 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             is_exchange=line_data.is_exchange,
             is_stale=line_data.is_stale,
             sum=line_sum,
-        )
-        db.add(line)
+        ))
 
     inv.total_sum = round(total, 2)
     db.commit()
+    db.refresh(inv)
+    return inv
+
+
+@router.put("/{invoice_id}/lines", response_model=InvoiceOut)
+def update_invoice_lines(
+    invoice_id: int,
+    data: InvoiceLinesUpdate,
+    db: Session = Depends(get_db),
+):
+    """Оновлює кількості рядків накладної. Тільки в статусі draft."""
+    inv = db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+    if inv.status != "draft":
+        raise HTTPException(status_code=400, detail="Редагування рядків доступне тільки в статусі draft")
+
+    total = 0.0
+    for upd in data.lines:
+        line = db.get(InvoiceLine, upd.id)
+        if not line or line.invoice_id != invoice_id:
+            continue
+        line.qty = upd.qty
+        effective = line.price_override if line.price_override is not None else line.price
+        line.sum = round(upd.qty * effective, 2)
+        if not line.is_exchange:
+            total += line.sum
+
+    inv.total_sum = round(total, 2)
+    db.commit()
+    db.refresh(inv)
+    return inv
+
+
+@router.put("/{invoice_id}/status", response_model=InvoiceOut)
+def update_invoice_status(
+    invoice_id: int,
+    status: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Переводить накладну у новий статус.
+    draft → sent: заморожує (lines вже є), повертає should_print=True у полі notes (frontend обробляє)
+    sent/processing → accepted: автоматично створює фінансовий запис
+    """
+    inv = db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+
+    allowed = _TRANSITIONS.get(inv.status, set())
+    if status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Перехід {inv.status!r} → {status!r} недозволений",
+        )
+
+    inv.status = status
+
+    if status == "accepted":
+        from backend.services.finance import create_invoice_finance_entry
+        create_invoice_finance_entry(db, inv)
+
+    db.commit()
+    db.refresh(inv)
+    return inv
+
+
+@router.post("/{invoice_id}/corrective", response_model=InvoiceOut)
+def create_corrective_invoice(
+    invoice_id: int,
+    data: ProcessingUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Завершує Опрацювання:
+    - Якщо є відхилення від оригіналу → створює коригуючу накладну (YYYYMMDD-NNN/1)
+    - Переводить оригінальну накладну в accepted
+    - Записує cash_received як фінансовий запис (готівка від водія)
+    """
+    inv = db.get(Invoice, invoice_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+    if inv.status not in ("sent", "processing"):
+        raise HTTPException(
+            status_code=400,
+            detail="Коригування доступне тільки в статусі sent або processing",
+        )
+
+    # Перевіряємо чи є відхилення
+    has_diff = False
+    corr_lines = []
+    for corr_in in data.lines:
+        orig = next((l for l in inv.lines if l.product_id == corr_in.product_id), None)
+        if not orig:
+            continue
+        diff = round(orig.qty - corr_in.qty_delivered, 4)
+        if abs(diff) > 0.001:
+            has_diff = True
+            price = corr_in.price_override if corr_in.price_override is not None else orig.price
+            corr_lines.append({
+                "product_id": corr_in.product_id,
+                "qty": diff,        # позитивне = повернення, негативне = додача
+                "price": price,
+                "sum": round(diff * price, 2),
+            })
+
+    corr_inv = None
+    if has_diff:
+        corr_number = generate_corrective_number(db, inv.invoice_number)
+        corr_inv = Invoice(
+            invoice_number=corr_number,
+            invoice_date=inv.invoice_date,
+            route_id=inv.route_id,
+            client_id=inv.client_id,
+            status="accepted",
+            corrective_for_id=inv.id,
+            notes=data.notes,
+            created_at=datetime.now().isoformat(),
+        )
+        db.add(corr_inv)
+        db.flush()
+
+        total = 0.0
+        for cl in corr_lines:
+            total += cl["sum"]
+            db.add(InvoiceLine(
+                invoice_id=corr_inv.id,
+                product_id=cl["product_id"],
+                qty=cl["qty"],
+                price=cl["price"],
+                sum=cl["sum"],
+            ))
+        corr_inv.total_sum = round(total, 2)
+
+    # Приймаємо оригінальну накладну
+    inv.status = "accepted"
+
+    from backend.services.finance import create_invoice_finance_entry
+    create_invoice_finance_entry(db, inv)
+
+    # Фіксуємо готівку від водія
+    if data.cash_received and data.cash_received > 0:
+        from backend.models.finances import Finance
+        db.add(Finance(
+            finance_date=inv.invoice_date,
+            client_id=inv.client_id,
+            finance_type="route_cash",
+            amount=data.cash_received,
+            sign=1,
+            notes=f"Готівка по {inv.invoice_number}",
+            created_at=datetime.now().isoformat(),
+        ))
+
+    db.commit()
+    if corr_inv:
+        db.refresh(corr_inv)
+        return corr_inv
+
     db.refresh(inv)
     return inv
 
@@ -198,22 +368,21 @@ def process_return(
     db: Session = Depends(get_db),
 ):
     """
-    Обробляє повернення після доставки:
-    - Для кожного поверненого товару: додає рядок у shop_counts з product_type='stale'
-    - Переводить накладну у статус 'delivered'
+    Застарілий ендпоінт — залишається для сумісності.
+    Рекомендовано використовувати POST /{id}/corrective.
     """
     from backend.models.shop import ShopCount
 
     inv = db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status_code=404, detail="Накладну не знайдено")
-    if inv.status != "printed":
-        raise HTTPException(status_code=400, detail="Накладна має бути у статусі 'printed'")
+    if inv.status not in ("sent", "processing"):
+        raise HTTPException(status_code=400, detail="Накладна має бути у статусі sent або processing")
 
     for item in body.get("returns", []):
         qty   = float(item.get("returned", 0))
         pid   = int(item.get("productId", 0))
-        price = item.get("stalePrice")  # може бути None
+        price = item.get("stalePrice")
 
         if qty <= 0 or not pid:
             continue
@@ -221,8 +390,8 @@ def process_return(
         stale = (
             db.query(ShopCount)
             .filter(
-                ShopCount.count_date  == inv.invoice_date,
-                ShopCount.product_id  == pid,
+                ShopCount.count_date   == inv.invoice_date,
+                ShopCount.product_id   == pid,
                 ShopCount.product_type == "stale",
             )
             .first()
@@ -244,35 +413,10 @@ def process_return(
             )
             db.add(stale)
 
-    inv.status = "delivered"
-    db.flush()
+    inv.status = "accepted"
 
-    # Автоматично створюємо фінансовий запис
     from backend.services.finance import create_invoice_finance_entry
     create_invoice_finance_entry(db, inv)
 
     db.commit()
-    return {"id": invoice_id, "status": "delivered", "stale_added": len(body.get("returns", []))}
-
-
-@router.put("/{invoice_id}/status")
-def update_invoice_status(
-    invoice_id: int,
-    status: str,
-    db: Session = Depends(get_db),
-):
-    inv = db.get(Invoice, invoice_id)
-    if not inv:
-        raise HTTPException(status_code=404, detail="Накладну не знайдено")
-    allowed = ("draft", "printed", "delivered", "cancelled")
-    if status not in allowed:
-        raise HTTPException(status_code=400, detail=f"Статус має бути один з: {allowed}")
-    inv.status = status
-    db.flush()
-
-    if status == "delivered":
-        from backend.services.finance import create_invoice_finance_entry
-        create_invoice_finance_entry(db, inv)
-
-    db.commit()
-    return {"id": invoice_id, "status": status}
+    return {"id": invoice_id, "status": "accepted"}
