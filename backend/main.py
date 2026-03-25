@@ -15,7 +15,7 @@ from backend.routers import (
     products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
     auth, settings, finances, finances_articles, ingredients, dashboard, issues, bot,
 )
-from backend.routers import auth_github, db_editor
+from backend.routers import auth_github, db_editor, backup
 
 # Ініціалізуємо таблиці (якщо не існують)
 Base.metadata.create_all(bind=engine)
@@ -54,6 +54,17 @@ DEFAULT_SETTINGS = {
     "github_login":          ("",               "GitHub логін акаунта пекарні"),
     "github_name":           ("",               "GitHub ім'я акаунта пекарні"),
     "github_avatar_url":     ("",               "GitHub аватар акаунта пекарні"),
+    # Бекапи
+    "backup_enabled":        ("1",             "Автобекап увімкнений (0/1)"),
+    "backup_time":           ("02:00",         "Час щоденного бекапу (HH:MM)"),
+    "backup_keep_count":     ("7",             "Кількість локальних бекапів"),
+    "backup_local_dir":      ("",              "Папка бекапів (порожньо = backups/ поряд з bakery.db)"),
+    "backup_cloud_1_label":  ("",              "Хмара 1: назва (напр. Google Drive)"),
+    "backup_cloud_1_path":   ("",              "Хмара 1: шлях до папки синхронізації"),
+    "backup_cloud_2_label":  ("",              "Хмара 2: назва"),
+    "backup_cloud_2_path":   ("",              "Хмара 2: шлях до папки синхронізації"),
+    "backup_cloud_3_label":  ("",              "Хмара 3: назва"),
+    "backup_cloud_3_path":   ("",              "Хмара 3: шлях до папки синхронізації"),
 }
 
 
@@ -164,6 +175,7 @@ app.include_router(issues.router,        prefix=PREFIX)
 app.include_router(auth_github.router,   prefix=PREFIX)
 app.include_router(bot.router,           prefix=PREFIX)
 app.include_router(db_editor.router,     prefix=PREFIX)
+app.include_router(backup.router,        prefix=PREFIX)
 
 
 @app.get("/api/health")

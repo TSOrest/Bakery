@@ -6,6 +6,7 @@ import sys
 import time
 import shutil
 import socket
+import sqlite3
 import subprocess
 import threading
 import webbrowser
@@ -54,6 +55,13 @@ GITHUB_TAGS_URL = f"{GITHUB_REPO}/tags"
 CHECK_INTERVAL    = 5     # server status check, seconds
 INTERNET_INTERVAL = 30    # internet connectivity check, seconds
 UPDATE_INTERVAL   = 3600  # update check, seconds
+BACKUP_INTERVAL   = 60    # scheduled backup check, seconds
+
+# Файли-прапори демо-режиму та відновлення бекапу
+DEMO_ACTIVE          = ROOT / "DEMO_ACTIVE"
+DEMO_ENTER_REQUESTED = ROOT / "DEMO_ENTER_REQUESTED"
+DEMO_EXIT_REQUESTED  = ROOT / "DEMO_EXIT_REQUESTED"
+RESTORE_REQUESTED    = ROOT / "RESTORE_REQUESTED"
 
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 
@@ -166,14 +174,73 @@ def _db_size() -> str:
     return f"{sz / 1_048_576:.1f} MB" if sz >= 1_048_576 else f"{sz // 1024} KB"
 
 
+def _read_setting(key: str) -> str:
+    """Читає налаштування з bakery.db напряму (без FastAPI)."""
+    try:
+        con = sqlite3.connect(str(DB_FILE))
+        row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        con.close()
+        return row[0] if row and row[0] else ""
+    except Exception:
+        return ""
+
+
+def _backup_dir_path() -> Path:
+    """Повертає папку для бекапів (з налаштувань або backups/)."""
+    custom = _read_setting("backup_local_dir").strip()
+    d = Path(custom) if custom else ROOT / "backups"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _backup_db() -> str:
-    """Copy bakery.db → bakery.db.bak-VERSION-TIMESTAMP. Returns backup path."""
+    """
+    SQLite online backup → backups/bakery_YYYYMMDD-HHMMSS.db + sidecar .meta.json.
+    Також копіює у хмарні папки якщо налаштовані.
+    Повертає шлях до бекапу.
+    """
     if not DB_FILE.exists():
         return ""
-    ver = _read_version().lstrip("v") or "unknown"
-    ts  = time.strftime("%Y%m%d-%H%M%S")
-    dst = ROOT / f"bakery.db.bak-{ver}-{ts}"
-    shutil.copy2(DB_FILE, dst)
+    ver = _read_version() or "unknown"
+    ts  = time.strftime("%Y-%m-%d_%H-%M-%S")
+    backup_dir = _backup_dir_path()
+    dst = backup_dir / f"bakery_{ts}.db"
+    meta_dst = backup_dir / f"bakery_{ts}.meta.json"
+
+    # SQLite online backup — безпечно при активних з'єднаннях
+    try:
+        src_con = sqlite3.connect(str(DB_FILE))
+        dst_con = sqlite3.connect(str(dst))
+        with dst_con:
+            src_con.backup(dst_con)
+        dst_con.close()
+        src_con.close()
+    except Exception:
+        # Fallback: звичайна копія (якщо сервер вже зупинений)
+        shutil.copy2(DB_FILE, dst)
+
+    # Sidecar метаданих
+    import datetime as _dt
+    meta = {"app_version": ver, "created_at": _dt.datetime.now().isoformat(timespec="seconds")}
+    try:
+        meta_dst.write_text(json.dumps(meta), encoding="utf-8")
+    except Exception:
+        pass
+
+    # Копіювання в хмарні папки
+    for key in ("backup_cloud_1_path", "backup_cloud_2_path", "backup_cloud_3_path"):
+        cp = _read_setting(key).strip()
+        if not cp:
+            continue
+        try:
+            cloud_dir = Path(cp)
+            cloud_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(dst, cloud_dir / dst.name)
+            if meta_dst.exists():
+                shutil.copy2(meta_dst, cloud_dir / meta_dst.name)
+        except Exception:
+            pass
+
     return str(dst)
 
 
@@ -218,6 +285,7 @@ _internet_up:       bool  = True    # optimistic default; corrected by _poll_int
 _latest_version:    str   = ""      # non-empty = newer version available
 _update_lock               = threading.Lock()
 _local_tags:        list  = []      # cached at startup; changes only after update/rollback (restarts tray)
+_last_backup_date:  str   = ""      # YYYY-MM-DD, захист від подвійного бекапу в один день
 
 
 # ── Windows helpers ────────────────────────────────────────────────────────────
@@ -486,6 +554,100 @@ def action_rollback(icon, _item=None) -> None:
     icon.stop()
 
 
+# ── Demo mode actions ──────────────────────────────────────────────────────────
+
+def _action_demo_enter(icon) -> None:
+    """Активує демо режим: backup → swap demo.db → restart."""
+    demo_db = ROOT / "demo.db"
+    if not demo_db.exists():
+        _msgbox("Bakery — демо", "demo.db не знайдено.\nСпочатку згенеруйте демо базу через AdminPage.", 0)
+        return
+    if not _confirm("Bakery — демо режим",
+                    "Увійти в демо режим?\n\n"
+                    "Поточна база буде збережена у бекап.\n"
+                    "Для виходу скористайтесь меню трею або AdminPage."):
+        return
+    _notify(icon, "Bakery — демо", "Входимо в демо режим...")
+    backup_path = _backup_db()
+    action_stop(icon)
+    time.sleep(2)
+    try:
+        shutil.copy2(demo_db, DB_FILE)
+        import datetime as _dt
+        DEMO_ACTIVE.write_text(
+            json.dumps({"backup_path": backup_path,
+                        "since": _dt.datetime.now().isoformat(timespec="seconds")}),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        _msgbox("Bakery — помилка", f"Не вдалося ввійти в демо режим:\n{e}", 0)
+        return
+    action_start(icon)
+    _refresh(icon)
+    _notify(icon, "Bakery — демо", "Демо режим активний ⚡")
+
+
+def _action_demo_exit(icon) -> None:
+    """Виходить з демо режиму: відновлює pre-demo бекап → restart."""
+    if not DEMO_ACTIVE.exists():
+        return
+    try:
+        data = json.loads(DEMO_ACTIVE.read_text(encoding="utf-8"))
+        backup_path = data.get("backup_path", "")
+    except Exception:
+        backup_path = ""
+
+    if not backup_path or not Path(backup_path).exists():
+        _msgbox("Bakery — демо", "Pre-demo бекап не знайдено.\nВідновіть базу вручну.", 0)
+        return
+
+    if not _confirm("Bakery — вийти з демо",
+                    "Вийти з демо режиму?\n\nБуде відновлена робоча база даних."):
+        return
+
+    _notify(icon, "Bakery — демо", "Виходимо з демо режиму...")
+    action_stop(icon)
+    time.sleep(2)
+    try:
+        shutil.copy2(backup_path, DB_FILE)
+        DEMO_ACTIVE.unlink(missing_ok=True)
+    except Exception as e:
+        _msgbox("Bakery — помилка", f"Не вдалося відновити базу:\n{e}", 0)
+        return
+    action_start(icon)
+    _refresh(icon)
+    _notify(icon, "Bakery — демо", "Демо режим завершено ✓")
+
+
+def _action_restore_backup(icon, backup_path: str, rollback_first: bool,
+                            backup_version: str) -> None:
+    """Відновлює бекап: (опційно відкат версії) → stop → swap → start."""
+    if not Path(backup_path).exists():
+        _msgbox("Bakery — відновлення", f"Файл бекапу не знайдено:\n{backup_path}", 0)
+        return
+    _notify(icon, "Bakery — відновлення", "Відновлення бекапу...")
+    if rollback_first and backup_version:
+        target_tag = f"v{backup_version.lstrip('v')}"
+        script = str(ROOT / "scripts" / "rollback.ps1")
+        subprocess.Popen(
+            ["powershell", "-ExecutionPolicy", "Bypass",
+             "-File", script, "-TargetTag", target_tag],
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            cwd=str(ROOT),
+        )
+        icon.stop()
+        return
+    action_stop(icon)
+    time.sleep(2)
+    try:
+        shutil.copy2(backup_path, DB_FILE)
+    except Exception as e:
+        _msgbox("Bakery — помилка", f"Не вдалося відновити базу:\n{e}", 0)
+        return
+    action_start(icon)
+    _notify(icon, "Bakery — відновлення", "Бекап відновлено ✓")
+
+
 # ── Menu / icon builders ───────────────────────────────────────────────────────
 
 def _build_menu(up: bool) -> pystray.Menu:
@@ -508,6 +670,8 @@ def _build_menu(up: bool) -> pystray.Menu:
         pystray.MenuItem("Довідники",  lambda i, _: webbrowser.open(APP_URL + "/admin")),
     )
 
+    in_demo = DEMO_ACTIVE.exists()
+
     items = [
         pystray.MenuItem("Відкрити застосунок", action_open, default=True),
         pystray.MenuItem("Відкрити розділ",     open_submenu),
@@ -515,6 +679,17 @@ def _build_menu(up: bool) -> pystray.Menu:
         pystray.MenuItem("Запустити сервер",     action_start,   enabled=not up),
         pystray.MenuItem("Перезапустити сервер", action_restart, enabled=up),
         pystray.MenuItem("Зупинити сервер",      action_stop,    enabled=up),
+        pystray.Menu.SEPARATOR,
+    ]
+
+    if in_demo:
+        items.append(pystray.MenuItem("⚡ Вийти з демо режиму",
+                                      lambda i, _: _action_demo_exit(i)))
+    else:
+        items.append(pystray.MenuItem("▶ Увійти в демо режим",
+                                      lambda i, _: _action_demo_enter(i)))
+
+    items += [
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(update_label, update_action),
     ]
@@ -535,6 +710,8 @@ def _build_menu(up: bool) -> pystray.Menu:
 
 
 def _pick_icon(up: bool) -> Image.Image:
+    if DEMO_ACTIVE.exists():
+        return ICON_YELLOW
     if up:
         return ICON_GREEN_BADGE if _latest_version else ICON_GREEN
     return ICON_RED_BADGE if _latest_version else ICON_RED
@@ -543,6 +720,8 @@ def _pick_icon(up: bool) -> Image.Image:
 def _build_title(up: bool) -> str:
     ver  = _read_version()
     base = f"Bakery {ver}" if ver else "Bakery"
+    if DEMO_ACTIVE.exists():
+        return f"{base} | ⚡ ДЕМО РЕЖИМ"
     if up:
         parts = [base, "працює"]
         ut = _format_uptime(_server_start_time)
@@ -621,6 +800,69 @@ def _poll_updates(icon) -> None:
         time.sleep(UPDATE_INTERVAL)
 
 
+def _poll_backup(icon) -> None:
+    """Щоденний автобекап за налаштованим часом + обробка прапорів demo/restore."""
+    global _last_backup_date
+    time.sleep(90)  # початкова затримка після старту
+    while True:
+        try:
+            # ── Обробка прапорів від frontend ──────────────────────────────────
+            if DEMO_ENTER_REQUESTED.exists():
+                DEMO_ENTER_REQUESTED.unlink(missing_ok=True)
+                threading.Thread(target=_action_demo_enter, args=(icon,), daemon=True).start()
+
+            elif DEMO_EXIT_REQUESTED.exists():
+                DEMO_EXIT_REQUESTED.unlink(missing_ok=True)
+                threading.Thread(target=_action_demo_exit, args=(icon,), daemon=True).start()
+
+            elif RESTORE_REQUESTED.exists():
+                try:
+                    req = json.loads(RESTORE_REQUESTED.read_text(encoding="utf-8"))
+                    RESTORE_REQUESTED.unlink(missing_ok=True)
+                    threading.Thread(
+                        target=_action_restore_backup,
+                        args=(icon,
+                              req.get("backup_path", ""),
+                              req.get("rollback_first", False),
+                              req.get("backup_version", "")),
+                        daemon=True,
+                    ).start()
+                except Exception:
+                    RESTORE_REQUESTED.unlink(missing_ok=True)
+
+            # ── Розклад автобекапу ──────────────────────────────────────────
+            if _read_setting("backup_enabled") == "1":
+                btime = (_read_setting("backup_time") or "02:00").strip()
+                now   = time.localtime()
+                t_now = f"{now.tm_hour:02d}:{now.tm_min:02d}"
+                today = time.strftime("%Y-%m-%d")
+                if t_now == btime and _last_backup_date != today:
+                    _last_backup_date = today
+                    try:
+                        result = _backup_db()
+                        if result:
+                            # Ротація
+                            keep = int(_read_setting("backup_keep_count") or "7")
+                            backup_dir = _backup_dir_path()
+                            files = sorted(backup_dir.glob("bakery_*.db"), reverse=True)
+                            for old in files[keep:]:
+                                try:
+                                    old.unlink()
+                                    meta = old.with_suffix(".meta.json")
+                                    if meta.exists():
+                                        meta.unlink()
+                                except Exception:
+                                    pass
+                            _notify(icon, "Bakery — бекап", f"Автобекап виконано ✓  {today}")
+                    except Exception as e:
+                        _notify(icon, "Bakery — бекап", f"Помилка автобекапу: {e}")
+
+        except Exception:
+            pass
+
+        time.sleep(BACKUP_INTERVAL)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -640,6 +882,7 @@ def main() -> None:
     threading.Thread(target=_poll_status,   args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_internet, args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_updates,  args=(icon,), daemon=True).start()
+    threading.Thread(target=_poll_backup,   args=(icon,), daemon=True).start()
 
     def _startup_notify():
         time.sleep(3)
