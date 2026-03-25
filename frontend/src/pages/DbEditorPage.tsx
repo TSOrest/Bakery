@@ -400,7 +400,7 @@ export default function DbEditorPage() {
         {/* ── Left: table list ─────────────────────────────────────────── */}
         <div className={styles.sidebar}>
           <div className={styles.sidebarTitle}>
-            Таблиці ({tables.length})
+            <span>Таблиці ({tables.length})</span>
             <button className={styles.btnToggle} onClick={loadTables} title="Оновити список">⟳</button>
             <button className={styles.btnErd} onClick={() => setShowErd(true)} title="Відкрити схему БД">Схема БД</button>
           </div>

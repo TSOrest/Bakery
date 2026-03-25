@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
 
 
@@ -68,3 +68,13 @@ class OrderOut(BaseModel):
     bot_status: Optional[str]
     bot_rejection_reason: Optional[str]
     bot_original_qty: Optional[float]
+
+
+class TransferRequest(BaseModel):
+    to_client_id: int
+    qty: float
+    notes: Optional[str] = None
+
+
+class OrderWithChildrenOut(OrderOut):
+    children: List[OrderOut] = []

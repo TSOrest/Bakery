@@ -66,20 +66,24 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     client_addr = (client.address or "") if client else ""
     route_name  = (client.route.name if client and client.route else "") if client else ""
 
-    # Групуємо рядки по категорії виробу (відділу)
+    # Завантажуємо категорії для відображення назв і сортування
+    all_cats: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
+
+    # Розділяємо рядки: основні і обмін
+    main_lines = [line for line in inv.lines if not line.is_exchange]
+    exch_lines = [line for line in inv.lines if line.is_exchange]
+
+    # Групуємо основні рядки по категорії виробу (відділу)
     # cat_id → [(line, product)]
     groups: dict[int | None, list] = {}
     cat_order: list[int | None] = []
-    for line in inv.lines:
+    for line in main_lines:
         product = db.get(Product, line.product_id)
         cid = product.category_id if product else None
         if cid not in groups:
             groups[cid] = []
             cat_order.append(cid)
         groups[cid].append((line, product))
-
-    # Завантажуємо категорії для відображення назв і сортування
-    all_cats: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
 
     # Сортуємо групи за sort_order категорії
     cat_order.sort(key=lambda cid: all_cats[cid].sort_order if cid and cid in all_cats else 999)
@@ -94,17 +98,15 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
         cat_label = all_cats[cid].name if cid and cid in all_cats else "Інше"
         g_sum = 0.0
         for line, product in group:
-            p_name  = product.name if product else f"#{line.product_id}"
-            unit    = product.unit.name if product and product.unit else "шт"
+            p_name    = product.name if product else f"#{line.product_id}"
+            unit      = product.unit.name if product and product.unit else "шт"
             eff_price = line.price_override if line.price_override else line.price
-            exch    = int(line.is_exchange or 0)
-            g_sum  += line.sum
+            g_sum    += line.sum
             total_qty    += line.qty
             total_names  += 1
             rows_html += f"""
       <tr>
         <td class="n">{p_name}</td>
-        <td class="c">{exch or 0}</td>
         <td class="c">{line.qty:g}</td>
         <td class="c">{unit}</td>
         <td class="r">{fmt(eff_price)}</td>
@@ -113,9 +115,51 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
         group_totals[cid] = g_sum
         rows_html += f"""
       <tr class="subtotal">
-        <td colspan="5" class="r">Сума по &nbsp;<b>{cat_label}</b></td>
+        <td colspan="4" class="r">Сума по &nbsp;<b>{cat_label}</b></td>
         <td class="r"><b>{fmt(g_sum)}</b></td>
       </tr>"""
+
+    # Секція обміну (опціонально)
+    exch_html = ""
+    if exch_lines:
+        exch_rows = ""
+        exch_total = 0.0
+        for line in exch_lines:
+            product   = db.get(Product, line.product_id)
+            p_name    = product.name if product else f"#{line.product_id}"
+            unit      = product.unit.name if product and product.unit else "шт"
+            eff_price = line.price_override if line.price_override else line.price
+            exch_total += line.sum
+            exch_rows += f"""
+      <tr>
+        <td class="n">{p_name}</td>
+        <td class="c">{line.qty:g}</td>
+        <td class="c">{unit}</td>
+        <td class="r">{fmt(eff_price)}</td>
+        <td class="r">{fmt(line.sum)}</td>
+      </tr>"""
+        exch_html = f"""
+  <div class="exch-section">
+    <div class="exch-title">Обмін</div>
+    <table class="lines-tbl">
+      <thead>
+        <tr>
+          <th>Назва</th>
+          <th class="c" style="width:38px">Кільк.</th>
+          <th class="c" style="width:32px">Од.</th>
+          <th class="r" style="width:54px">Ціна</th>
+          <th class="r" style="width:60px">Сума</th>
+        </tr>
+      </thead>
+      <tbody>{exch_rows}</tbody>
+      <tfoot>
+        <tr class="subtotal">
+          <td colspan="4" class="r">Сума обміну</td>
+          <td class="r"><b>{fmt(exch_total)}</b></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>"""
 
     copy_label = '<div class="copy-label">Копія</div>' if is_copy else ""
 
@@ -139,7 +183,6 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     <thead>
       <tr>
         <th>Назва</th>
-        <th class="c" style="width:32px">Обм.</th>
         <th class="c" style="width:38px">Кільк.</th>
         <th class="c" style="width:32px">Од.</th>
         <th class="r" style="width:54px">Ціна</th>
@@ -148,6 +191,7 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     </thead>
     <tbody>{rows_html}</tbody>
   </table>
+  {exch_html}
 
   <div class="total-line">
     Усього&nbsp;<b>{total_names}</b>&nbsp;найменувань,&nbsp;
@@ -216,6 +260,13 @@ body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; background: 
 .c { text-align: center; }
 .r { text-align: right; }
 .n { }
+
+/* ── Секція обміну ── */
+.exch-section { margin-top: 2mm; }
+.exch-title {
+  font-size: 8pt; font-weight: bold; text-transform: uppercase; color: #555;
+  border-top: 1px dashed #aaa; padding-top: 1.5mm; margin-bottom: 1mm;
+}
 
 /* ── Підсумок ── */
 .total-line {

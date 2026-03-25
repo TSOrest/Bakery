@@ -1,6 +1,6 @@
-/* Вкладка Маршрути — редизайн */
+/* Вкладка Маршрути */
 
-/* ─── Root ─────────────────────────────────────────────────── */
+/* ─── Root ───────────────────────────────────────────────────────────────── */
 
 .page {
   display: flex;
@@ -10,73 +10,145 @@
   font-size: 0.875rem;
 }
 
-/* ─── Фільтри маршрутів (горизонтальна панель) ─────────────── */
+/* ─── KPI картки маршрутів ───────────────────────────────────────────────── */
 
-.routeFilters {
+.kpiStrip {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.45rem 0.75rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   border-bottom: 1px solid #dce4ef;
   flex-shrink: 0;
   background: #f8fafc;
-  flex-wrap: wrap;
+  overflow-x: auto;
+  align-items: stretch;
 }
 
-.filterBtn {
-  padding: 0.28rem 0.75rem;
-  border: 1px solid #c5d8ed;
-  border-radius: 14px;
+.kpiCard {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d0dbe8;
+  border-radius: 8px;
   background: #fff;
-  color: #444;
-  font-size: 0.82rem;
   cursor: pointer;
-  transition: background 0.1s, border-color 0.1s;
-  white-space: nowrap;
+  flex: 1;
+  min-width: 130px;
+  overflow: hidden;
+  transition: border-color 0.1s, box-shadow 0.1s;
 }
-.filterBtn:hover { background: #edf2f8; }
-.filterBtnActive {
-  background: #1a3a5c;
+.kpiCard:hover {
+  border-color: #a0b8d0;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+.kpiCardActive {
   border-color: #1a3a5c;
-  color: #fff;
-}
-.filterBtnActive:hover { background: #142d48; }
-
-.filterSep {
-  width: 1px;
-  height: 16px;
-  background: #dce4ef;
-  margin: 0 0.25rem;
+  box-shadow: 0 2px 6px rgba(26,58,92,0.18);
 }
 
-.genBtn {
-  margin-left: auto;
-  padding: 0.28rem 0.85rem;
-  background: #27ae60;
-  color: #fff;
-  border: none;
-  border-radius: 14px;
-  font-size: 0.82rem;
-  cursor: pointer;
+/* ── Заголовок картки з фоном ── */
+.kpiCardHeader {
+  background: #e8f0f8;
+  padding: 0.45rem 0.75rem 0;
+}
+.kpiCardActive .kpiCardHeader {
+  background: #1a3a5c;
+}
+
+.kpiCardTitle {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #1a3a5c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-bottom: 0.35rem;
 }
-.genBtn:hover { background: #219a52; }
-.genBtn:disabled { opacity: 0.5; cursor: default; }
+.kpiCardActive .kpiCardTitle { color: #d8eaf8; }
 
-.printSelBtn {
-  padding: 0.28rem 0.85rem;
-  background: #5c7a9c;
-  color: #fff;
-  border: none;
-  border-radius: 14px;
-  font-size: 0.82rem;
-  cursor: pointer;
+/* Смуга статусів — всередині заголовку, впритул до країв */
+.kpiStatusBar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.12);
+  margin: 0 -0.75rem;
+}
+
+.kpiBarSegment {
+  height: 100%;
+  transition: width 0.3s;
+}
+.kpiBarSegment[data-state="no_activity"]  { background: #9aa5b4; }
+.kpiBarSegment[data-state="virtual_draft"]{ background: #e6a817; }
+.kpiBarSegment[data-state="sent"]         { background: #2980b9; }
+.kpiBarSegment[data-state="processing"]   { background: #c8a800; }
+.kpiBarSegment[data-state="accepted"]     { background: #28a745; }
+
+/* ── Тіло картки ── */
+.kpiCardBody {
+  padding: 0.45rem 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* Баланс рейсу (дебет − кредит) */
+.kpiBalance {
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 0.05rem 0;
+}
+.kpiBalancePos { color: #27ae60; }
+.kpiBalanceNeg { color: #c0392b; }
+
+/* Дві колонки: Кредит / Дебет */
+.kpiColumns {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.kpiCredit,
+.kpiDebit {
+  flex: 1;
+  border-radius: 4px;
+  padding: 0.28rem 0.45rem;
+  min-width: 0;
+}
+.kpiCredit { background: #fff0f0; }
+.kpiDebit  { background: #f0fff4; }
+
+.kpiColLabel {
+  display: block;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.65;
+}
+.kpiCredit .kpiColLabel { color: #8b0000; }
+.kpiDebit  .kpiColLabel { color: #1a5c30; }
+
+.kpiColValue {
+  display: block;
+  font-weight: 700;
+  font-size: 0.7rem;
+  margin-top: 0.08rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.printSelBtn:hover { background: #486282; }
-.printSelBtn:disabled { opacity: 0.5; cursor: default; }
+.kpiCredit .kpiColValue { color: #c0392b; }
+.kpiDebit  .kpiColValue { color: #27ae60; }
 
-/* ─── Основний 50/50 layout ────────────────────────────────── */
+/* Рядок корекцій (якщо є) */
+.kpiCorrectionLine {
+  font-size: 0.68rem;
+  color: #e67e22;
+  text-align: center;
+}
+
+/* ─── Основний 50/50 layout ──────────────────────────────────────────────── */
 
 .body {
   display: flex;
@@ -85,16 +157,42 @@
   min-height: 0;
 }
 
-/* ─── Ліва панель: список накладних ───────────────────────── */
+/* ─── Ліва панель: список клієнтів ──────────────────────────────────────── */
 
 .invoiceList {
-  width: 50%;
   flex-shrink: 0;
-  border-right: 1px solid #dce4ef;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
+
+/* ─── Перетягуваний розділювач ───────────────────────────────────────────── */
+
+.resizeDivider {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: #dce4ef;
+  position: relative;
+  transition: background 0.15s;
+  user-select: none;
+}
+.resizeDivider:hover { background: #a8bfd4; }
+.resizeDivider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 36px;
+  background: #8faac0;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.resizeDivider:hover::after { opacity: 1; }
 
 .listHeader {
   display: flex;
@@ -115,12 +213,18 @@
   color: #888;
 }
 
+.listActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .listScroll {
   flex: 1;
   overflow-y: auto;
 }
 
-/* Рядок накладної */
+/* Рядок клієнта */
 .invoiceRow {
   display: flex;
   align-items: center;
@@ -135,15 +239,35 @@
   background: #e8eef5;
   border-left-color: #1a3a5c;
 }
-.invoiceRowDimmed {
-  opacity: 0.45;
+
+/* Сірий: немає замовлень */
+.invoiceRowNoActivity {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-left: 3px solid transparent;
+  opacity: 0.35;
   cursor: default;
 }
-.invoiceRowDimmed:hover { background: transparent; }
 
-.rowCheck {
-  flex-shrink: 0;
+/* Amber: є замовлення але немає накладної */
+.invoiceRowVirtualDraft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+  border-left: 3px solid #f39c12;
+  transition: background 0.1s;
 }
+.invoiceRowVirtualDraft:hover { background: #fef9ee; }
+.invoiceRowVirtualDraftActive {
+  background: #fef3cd;
+  border-left-color: #e67e22;
+}
+
+.rowCheck { flex-shrink: 0; }
 
 .rowClientName {
   flex: 1;
@@ -159,6 +283,15 @@
   font-size: 0.78rem;
   color: #5c7a9c;
   white-space: nowrap;
+  width: 122px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.rowStatusCol {
+  width: 96px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .rowSum {
@@ -170,7 +303,7 @@
   text-align: right;
 }
 
-/* Статус-бейдж */
+/* Статус-бейджі */
 .statusBadge {
   display: inline-block;
   padding: 0.1rem 0.45rem;
@@ -184,8 +317,38 @@
 .status_processing { background: #fff0a0; color: #7a5800; }
 .status_accepted   { background: #d4edda; color: #155724; }
 .status_cancelled  { background: #f8d7da; color: #721c24; }
+.status_virtual_draft { background: #fff3cd; color: #856404; }
 
-/* ─── Права панель: деталь накладної ─────────────────────── */
+/* Кнопка "Відправити вибрані чернетки" */
+.sendDraftsBtn {
+  padding: 0.25rem 0.75rem;
+  background: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.sendDraftsBtn:hover { background: #ca6f1e; }
+.sendDraftsBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* Кнопка "Друкувати вибрані" */
+.printSelBtn {
+  padding: 0.25rem 0.75rem;
+  background: #5c7a9c;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.printSelBtn:hover { background: #486282; }
+.printSelBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Права панель ───────────────────────────────────────────────────────── */
 
 .invoiceDetail {
   flex: 1;
@@ -275,29 +438,94 @@
   font-weight: 700;
 }
 
-/* Режим редагування qty */
-.qtyInput {
-  width: 64px;
+/* ─── VirtualDraftPanel ──────────────────────────────────────────────────── */
+
+.draftTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
+}
+.draftTable th {
+  padding: 0.35rem 0.5rem;
+  background: #fff8e1;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #ffe082;
+}
+.draftTable th.numTh { text-align: right; }
+.draftTable td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #fef3cd;
+  vertical-align: middle;
+}
+.draftTable td.numTd { text-align: right; }
+
+.transferBtn {
+  padding: 0.18rem 0.45rem;
+  background: #fff;
+  color: #e67e22;
+  border: 1px solid #e67e22;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+.transferBtn:hover { background: #fef3cd; }
+
+/* Рядок форми переміщення */
+.transferFormRow td {
+  background: #fffde7;
+  padding: 0.5rem 0.75rem;
+}
+.transferForm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.transferLabel {
+  font-size: 0.82rem;
+  color: #666;
+  white-space: nowrap;
+}
+.transferInput {
+  width: 72px;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  outline: none;
   text-align: right;
-  padding: 0.2rem 0.3rem;
-  border: 1px solid #c5d8ed;
+}
+.transferInput:focus { border-color: #e67e22; }
+.transferSelect {
+  flex: 1;
+  min-width: 140px;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid #ccc;
   border-radius: 3px;
   font-size: 0.85rem;
   outline: none;
 }
-.qtyInput:focus { border-color: #1a3a5c; }
-
-/* Коригуюча накладна */
-.correctiveBadge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  color: #e67e22;
-  margin-left: 0.5rem;
+.transferSelect:focus { border-color: #e67e22; }
+.btnTransfer {
+  padding: 0.3rem 0.8rem;
+  background: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
+.btnTransfer:hover { background: #ca6f1e; }
+.btnTransfer:disabled { opacity: 0.5; cursor: default; }
 
-/* ─── Дії ─────────────────────────────────────────────────── */
+.transferredQty { color: #e67e22; font-size: 0.82rem; }
+.effectiveQty { font-weight: 600; }
+
+/* ─── Кнопки дій ─────────────────────────────────────────────────────────── */
 
 .paperActions {
   display: flex;
@@ -344,29 +572,6 @@
 .btnAccept:hover { background: #219a52; }
 .btnAccept:disabled { opacity: 0.5; cursor: default; }
 
-.btnEdit {
-  padding: 0.38rem 0.85rem;
-  background: #fff;
-  color: #1a3a5c;
-  border: 1px solid #1a3a5c;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.btnEdit:hover { background: #e8eef5; }
-
-.btnSaveEdit {
-  padding: 0.38rem 0.85rem;
-  background: #4f6ef7;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.btnSaveEdit:hover { background: #3a56d4; }
-.btnSaveEdit:disabled { opacity: 0.5; cursor: default; }
-
 .btnCancel {
   padding: 0.38rem 0.85rem;
   background: #fff;
@@ -389,7 +594,20 @@
 }
 .btnPrintSingle:hover { background: #dde8f4; }
 
-/* ─── Панель Опрацювання ──────────────────────────────────── */
+.btnConfirm {
+  padding: 0.38rem 1.1rem;
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.btnConfirm:hover { background: #219a52; }
+.btnConfirm:disabled { opacity: 0.5; cursor: default; }
+
+/* ─── Панель Опрацювання ─────────────────────────────────────────────────── */
 
 .processingPanel {
   margin-top: 1rem;
@@ -414,10 +632,7 @@
   flex-wrap: wrap;
 }
 
-.cashLabel {
-  font-size: 0.85rem;
-  color: #444;
-}
+.cashLabel { font-size: 0.85rem; color: #444; }
 
 .cashInput {
   width: 100px;
@@ -481,20 +696,7 @@
   margin-top: 0.5rem;
 }
 
-.btnConfirm {
-  padding: 0.38rem 1.1rem;
-  background: #27ae60;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.88rem;
-  font-weight: 600;
-}
-.btnConfirm:hover { background: #219a52; }
-.btnConfirm:disabled { opacity: 0.5; cursor: default; }
-
-/* ─── Коригуюча накладна (зелений заголовок) ──────────────── */
+/* ─── Коригуюча накладна ─────────────────────────────────────────────────── */
 
 .correctivePaper {
   max-width: 640px;
@@ -514,4 +716,119 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+.correctiveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: #e67e22;
+  margin-left: 0.5rem;
+}
+
+/* ─── Панель управління накладною (над документом) ───────────────────────── */
+
+.paperControlBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 640px;
+  margin: 0 auto 0.75rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.paperControlLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ─── Документний вигляд накладної ──────────────────────────────────────── */
+
+.docTop {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #555;
+  margin-bottom: 0.2rem;
+}
+
+.docTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-align: center;
+  border-bottom: 2px solid #111;
+  padding-bottom: 0.35rem;
+  margin: 0.35rem 0 0.7rem;
+  color: #111;
+}
+
+.docInvNum {
+  border-bottom: 1px solid #111;
+  padding-bottom: 1px;
+}
+
+.metaTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+  font-size: 0.83rem;
+}
+.metaTable td { padding: 0.18rem 0; border: none; vertical-align: bottom; }
+.metaLabel { width: 110px; color: #666; white-space: nowrap; padding-right: 0.5rem; }
+.metaValue { border-bottom: 1px solid #bbb; }
+
+.subtotalRow td {
+  background: #f0f4f8 !important;
+  border-top: 1px solid #c5d8ed !important;
+  font-size: 0.8rem;
+}
+
+.exchSection {
+  margin-top: 0.75rem;
+}
+.exchTitle {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  border-top: 1px dashed #c5d8ed;
+  padding-top: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.totalLine {
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0.2rem;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.totalBox {
+  font-size: 1.1rem;
+  font-weight: 700;
+  border: 2px solid #111;
+  padding: 0.1rem 0.65rem;
+  margin-left: 0.35rem;
+  color: #111;
+}
+.kopiyky {
+  font-size: 0.73rem;
+  color: #888;
+  margin-bottom: 0.75rem;
+}
+
+.sigsRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  border-top: 1px solid #d8e0ea;
+  padding-top: 0.4rem;
+  margin-top: 0.45rem;
+  color: #333;
 }

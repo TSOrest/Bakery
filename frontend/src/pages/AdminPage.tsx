@@ -164,6 +164,40 @@ export default function AdminPage() {
             })}
           </div>
         ))}
+
+        {/* ── База даних (тільки адмін) ──────────────────────────────────────── */}
+        {isAdmin && (
+          <div style={{ marginBottom: '1.1rem' }}>
+            <div style={{
+              fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase',
+              letterSpacing: '0.09em', color: '#b0bec5',
+              padding: '0 0.5rem', marginBottom: '0.25rem',
+              userSelect: 'none',
+            }}>
+              База даних
+            </div>
+            <button
+              onClick={() => window.open('/db-editor', '_blank')}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '0.38rem 0.65rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'transparent',
+                color: '#374151',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: 400,
+                marginBottom: '0.1rem',
+                transition: 'background 0.1s, color 0.1s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#f1f5f9' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >
+              ⚠️ Редактор БД
+            </button>
+          </div>
+        )}
       </nav>
 
       {/* ── Контент ─────────────────────────────────────────────────────────── */}

@@ -2,6 +2,7 @@
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime
 from backend.database import get_db
@@ -57,28 +58,46 @@ def get_locked_clients(date: str, db: Session = Depends(get_db)):
 @router.post("/generate-from-orders")
 def generate_from_orders(
     invoice_date: str,
-    route_id: int,
+    route_id: Optional[int] = None,
+    client_id: Optional[int] = None,
+    initial_status: str = "sent",
     db: Session = Depends(get_db),
 ):
     """
-    Автоматично генерує draft-накладні на основі замовлень для всіх клієнтів маршруту.
+    Генерує накладні на основі замовлень.
+    - route_id: для всіх клієнтів маршруту
+    - client_id: для одного клієнта (режим "Відправити" з UI)
+    - initial_status: статус накладної після створення (за замовч. 'sent')
     Пропускає клієнтів у яких вже є накладна за цю дату.
     Ціну бере через get_price() з урахуванням знижок і індивідуальних цін.
+    Враховує переміщення (parent_order_id): effective_qty = order.qty - transferred_out.
     """
     from backend.models.references import Client
     from backend.models.orders import Order
 
-    clients = (
-        db.query(Client)
-        .filter(Client.route_id == route_id, Client.is_active == 1)
-        .all()
-    )
+    if not route_id and not client_id:
+        raise HTTPException(status_code=400, detail="Потрібен route_id або client_id")
+
+    if client_id:
+        client_obj = db.get(Client, client_id)
+        if not client_obj:
+            raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+        clients = [client_obj]
+        eff_route_id = client_obj.route_id
+    else:
+        clients = (
+            db.query(Client)
+            .filter(Client.route_id == route_id, Client.is_active == 1)
+            .all()
+        )
+        eff_route_id = route_id
 
     created_count = skipped_count = no_orders_count = 0
     invoice_ids: list[int] = []
 
     for client in clients:
-        orders = (
+        # Батьківські замовлення клієнта
+        parent_orders = (
             db.query(Order)
             .filter(
                 Order.client_id == client.id,
@@ -89,7 +108,32 @@ def generate_from_orders(
             )
             .all()
         )
-        if not orders:
+
+        # Переміщення, отримані від інших клієнтів (дочірні рядки з origin_id != null)
+        transfer_in_orders = (
+            db.query(Order)
+            .filter(
+                Order.client_id == client.id,
+                Order.order_date == invoice_date,
+                Order.parent_order_id.isnot(None),
+                Order.origin_id.isnot(None),
+            )
+            .all()
+        )
+
+        # Підраховуємо ефективні кількості з урахуванням переміщень
+        effective_orders = []
+        for order in parent_orders:
+            transferred_out = (
+                db.query(func.coalesce(func.sum(Order.qty), 0.0))
+                .filter(Order.parent_order_id == order.id, Order.client_id != client.id)
+                .scalar()
+            ) or 0.0
+            eff_qty = order.qty - transferred_out
+            if eff_qty > 0:
+                effective_orders.append((order, eff_qty))
+
+        if not effective_orders and not transfer_in_orders:
             no_orders_count += 1
             continue
 
@@ -112,19 +156,20 @@ def generate_from_orders(
             invoice_number=number,
             invoice_date=invoice_date,
             client_id=client.id,
-            route_id=route_id,
+            route_id=eff_route_id,
+            status=initial_status,
             created_at=datetime.now().isoformat(),
         )
         db.add(inv)
         db.flush()
 
         total = 0.0
-        for order in orders:
+        for order, eff_qty in effective_orders:
             if order.exchange_type == "pre_order":
                 db.add(InvoiceLine(
                     invoice_id=inv.id,
                     product_id=order.product_id,
-                    qty=order.qty,
+                    qty=eff_qty,
                     price=0.0,
                     is_exchange=1,
                     sum=0.0,
@@ -132,16 +177,31 @@ def generate_from_orders(
             else:
                 price = get_price(db, order.product_id, client.id, invoice_date)
                 effective_price = order.price_override if order.price_override is not None else price
-                line_sum = round(order.qty * effective_price, 2)
+                line_sum = round(eff_qty * effective_price, 2)
                 total += line_sum
                 db.add(InvoiceLine(
                     invoice_id=inv.id,
                     product_id=order.product_id,
-                    qty=order.qty,
+                    qty=eff_qty,
                     price=price,
                     price_override=order.price_override,
                     sum=line_sum,
                 ))
+
+        # Рядки з переміщень від інших клієнтів
+        for order in transfer_in_orders:
+            price = get_price(db, order.product_id, client.id, invoice_date)
+            effective_price = order.price_override if order.price_override is not None else price
+            line_sum = round(order.qty * effective_price, 2)
+            total += line_sum
+            db.add(InvoiceLine(
+                invoice_id=inv.id,
+                product_id=order.product_id,
+                qty=order.qty,
+                price=price,
+                price_override=order.price_override,
+                sum=line_sum,
+            ))
 
         inv.total_sum = round(total, 2)
         db.flush()

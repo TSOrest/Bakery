@@ -239,3 +239,25 @@ export interface ClientPriceOverride {
   valid_from: string
   valid_to: string | null
 }
+
+export interface OrderWithChildren extends Order {
+  children: Order[]
+}
+
+export type ClientState =
+  | 'no_activity'    // активний клієнт, немає замовлень і накладної
+  | 'virtual_draft'  // є замовлення, але немає накладної
+  | 'sent'
+  | 'processing'
+  | 'accepted'
+  | 'cancelled'
+
+export interface RouteKpi {
+  routeId: number | null   // null = "Всі", -1 = "Внутрішні"
+  routeName: string
+  clientCount: number
+  invoiceSum: number      // кредит: сума виставлених накладних
+  correctionSum: number
+  debitSum: number        // дебет: сума внесених оплат
+  statusCounts: Record<Exclude<ClientState, 'cancelled'>, number>
+}

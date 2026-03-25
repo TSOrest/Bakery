@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
 from backend.database import get_db
 from backend.models.orders import Order
-from backend.schemas.orders import OrderCreate, OrderUpdate, OrderOut
+from backend.schemas.orders import OrderCreate, OrderUpdate, OrderOut, TransferRequest, OrderWithChildrenOut
 from backend.services.orders import copy_orders
 
 router = APIRouter(prefix="/orders", tags=["Замовлення"])
@@ -100,6 +100,57 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
     db.delete(o)
     db.commit()
+
+
+@router.post("/{order_id}/transfer", response_model=OrderWithChildrenOut)
+def transfer_order(
+    order_id: int,
+    data: TransferRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Переміщує частину замовлення іншому клієнту.
+    Створює дочірній рядок (parent_order_id=order_id, origin_id=order_id)
+    зі збереженням повної історії.
+    """
+    parent = db.get(Order, order_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Замовлення не знайдено")
+    if parent.parent_order_id is not None:
+        raise HTTPException(status_code=400, detail="Можна переміщувати тільки батьківське замовлення")
+    if parent.origin_id is not None:
+        raise HTTPException(status_code=400, detail="Можна переміщувати тільки звичайне замовлення клієнта")
+
+    # Вже переміщена кількість
+    already = (
+        db.query(func.coalesce(func.sum(Order.qty), 0.0))
+        .filter(Order.parent_order_id == order_id, Order.client_id != parent.client_id)
+        .scalar()
+    ) or 0.0
+
+    if data.qty <= 0:
+        raise HTTPException(status_code=400, detail="Кількість має бути > 0")
+    if data.qty > parent.qty - already:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Неможливо перемістити {data.qty}: доступно {parent.qty - already}",
+        )
+
+    child = Order(
+        parent_order_id=order_id,
+        origin_id=order_id,
+        client_id=data.to_client_id,
+        product_id=parent.product_id,
+        order_date=parent.order_date,
+        qty=data.qty,
+        source="phone",
+        notes=data.notes,
+        created_at=datetime.now().isoformat(),
+    )
+    db.add(child)
+    db.commit()
+    db.refresh(parent)
+    return parent
 
 
 @router.post("/copy", status_code=200)

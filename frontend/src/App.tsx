@@ -29,6 +29,7 @@ function AppRoutes() {
     <DateProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="db-editor" element={<DbEditorPage />} />
           <Route path="/" element={<Layout />}>
             {/* Дашборд — головна сторінка */}
             <Route index element={<OwnerDashboard />} />
@@ -39,7 +40,6 @@ function AppRoutes() {
             <Route path="shop"      element={<ShopPage />} />
             <Route path="finances"  element={<FinancesPage />} />
             <Route path="admin"     element={<AdminPage />} />
-            <Route path="db-editor" element={<DbEditorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
