@@ -87,18 +87,41 @@ def _copy_schema(src: sqlite3.Connection, dst: sqlite3.Connection) -> None:
         try:
             dst.execute(row[0])
         except sqlite3.OperationalError:
-            pass  # таблиця вже існує
+            pass
     dst.commit()
 
 
+def _get_cols(con: sqlite3.Connection, table: str) -> list[str]:
+    """Повертає список колонок таблиці."""
+    cur = con.execute(f"SELECT * FROM {table} LIMIT 0")  # noqa: S608
+    return [d[0] for d in cur.description] if cur.description else []
+
+
 def _copy_table_full(src: sqlite3.Connection, dst: sqlite3.Connection, table: str) -> int:
-    """Копіює всі рядки таблиці."""
-    rows = src.execute(f"SELECT * FROM {table}").fetchall()  # noqa: S608
+    """Копіює всі рядки таблиці, беручи тільки спільні колонки."""
+    # Перевіряємо чи існує таблиця в dst
+    exists = dst.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()[0]
+    if not exists:
+        return 0
+
+    src_cols = _get_cols(src, table)
+    dst_cols = _get_cols(dst, table)
+    shared = [c for c in src_cols if c in dst_cols]
+    if not shared:
+        return 0
+
+    rows = src.execute(
+        f"SELECT {','.join(shared)} FROM {table}"  # noqa: S608
+    ).fetchall()
     if not rows:
         return 0
-    cols = [d[0] for d in src.execute(f"SELECT * FROM {table} LIMIT 0").description]  # noqa: S608
-    placeholders = ",".join("?" * len(cols))
-    dst.executemany(f"INSERT OR REPLACE INTO {table} VALUES ({placeholders})", rows)  # noqa: S608
+    placeholders = ",".join("?" * len(shared))
+    dst.executemany(
+        f"INSERT OR REPLACE INTO {table} ({','.join(shared)}) VALUES ({placeholders})",  # noqa: S608
+        rows,
+    )
     dst.commit()
     return len(rows)
 
@@ -112,6 +135,8 @@ def generate(source_path: str, output_path: str) -> None:
 
     # ── Схема ─────────────────────────────────────────────────────────────────
     _copy_schema(src, dst)
+    # schema.sql може включати PRAGMA foreign_keys=ON — перевмикаємо OFF для заповнення
+    dst.execute("PRAGMA foreign_keys = OFF")
 
     # ── Довідники (копіюємо повністю) ─────────────────────────────────────────
     for table in ("units", "categories", "ingredients",
@@ -121,16 +146,29 @@ def generate(source_path: str, output_path: str) -> None:
         print(f"  {table}: {n} рядків")
 
     # ── Вироби: реальні + синтетичні до 60 ───────────────────────────────────
+    # Визначаємо наявні колонки в src і dst
+    src_prod_cols_raw = [r[1] for r in src.execute("PRAGMA table_info(products)")]
+    dst_prod_cols_raw = [r[1] for r in dst.execute("PRAGMA table_info(products)")]
+    # Беремо спільні колонки (які є в обох)
+    shared_cols = [c for c in dst_prod_cols_raw if c in src_prod_cols_raw]
+    # Колонки для вставки в dst: shared + type (якщо є в dst але не src — з дефолтом)
+    dst_insert_cols = dst_prod_cols_raw[:]
+
     real_products = src.execute(
-        "SELECT id,name,short_name,type,weight,unit_id,category_id,cost_per_unit,"
-        "is_active,created_at,initial_stock FROM products"
+        f"SELECT {','.join(shared_cols)} FROM products"  # noqa: S608
     ).fetchall()
-    prod_cols = ("id","name","short_name","type","weight","unit_id","category_id",
-                 "cost_per_unit","is_active","created_at","initial_stock")
-    dst.executemany(
-        f"INSERT OR REPLACE INTO products ({','.join(prod_cols)}) VALUES ({','.join('?'*len(prod_cols))})",
-        real_products,
-    )
+
+    # Вставляємо в dst — для відсутніх колонок (напр. type) ставимо дефолт 'other'
+    for row in real_products:
+        row_dict = dict(zip(shared_cols, row))
+        if "type" not in row_dict:
+            row_dict["type"] = "other"
+        vals = [row_dict.get(c) for c in dst_insert_cols]
+        dst.execute(
+            f"INSERT OR REPLACE INTO products ({','.join(dst_insert_cols)}) "
+            f"VALUES ({','.join('?'*len(dst_insert_cols))})",
+            vals,
+        )
 
     next_id = (max((r[0] for r in real_products), default=0) + 1) if real_products else 1
     added = 0
@@ -143,17 +181,38 @@ def generate(source_path: str, output_path: str) -> None:
     cat_bread = src.execute("SELECT id FROM categories WHERE name LIKE '%Хліб%' OR name LIKE '%bread%' LIMIT 1").fetchone()
     cat_bread = cat_bread[0] if cat_bread else None
 
+    # Базовий набір колонок для синтетичних виробів
+    syn_base = {"id": None, "name": None, "short_name": None, "type": "other",
+                "weight": None, "unit_id": unit_id, "category_id": None,
+                "cost_per_unit": 0, "is_active": 1, "created_at": "datetime('now')",
+                "initial_stock": 0}
+    syn_cols = [c for c in dst_prod_cols_raw if c in syn_base]
+
     existing_count = len(real_products)
-    for name, short, ptype, weight in SYNTHETIC_PRODUCTS:
+    for syn_name, short, ptype, weight in SYNTHETIC_PRODUCTS:
         if existing_count + added >= 60:
             break
         cat = cat_bun if ptype == "bun" else (cat_bread if ptype == "bread" else None)
-        dst.execute(
-            "INSERT OR IGNORE INTO products (id,name,short_name,type,weight,unit_id,"
-            "category_id,cost_per_unit,is_active,created_at,initial_stock) "
-            "VALUES (?,?,?,?,?,?,?,0,1,datetime('now'),0)",
-            (next_id, name, short, ptype, weight, unit_id, cat),
-        )
+        row = {**syn_base, "id": next_id, "name": syn_name, "short_name": short,
+               "type": ptype, "weight": weight, "category_id": cat}
+        vals = [row[c] for c in syn_cols]
+        # created_at як SQL функція
+        sql_cols = syn_cols[:]
+        if "created_at" in sql_cols:
+            idx = sql_cols.index("created_at")
+            placeholders_list = ["?" if c != "created_at" else "datetime('now')" for c in sql_cols]
+            vals_filtered = [v for c, v in zip(sql_cols, vals) if c != "created_at"]
+            dst.execute(
+                f"INSERT OR IGNORE INTO products ({','.join(sql_cols)}) "
+                f"VALUES ({','.join(placeholders_list)})",
+                vals_filtered,
+            )
+        else:
+            dst.execute(
+                f"INSERT OR IGNORE INTO products ({','.join(syn_cols)}) "
+                f"VALUES ({','.join('?'*len(syn_cols))})",
+                vals,
+            )
         next_id += 1
         added += 1
 
@@ -166,23 +225,24 @@ def generate(source_path: str, output_path: str) -> None:
     print(f"  prices: {n} рядків")
 
     # ── Системні клієнти ──────────────────────────────────────────────────────
-    sys_clients = src.execute(
-        "SELECT id,full_name,short_name,address,phone,director,accountant,"
-        "route_id,discount_pct,is_active,created_at,is_own_shop,print_invoice,"
-        "receiver_name,delivery_agent,delivery_note_number,delivery_note_date,"
-        "client_group,client_kind,bot_phones FROM clients "
+    # Визначаємо спільні колонки між src і dst для clients
+    src_cli_cols = _get_cols(src, "clients")
+    dst_cli_cols = _get_cols(dst, "clients")
+    cli_shared = [c for c in src_cli_cols if c in dst_cli_cols]
+
+    sys_clients_raw = src.execute(
+        f"SELECT {','.join(cli_shared)} FROM clients "  # noqa: S608
         "WHERE client_kind IN ('writeoff','ration','underbaked')"
-    ).fetchall()
-    client_cols = ("id","full_name","short_name","address","phone","director","accountant",
-                   "route_id","discount_pct","is_active","created_at","is_own_shop","print_invoice",
-                   "receiver_name","delivery_agent","delivery_note_number","delivery_note_date",
-                   "client_group","client_kind","bot_phones")
-    dst.executemany(
-        f"INSERT OR REPLACE INTO clients ({','.join(client_cols)}) VALUES ({','.join('?'*len(client_cols))})",
-        sys_clients,
-    )
-    dst.commit()
-    max_client_id = max((r[0] for r in sys_clients), default=0) + 1
+    ).fetchall() if "client_kind" in src_cli_cols else []
+
+    if sys_clients_raw:
+        dst.executemany(
+            f"INSERT OR REPLACE INTO clients ({','.join(cli_shared)}) "
+            f"VALUES ({','.join('?'*len(cli_shared))})",
+            sys_clients_raw,
+        )
+        dst.commit()
+    max_client_id = max((r[0] for r in sys_clients_raw), default=0) + 1
 
     # ── Маршрути ─────────────────────────────────────────────────────────────
     real_routes = src.execute(
@@ -217,6 +277,21 @@ def generate(source_path: str, output_path: str) -> None:
     all_client_ids = []
     client_id = max_client_id + 100  # запас після системних
 
+    # Базові значення для синтетичних клієнтів — використовуємо тільки dst_cli_cols
+    cli_defaults = {
+        "id": None, "full_name": None, "short_name": None, "address": None,
+        "phone": None, "director": None, "accountant": None, "route_id": None,
+        "discount_pct": 0, "is_active": 1, "created_at": None,
+        "is_own_shop": 0, "print_invoice": 1, "client_kind": "customer",
+        "receiver_name": None, "delivery_agent": None, "delivery_note_number": None,
+        "delivery_note_date": None, "client_group": None, "bot_phones": None,
+    }
+    syn_cli_cols = [c for c in dst_cli_cols if c in cli_defaults]
+    syn_cli_ph = []
+    for c in syn_cli_cols:
+        syn_cli_ph.append("datetime('now')" if c == "created_at" else "?")
+    syn_cli_val_cols = [c for c in syn_cli_cols if c != "created_at"]
+
     for route_id in route_ids:
         for j in range(25):
             prefix = rng.choice(CLIENT_PREFIXES)
@@ -224,12 +299,13 @@ def generate(source_path: str, output_path: str) -> None:
             name = f"{prefix} {surname}"
             short = surname[:10]
             discount = rng.choice([0, 0, 0, 3, 5])
+            row = {**cli_defaults, "id": client_id, "full_name": name, "short_name": short,
+                   "route_id": route_id, "discount_pct": discount}
+            vals = [row[c] for c in syn_cli_val_cols]
             dst.execute(
-                "INSERT OR REPLACE INTO clients "
-                "(id,full_name,short_name,route_id,discount_pct,is_active,created_at,"
-                "is_own_shop,print_invoice,client_kind) "
-                "VALUES (?,?,?,?,?,1,datetime('now'),0,1,'customer')",
-                (client_id, name, short, route_id, discount),
+                f"INSERT OR REPLACE INTO clients ({','.join(syn_cli_cols)}) "
+                f"VALUES ({','.join(syn_cli_ph)})",
+                vals,
             )
             all_client_ids.append(client_id)
             client_id += 1
@@ -238,10 +314,32 @@ def generate(source_path: str, output_path: str) -> None:
     print(f"  clients: {len(all_client_ids)} синтетичних")
 
     # ── Замовлення: 30 днів ───────────────────────────────────────────────────
-    all_products = dst.execute(
-        "SELECT id,type FROM products WHERE is_active=1 AND type != 'other'"
-    ).fetchall()
+    dst_prod_final_cols = _get_cols(dst, "products")
+    if "type" in dst_prod_final_cols:
+        all_products = dst.execute(
+            "SELECT id,type FROM products WHERE is_active=1 AND type != 'other'"
+        ).fetchall()
+    else:
+        # Якщо немає type — беремо всі активні продукти з ptype='bread' (для qty)
+        all_products = [(r[0], "bread") for r in dst.execute(
+            "SELECT id FROM products WHERE is_active=1"
+        ).fetchall()]
     today = date.today()
+    # Визначаємо колонки orders в dst динамічно
+    dst_order_cols = _get_cols(dst, "orders")
+    order_defaults = {
+        "id": None, "client_id": None, "product_id": None, "qty": None,
+        "order_date": None, "status": "confirmed", "source": "phone",
+        "exchange_type": "none", "exchange_qty": 0, "exchange_price": None,
+        "exchange_notes": None, "price_override": None, "notes": None,
+        "created_at": None, "created_by": None,
+        # бот-поля (якщо є в dst)
+        "bot_status": None, "bot_rejection_reason": None, "bot_original_qty": None,
+        "placed_by_chat_id": None, "parent_order_id": None, "delivered_qty": None,
+    }
+    order_insert_cols = [c for c in dst_order_cols if c in order_defaults]
+    order_ph = ",".join("?" * len(order_insert_cols))
+
     order_id = 1
     order_rows = []
     for delta in range(30, 0, -1):
@@ -251,17 +349,13 @@ def generate(source_path: str, output_path: str) -> None:
             sample = rng.sample(all_products, min(rng.randint(3, 6), len(all_products)))
             for (pid, ptype) in sample:
                 qty = rng.randint(5, 30) if ptype == "bread" else rng.randint(10, 60)
-                order_rows.append((order_id, cid, pid, qty, d, "confirmed", "phone",
-                                   "none", 0, None, None, None, None, None,
-                                   datetime_now := f"{d}T08:00:00", None, None, None, None, None))
+                row = {**order_defaults, "id": order_id, "client_id": cid, "product_id": pid,
+                       "qty": qty, "order_date": d, "created_at": f"{d}T08:00:00"}
+                order_rows.append(tuple(row[c] for c in order_insert_cols))
                 order_id += 1
 
-    order_cols = ("id","client_id","product_id","qty","order_date","status","source",
-                  "exchange_type","exchange_qty","exchange_price","exchange_notes",
-                  "price_override","notes","created_at","bot_status","bot_rejection_reason",
-                  "bot_original_qty","placed_by_chat_id","parent_order_id","delivered_qty")
     dst.executemany(
-        f"INSERT OR REPLACE INTO orders ({','.join(order_cols)}) VALUES ({','.join('?'*len(order_cols))})",
+        f"INSERT OR REPLACE INTO orders ({','.join(order_insert_cols)}) VALUES ({order_ph})",
         order_rows,
     )
     dst.commit()
@@ -337,17 +431,28 @@ def generate(source_path: str, output_path: str) -> None:
     ).fetchone()
     article_id = article_id[0] if article_id else None
 
-    if article_id:
+    dst_fin_cols = _get_cols(dst, "finances")
+    fin_defaults = {
+        "id": None, "finance_date": None, "client_id": None,
+        "finance_type": "payment", "amount": None, "sign": 1,
+        "notes": "Оплата готівка", "created_at": None, "created_by": None,
+        "article_id": None,
+    }
+    fin_insert_cols = [c for c in dst_fin_cols if c in fin_defaults]
+    fin_ph = ",".join("?" * len(fin_insert_cols))
+
+    if article_id or "article_id" not in dst_fin_cols:
         fin_id = 1
         for delta in range(8, 0, -1):
             d = (today - timedelta(days=delta)).isoformat()
             for cid in rng.sample(all_client_ids, min(10, len(all_client_ids))):
                 amount = round(rng.uniform(200, 2000), 2)
+                row = {**fin_defaults, "id": fin_id, "finance_date": d, "client_id": cid,
+                       "amount": amount, "created_at": f"{d}T10:00:00", "article_id": article_id}
+                vals = tuple(row[c] for c in fin_insert_cols)
                 dst.execute(
-                    "INSERT OR REPLACE INTO finances "
-                    "(id,finance_date,client_id,finance_type,article_id,amount,sign,notes,created_at) "
-                    "VALUES (?,?,?,'payment',?,?,1,'Оплата готівка',?)",
-                    (fin_id, d, cid, article_id, amount, f"{d}T10:00:00"),
+                    f"INSERT OR REPLACE INTO finances ({','.join(fin_insert_cols)}) VALUES ({fin_ph})",
+                    vals,
                 )
                 fin_id += 1
         dst.commit()
@@ -355,7 +460,7 @@ def generate(source_path: str, output_path: str) -> None:
 
     src.close()
     dst.close()
-    print(f"\n✓ demo.db згенеровано: {output_path}")
+    print(f"\nGotovo! demo.db zghenerovano: {output_path}")
 
 
 if __name__ == "__main__":

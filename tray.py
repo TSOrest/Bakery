@@ -107,7 +107,7 @@ ICON_YELLOW_B    = _make_icon("#d4870f")   # darker frame for startup animation
 
 def _read_version(filename: str = "VERSION") -> str:
     f = ROOT / filename
-    return f.read_text(encoding="utf-8").strip() if f.exists() else ""
+    return f.read_text(encoding="utf-8-sig").strip() if f.exists() else ""
 
 
 def _fetch_latest_tag() -> str:

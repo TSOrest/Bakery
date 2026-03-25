@@ -86,7 +86,7 @@ def list_backups(root: Path, custom_dir: str = "") -> list:
         if meta_file.exists():
             try:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                app_version = meta.get("app_version", "")
+                app_version = meta.get("app_version", "").lstrip("\ufeff")
                 created_at = meta.get("created_at", "")
             except Exception:
                 pass
@@ -147,7 +147,10 @@ def get_backup_meta(root: Path, filename: str, custom_dir: str = "") -> dict:
     if not meta_file.exists():
         return {}
     try:
-        return json.loads(meta_file.read_text(encoding="utf-8"))
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if "app_version" in meta:
+            meta["app_version"] = meta["app_version"].lstrip("\ufeff")
+        return meta
     except Exception:
         return {}
 

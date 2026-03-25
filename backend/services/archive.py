@@ -36,6 +36,25 @@ def _ensure_snapshot_article(db: Session) -> int:
     return row[0]
 
 
+def _table_exists(db: Session, table: str) -> bool:
+    """Перевіряє чи існує таблиця в БД."""
+    row = db.execute(
+        text("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=:t"),
+        {"t": table},
+    ).scalar()
+    return bool(row)
+
+
+def _count_if_exists(db: Session, table: str, col: str, cutoff: str) -> int:
+    """Рахує рядки якщо таблиця існує, інакше 0."""
+    if not _table_exists(db, table):
+        return 0
+    return db.execute(
+        text(f"SELECT COUNT(*) FROM {table} WHERE {col} < :c"),  # noqa: S608
+        {"c": cutoff},
+    ).scalar() or 0
+
+
 def get_archive_preview(db: Session, cutoff_date: str) -> dict[str, Any]:
     """
     Підраховує скільки записів буде видалено при архівуванні до cutoff_date.
@@ -46,29 +65,14 @@ def get_archive_preview(db: Session, cutoff_date: str) -> dict[str, Any]:
 
     counts: dict[str, int] = {}
 
-    counts["baking_tasks"] = db.execute(
-        text("SELECT COUNT(*) FROM baking_tasks WHERE task_date < :c"), {"c": c}
-    ).scalar() or 0
+    counts["baking_tasks"] = _count_if_exists(db, "baking_tasks", "task_date", c)
 
-    counts["surplus_allocations"] = db.execute(
-        text("SELECT COUNT(*) FROM surplus_allocations WHERE alloc_date < :c"), {"c": c}
-    ).scalar() or 0
+    counts["surplus_allocations"] = _count_if_exists(db, "surplus_allocations", "alloc_date", c)
 
-    counts["shop_counts"] = db.execute(
-        text("SELECT COUNT(*) FROM shop_counts WHERE count_date < :c"), {"c": c}
-    ).scalar() or 0
-
-    counts["other_stock_in"] = db.execute(
-        text("SELECT COUNT(*) FROM other_stock_in WHERE stock_date < :c"), {"c": c}
-    ).scalar() or 0
-
-    counts["route_cancellations"] = db.execute(
-        text("SELECT COUNT(*) FROM route_cancellations WHERE cancel_date < :c"), {"c": c}
-    ).scalar() or 0
-
-    counts["movements"] = db.execute(
-        text("SELECT COUNT(*) FROM movements WHERE move_date < :c"), {"c": c}
-    ).scalar() or 0
+    counts["shop_counts"]         = _count_if_exists(db, "shop_counts",         "count_date",  c)
+    counts["other_stock_in"]      = _count_if_exists(db, "other_stock_in",      "stock_date",  c)
+    counts["route_cancellations"] = _count_if_exists(db, "route_cancellations", "cancel_date", c)
+    counts["movements"]           = _count_if_exists(db, "movements",           "move_date",   c)
 
     # daily_balances: видаляємо тільки ті що строго < (cutoff - 1 день)
     anchor_date = (date.fromisoformat(c) - timedelta(days=1)).isoformat()
@@ -184,6 +188,9 @@ def run_archive(db: Session, cutoff_date: str) -> dict[str, Any]:
         ("baking_tasks",        "task_date"),
         ("movements",           "move_date"),
     ]:
+        if not _table_exists(db, table):
+            deleted[table] = 0
+            continue
         r = db.execute(
             text(f"DELETE FROM {table} WHERE {col} < :c"), {"c": c}  # noqa: S608
         )

@@ -33,7 +33,7 @@ def _get_settings(db: Session) -> dict:
 
 def _read_version() -> str:
     f = ROOT / "VERSION"
-    return f.read_text(encoding="utf-8").strip() if f.exists() else ""
+    return f.read_text(encoding="utf-8-sig").strip() if f.exists() else ""
 
 
 def _cloud_paths(cfg: dict) -> list:
