@@ -145,6 +145,21 @@ def generate(source_path: str, output_path: str) -> None:
         n = _copy_table_full(src, dst, table)
         print(f"  {table}: {n} рядків")
 
+    # ── Скидаємо паролі всіх користувачів на username=password ────────────────
+    import hashlib as _hashlib, secrets as _secrets
+    user_cols = _get_cols(dst, "users")
+    if "password_hash" in user_cols and "salt" in user_cols and "username" in user_cols:
+        users = dst.execute("SELECT id, username FROM users").fetchall()
+        for uid, username in users:
+            new_salt = _secrets.token_hex(16)
+            new_hash = _hashlib.sha256(f"{new_salt}{username}".encode()).hexdigest()
+            dst.execute(
+                "UPDATE users SET password_hash=?, salt=? WHERE id=?",
+                (new_hash, new_salt, uid),
+            )
+        dst.commit()
+        print(f"  passwords reset: {len(users)} users (password = username)")
+
     # ── Вироби: реальні + синтетичні до 60 ───────────────────────────────────
     # Визначаємо наявні колонки в src і dst
     src_prod_cols_raw = [r[1] for r in src.execute("PRAGMA table_info(products)")]

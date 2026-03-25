@@ -38,12 +38,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error,    setError]    = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
+  const [isDemo,   setIsDemo]   = useState(false)
 
   useEffect(() => {
     fetch('/api/v1/auth/public-users')
       .then((r) => r.json())
       .then(setUsers)
       .catch(() => setUsers([]))
+    fetch('/api/v1/backup/demo/status')
+      .then((r) => r.json())
+      .then((d) => setIsDemo(!!d.active))
+      .catch(() => {})
   }, [])
 
   const select = (u: PublicUser) => {
@@ -84,6 +89,16 @@ export default function LoginPage() {
             <div className={styles.headerSub}>Оберіть користувача для входу</div>
           </div>
         </div>
+
+        {isDemo && (
+          <div style={{
+            background: '#fff8e1', border: '1px solid #f59e0b', borderRadius: 6,
+            padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#92400e',
+          }}>
+            ⚡ <strong>Демо режим</strong> — пароль = логін
+            {' '}(наприклад: <code>admin</code> → <code>admin</code>)
+          </div>
+        )}
 
         <div className={styles.divider} />
 
