@@ -103,8 +103,10 @@ export default function LoginPage() {
         <div className={styles.divider} />
 
         {/* Список користувачів */}
-        <div className={styles.userList}>
-          {users.map((u) => {
+        {(() => {
+          const main   = users.filter(u => u.role !== 'admin')
+          const admins = users.filter(u => u.role === 'admin')
+          const renderCard = (u: PublicUser, dim = false) => {
             const color = ROLE_COLORS[u.role] ?? '#1a3a5c'
             const isSelected = selected?.id === u.id
             return (
@@ -112,11 +114,9 @@ export default function LoginPage() {
                 key={u.id}
                 className={`${styles.userCard} ${isSelected ? styles.userCardActive : ''}`}
                 onClick={() => select(u)}
+                style={dim ? { opacity: 0.55, transform: 'scale(0.95)', transformOrigin: 'left' } : undefined}
               >
-                <div
-                  className={styles.avatar}
-                  style={{ background: color }}
-                >
+                <div className={styles.avatar} style={{ background: color }}>
                   {getInitials(u)}
                   <span className={styles.roleIcon}>{ROLE_ICONS[u.role] ?? '👤'}</span>
                 </div>
@@ -127,8 +127,21 @@ export default function LoginPage() {
                 {isSelected && <div className={styles.arrow}>▶</div>}
               </button>
             )
-          })}
-        </div>
+          }
+          return (
+            <div className={styles.userList}>
+              {main.map(u => renderCard(u))}
+              {admins.length > 0 && (
+                <>
+                  <div style={{ margin: '6px 0 2px', borderTop: '1px dashed #d1d5db', paddingTop: 6 }}>
+                    <span style={{ fontSize: 11, color: '#9ca3af', letterSpacing: '0.05em' }}>Адміністратори</span>
+                  </div>
+                  {admins.map(u => renderCard(u, true))}
+                </>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Панель пароля */}
         {selected && (

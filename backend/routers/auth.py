@@ -122,6 +122,9 @@ class UserUpdate(BaseModel):
 @router.get("/public-users")
 def list_users_public(db: Session = Depends(get_db)):
     """Публічний список активних користувачів для екрану входу (без паролів)."""
+    ROLE_ORDER = {"operator": 0, "accountant": 1, "owner": 2, "admin": 3}
+    users = db.query(User).filter(User.is_active == 1).all()
+    users.sort(key=lambda u: (ROLE_ORDER.get(u.role, 99), u.id))
     return [
         {
             "id":         u.id,
@@ -130,7 +133,7 @@ def list_users_public(db: Session = Depends(get_db)):
             "role":       u.role,
             "role_label": ROLE_LABELS.get(u.role, u.role),
         }
-        for u in db.query(User).filter(User.is_active == 1).order_by(User.id).all()
+        for u in users
     ]
 
 
