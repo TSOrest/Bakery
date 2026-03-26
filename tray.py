@@ -412,7 +412,8 @@ def action_start(icon, _item=None) -> None:
     _kill_uvicorn()
     time.sleep(1)
     if _task_exists():
-        _run_ps(f"Start-ScheduledTask -TaskName {TASK_NAME}")
+        _run_ps(f"Enable-ScheduledTask -TaskName {TASK_NAME} -ErrorAction SilentlyContinue; "
+                f"Start-ScheduledTask -TaskName {TASK_NAME}")
     else:
         subprocess.Popen(
             [str(PYTHON), "-m", "uvicorn", "backend.main:app",
