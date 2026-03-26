@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type {
@@ -55,6 +55,11 @@ function VirtualDraftPanel({
     allOrders
       .filter((o) => o.parent_order_id === orderId && o.client_id !== client.id)
       .reduce((s, o) => s + o.qty, 0)
+
+  const clientLabel = (id: number) => {
+    const c = allClients.find((c) => c.id === id)
+    return c?.short_name ?? c?.full_name ?? `#${id}`
+  }
 
   // Стан форми переміщення
   const [transferOpen, setTransferOpen] = useState<number | null>(null)
@@ -151,19 +156,40 @@ function VirtualDraftPanel({
         </thead>
         <tbody>
           {clientOrders.map((order) => {
-            const transferred = transferredOut(order.id)
-            const effective = order.qty - transferred
+            const isTransferIn = order.origin_id !== null && order.origin_id !== 0
+            const transferred  = isTransferIn ? 0 : transferredOut(order.id)
+            const effective    = order.qty - transferred
+
+            // Вихідні переміщення (гілки від цього ордера)
+            const outgoing = isTransferIn ? [] : allOrders.filter(
+              (o) => o.parent_order_id === order.id
+            )
+
+            // Джерело вхідного переміщення
+            const parentOrder = isTransferIn
+              ? allOrders.find((o) => o.id === order.parent_order_id)
+              : null
+            const sourceLabel = parentOrder ? clientLabel(parentOrder.client_id) : null
+
             return (
-              <>
-                <tr key={order.id}>
-                  <td>{productName(order.product_id)}</td>
-                  <td className={styles.numTd}>{order.qty}</td>
+              <React.Fragment key={order.id}>
+                {/* ── Головний рядок виробу ── */}
+                <tr>
+                  <td>
+                    <span>{productName(order.product_id)}</span>
+                    {isTransferIn && (
+                      <span className={styles.transferInTag}>переміщення</span>
+                    )}
+                  </td>
+                  <td className={styles.numTd}>
+                    {isTransferIn ? <span className={styles.dimDash}>—</span> : order.qty}
+                  </td>
                   <td className={`${styles.numTd} ${transferred > 0 ? styles.transferredQty : ''}`}>
                     {transferred > 0 ? transferred : '—'}
                   </td>
                   <td className={`${styles.numTd} ${styles.effectiveQty}`}>{effective}</td>
                   <td>
-                    {effective > 0 && (
+                    {effective > 0 && !isTransferIn && (
                       <button
                         className={styles.transferBtn}
                         onClick={() => openTransfer(order.id, effective)}
@@ -174,9 +200,38 @@ function VirtualDraftPanel({
                     )}
                   </td>
                 </tr>
-                {/* Inline форма переміщення */}
+
+                {/* ── Вхідна гілка: звідки прийшло ── */}
+                {isTransferIn && sourceLabel && (
+                  <tr className={styles.flowRow}>
+                    <td colSpan={2} className={styles.flowCell}>
+                      <span className={styles.flowTreeIn}>└</span>
+                      <span className={styles.flowArrowIn}>↑</span>
+                      <span className={styles.flowLabel}>від {sourceLabel}</span>
+                    </td>
+                    <td />
+                    <td className={`${styles.numTd} ${styles.flowQtyIn}`}>+{order.qty}</td>
+                    <td />
+                  </tr>
+                )}
+
+                {/* ── Вихідні гілки: куди пішло ── */}
+                {outgoing.map((child) => (
+                  <tr key={`out-${child.id}`} className={styles.flowRow}>
+                    <td colSpan={2} className={styles.flowCell}>
+                      <span className={styles.flowTreeOut}>└</span>
+                      <span className={styles.flowArrowOut}>↓</span>
+                      <span className={styles.flowLabel}>→ {clientLabel(child.client_id)}</span>
+                    </td>
+                    <td className={`${styles.numTd} ${styles.flowQtyOut}`}>-{child.qty}</td>
+                    <td />
+                    <td />
+                  </tr>
+                ))}
+
+                {/* ── Inline форма переміщення ── */}
                 {transferOpen === order.id && (
-                  <tr key={`transfer-${order.id}`} className={styles.transferFormRow}>
+                  <tr className={styles.transferFormRow}>
                     <td colSpan={5}>
                       <div className={styles.transferForm}>
                         <span className={styles.transferLabel}>Кількість:</span>
@@ -196,13 +251,11 @@ function VirtualDraftPanel({
                           className={styles.transferSelect}
                         >
                           <option value="">— оберіть клієнта —</option>
-                          {/* Магазин / Списання / Пайок — без групування */}
                           {destinationClients
                             .filter((c) => c.client_kind !== 'customer')
                             .map((c) => (
                               <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
                             ))}
-                          {/* Рейсові клієнти — згруповані по маршруту */}
                           {activeRoutes.map((r) => {
                             const group = destinationClients.filter(
                               (c) => c.client_kind === 'customer' && c.route_id === r.id
@@ -216,7 +269,6 @@ function VirtualDraftPanel({
                               </optgroup>
                             )
                           })}
-                          {/* Клієнти без маршруту */}
                           {(() => {
                             const noRoute = destinationClients.filter(
                               (c) => c.client_kind === 'customer' && c.route_id === null
@@ -248,7 +300,7 @@ function VirtualDraftPanel({
                     </td>
                   </tr>
                 )}
-              </>
+              </React.Fragment>
             )
           })}
         </tbody>

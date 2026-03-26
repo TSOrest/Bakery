@@ -525,6 +525,31 @@
 .transferredQty { color: #e67e22; font-size: 0.82rem; }
 .effectiveQty { font-weight: 600; }
 
+/* ── Дерево переміщень ───────────────────────────────────────────────────── */
+
+.flowRow td {
+  padding-top: 0.1rem !important;
+  padding-bottom: 0.1rem !important;
+  border-top: none !important;
+}
+
+.flowCell {
+  padding-left: 1.5rem !important;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.flowTreeIn, .flowTreeOut { font-size: 0.78rem; color: #cbd5e1; }
+.flowArrowIn  { font-size: 0.7rem; color: #16a34a; }
+.flowArrowOut { font-size: 0.7rem; color: #d97706; }
+.flowLabel    { font-size: 0.78rem; color: #6b7280; }
+.flowQtyIn    { font-size: 0.78rem; color: #16a34a; font-weight: 600; }
+.flowQtyOut   { font-size: 0.78rem; color: #d97706; font-weight: 600; }
+
+.transferInTag { margin-left: 0.4rem; font-size: 0.68rem; color: #9ca3af; font-style: italic; }
+.dimDash       { color: #9ca3af; }
+
 /* ─── Кнопки дій ─────────────────────────────────────────────────────────── */
 
 .paperActions {
