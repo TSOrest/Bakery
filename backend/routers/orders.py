@@ -116,10 +116,6 @@ def transfer_order(
     parent = db.get(Order, order_id)
     if not parent:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
-    if parent.parent_order_id is not None:
-        raise HTTPException(status_code=400, detail="Можна переміщувати тільки батьківське замовлення")
-    if parent.origin_id is not None:
-        raise HTTPException(status_code=400, detail="Можна переміщувати тільки звичайне замовлення клієнта")
 
     # Вже переміщена кількість
     already = (

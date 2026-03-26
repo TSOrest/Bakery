@@ -36,6 +36,7 @@ interface VirtualDraftProps {
   products: Product[]
   allClients: Client[]
   routes: Route[]
+  lockedClientIds: Set<number>
   workDate: string
   onSent: (inv: Invoice) => void
   onOrdersChanged: () => void
@@ -43,7 +44,7 @@ interface VirtualDraftProps {
 
 function VirtualDraftPanel({
   client, clientOrders, allOrders, products, allClients, routes,
-  workDate, onSent, onOrdersChanged,
+  lockedClientIds, workDate, onSent, onOrdersChanged,
 }: VirtualDraftProps) {
   const productName = (id: number) => {
     const p = products.find((p) => p.id === id)
@@ -111,10 +112,10 @@ function VirtualDraftPanel({
     }
   }
 
-  // Список клієнтів для переміщення: без джерела, без "Недопечено", з сортуванням
+  // Список клієнтів для переміщення: без джерела, без "Недопечено", тільки доступні (не відправлені)
   const KIND_ORDER: Record<string, number> = { shop: 0, writeoff: 1, ration: 2, customer: 3 }
   const destinationClients = allClients
-    .filter((c) => c.id !== client.id && c.client_kind !== 'underbaked')
+    .filter((c) => c.id !== client.id && c.client_kind !== 'underbaked' && !lockedClientIds.has(c.id))
     .sort((a, b) => {
       const ka = KIND_ORDER[a.client_kind] ?? 99
       const kb = KIND_ORDER[b.client_kind] ?? 99
@@ -189,7 +190,7 @@ function VirtualDraftPanel({
                   </td>
                   <td className={`${styles.numTd} ${styles.effectiveQty}`}>{effective}</td>
                   <td>
-                    {effective > 0 && !isTransferIn && (
+                    {effective > 0 && (
                       <button
                         className={styles.transferBtn}
                         onClick={() => openTransfer(order.id, effective)}
@@ -846,6 +847,16 @@ export default function RoutesPage() {
     return (ordersForClient[clientId]?.length ?? 0) > 0 ? 'virtual_draft' : 'no_activity'
   }
 
+  // Клієнти з відправленою (не чернетковою) накладною — недоступні для переміщення
+  const lockedClientIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const inv of invoices) {
+      if (inv.corrective_for_id !== null) continue
+      if (inv.status !== 'draft' && inv.status !== 'cancelled') ids.add(inv.client_id)
+    }
+    return ids
+  }, [invoices])
+
   // ── KPI картки ────────────────────────────────────────────────────────────────
 
   const kpiCards = useMemo((): RouteKpi[] => {
@@ -1255,6 +1266,7 @@ export default function RoutesPage() {
               products={products}
               allClients={clients.filter((c) => c.is_active)}
               routes={routes}
+              lockedClientIds={lockedClientIds}
               workDate={workDate}
               onSent={handleClientSent}
               onOrdersChanged={() => load(workDate)}
