@@ -733,7 +733,7 @@ export default function RoutesPage() {
         api.get<Product[]>('/products/'),
         api.get<Category[]>('/categories?active_only=false'),
         api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
-        api.get<Order[]>(`/orders/?order_date=${date}&origin_id=null`),
+        api.get<Order[]>(`/orders/?order_date=${date}`),
         api.get<Finance[]>(`/finances/?date_from=${date}&date_to=${date}`),
         api.get<Record<string, { value: string }>>('/settings/'),
       ])
@@ -776,11 +776,11 @@ export default function RoutesPage() {
   const correctiveFor = (invoiceId: number) =>
     invoices.find((i) => i.corrective_for_id === invoiceId) ?? null
 
-  // Ордери клієнта (тільки parent, без pending)
+  // Ордери клієнта: батьківські + отримані переміщення, без надлишків і pending
   const ordersForClient = useMemo(() => {
     const map: Record<number, Order[]> = {}
     for (const o of orders) {
-      if (o.parent_order_id !== null) continue   // тільки батьківські
+      if (o.origin_id === 0) continue          // пропустити надлишки з випічки
       if (o.bot_status === 'pending') continue
       if (!map[o.client_id]) map[o.client_id] = []
       map[o.client_id].push(o)
