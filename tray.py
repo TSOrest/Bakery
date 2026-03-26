@@ -193,6 +193,20 @@ def _backup_dir_path() -> Path:
     return d
 
 
+def _clear_wal(db_path: Path) -> None:
+    """
+    Видаляє stale WAL/SHM файли після заміни DB-файлу.
+    Без цього SQLite намагається застосувати WAL від попередньої БД,
+    що призводить до некоректних даних або помилок.
+    """
+    for ext in ("-wal", "-shm"):
+        f = Path(str(db_path) + ext)
+        try:
+            f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def _backup_db() -> str:
     """
     SQLite online backup → backups/bakery_YYYYMMDD-HHMMSS.db + sidecar .meta.json.
@@ -573,6 +587,7 @@ def _action_demo_enter(icon) -> None:
     time.sleep(2)
     try:
         shutil.copy2(demo_db, DB_FILE)
+        _clear_wal(DB_FILE)
         import datetime as _dt
         DEMO_ACTIVE.write_text(
             json.dumps({"backup_path": backup_path,
@@ -610,6 +625,7 @@ def _action_demo_exit(icon) -> None:
     time.sleep(2)
     try:
         shutil.copy2(backup_path, DB_FILE)
+        _clear_wal(DB_FILE)
         DEMO_ACTIVE.unlink(missing_ok=True)
     except Exception as e:
         _msgbox("Bakery — помилка", f"Не вдалося відновити базу:\n{e}", 0)
