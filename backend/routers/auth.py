@@ -1,6 +1,7 @@
 """Ендпоінти авторизації: вхід, профіль, вихід, управління користувачами."""
 
 import hashlib
+import json
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.auth import User, UserSession
+from backend.models.settings import Setting
 
 router = APIRouter(prefix="/auth", tags=["Авторизація"])
 
@@ -64,6 +66,24 @@ def require_admin(user: User = Depends(require_user)) -> User:
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Потрібні права адміністратора")
     return user
+
+
+def require_system_perm(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Дозволяє доступ адміну або будь-якій ролі з дозволом admin_system."""
+    if user.role == "admin":
+        return user
+    setting = db.get(Setting, "role_permissions")
+    if setting and setting.value:
+        try:
+            perms: dict = json.loads(setting.value)
+            if "admin_system" in perms.get(user.role, []):
+                return user
+        except (ValueError, TypeError):
+            pass
+    raise HTTPException(status_code=403, detail="Потрібні права адміністратора або дозвіл admin_system")
 
 
 # ─── Схеми ───────────────────────────────────────────────────────────────────
@@ -165,10 +185,10 @@ def logout(
     return {"ok": True}
 
 
-# ─── Управління користувачами (тільки admin) ─────────────────────────────────
+# ─── Управління користувачами ────────────────────────────────────────────────
 
 @router.get("/users")
-def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def list_users(admin: User = Depends(require_system_perm), db: Session = Depends(get_db)):
     return [
         {
             "id":        u.id,
