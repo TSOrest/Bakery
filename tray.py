@@ -684,10 +684,10 @@ def _build_menu(up: bool) -> pystray.Menu:
 
     if in_demo:
         items.append(pystray.MenuItem("⚡ Вийти з демо режиму",
-                                      lambda i, _: _action_demo_exit(i)))
+                                      lambda i, _: threading.Thread(target=_action_demo_exit, args=(i,), daemon=True).start()))
     else:
         items.append(pystray.MenuItem("▶ Увійти в демо режим",
-                                      lambda i, _: _action_demo_enter(i)))
+                                      lambda i, _: threading.Thread(target=_action_demo_enter, args=(i,), daemon=True).start()))
 
     items += [
         pystray.Menu.SEPARATOR,
@@ -695,11 +695,13 @@ def _build_menu(up: bool) -> pystray.Menu:
     ]
 
     if has_rb:
-        items.append(pystray.MenuItem("Відкатити версію...", action_rollback))
+        items.append(pystray.MenuItem("Відкатити версію...",
+                                      lambda i, _: threading.Thread(target=action_rollback, args=(i,), daemon=True).start()))
 
     items += [
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Переглянути логи",                action_logs),
+        pystray.MenuItem("Переглянути логи",
+                         lambda i, _: threading.Thread(target=action_logs, args=(i,), daemon=True).start()),
         pystray.MenuItem(f"Версія: {current}" if current
                          else "Версія: невідома", None, enabled=False),
         pystray.Menu.SEPARATOR,
