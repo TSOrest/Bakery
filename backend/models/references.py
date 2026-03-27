@@ -28,16 +28,17 @@ class Category(Base):
 class Product(Base):
     __tablename__ = "products"
 
-    id            = Column(Integer, primary_key=True, autoincrement=True)
-    name          = Column(Text, nullable=False)
-    short_name    = Column(Text)
-    weight        = Column(Float)
-    unit_id       = Column(Integer, ForeignKey("units.id"))
-    category_id   = Column(Integer, ForeignKey("categories.id"))
-    cost_per_unit = Column(Float, default=0)
-    is_active     = Column(Integer, default=1)
-    created_at    = Column(Text)
-    initial_stock = Column(Float, default=0)       # початковий залишок для першої звірки
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    name           = Column(Text, nullable=False)
+    short_name     = Column(Text)
+    weight         = Column(Float)
+    unit_id        = Column(Integer, ForeignKey("units.id"))
+    category_id    = Column(Integer, ForeignKey("categories.id"))
+    cost_per_unit  = Column(Float, default=0)
+    purchase_price = Column(Float, default=0)      # ціна закупівлі (для товарів ззовні)
+    is_active      = Column(Integer, default=1)
+    created_at     = Column(Text)
+    initial_stock  = Column(Float, default=0)      # початковий залишок для першої звірки
 
     unit     = relationship("Unit")
     category = relationship("Category")

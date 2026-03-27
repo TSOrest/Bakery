@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS products (
     unit_id        INTEGER REFERENCES units(id),
     category_id    INTEGER REFERENCES categories(id),
     cost_per_unit  REAL    DEFAULT 0,
+    purchase_price REAL    DEFAULT 0,  -- ціна закупівлі (для товарів ззовні)
     is_active      INTEGER DEFAULT 1,
     created_at     TEXT    DEFAULT (datetime('now'))
 );
@@ -280,6 +281,47 @@ CREATE TABLE IF NOT EXISTS other_stock_in (
     purchase_price   REAL,
     notes            TEXT,
     created_at       TEXT    DEFAULT (datetime('now'))
+);
+
+-- Нові таблиці магазину (міграція 012)
+CREATE TABLE IF NOT EXISTS shop_reconciliations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_client_id  INTEGER NOT NULL REFERENCES clients(id),
+    period_from     TEXT    NOT NULL,
+    period_to       TEXT    NOT NULL,
+    cash_expected   REAL    DEFAULT 0,
+    cash_actual     REAL,
+    cash_diff       REAL,
+    notes           TEXT,
+    closed          INTEGER DEFAULT 0,
+    closed_at       TEXT,
+    closed_by       TEXT,
+    created_at      TEXT    DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS shop_reconciliation_lines (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    reconciliation_id INTEGER NOT NULL REFERENCES shop_reconciliations(id) ON DELETE CASCADE,
+    product_id        INTEGER NOT NULL REFERENCES products(id),
+    opening_balance   REAL    DEFAULT 0,
+    received          REAL    DEFAULT 0,
+    entered_balance   REAL,
+    written_off       REAL    DEFAULT 0,
+    calculated_sold   REAL,
+    price             REAL,
+    expected_cash     REAL,
+    UNIQUE(reconciliation_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS shop_receipts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_client_id  INTEGER NOT NULL REFERENCES clients(id),
+    receipt_date    TEXT    NOT NULL,
+    product_id      INTEGER NOT NULL REFERENCES products(id),
+    qty             REAL    NOT NULL,
+    purchase_price  REAL    DEFAULT 0,
+    notes           TEXT,
+    created_at      TEXT    DEFAULT (datetime('now'))
 );
 
 -- -------------------------------------------------------------
