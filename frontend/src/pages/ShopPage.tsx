@@ -78,12 +78,24 @@ export default function ShopPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [sh, sm] = await Promise.all([
-        api.get<ShopClient[]>('/shop/shops'),
-        api.get<ShopSummary[]>(`/shop/summary?date=${workDate}`),
-      ])
+      const sh = await api.get<ShopClient[]>('/shop/shops')
       setShops(sh)
-      setSummaries(sm)
+      // Summary завантажуємо окремо — щоб список магазинів не зникав при помилці
+      try {
+        const sm = await api.get<ShopSummary[]>(`/shop/summary?date=${workDate}`)
+        setSummaries(sm)
+      } catch {
+        // summary failed — показуємо магазини без даних
+        setSummaries(sh.map((s) => ({
+          shop_client_id: s.id,
+          shop_name: s.name,
+          last_reconciliation_id: null,
+          last_reconciliation_from: null,
+          last_reconciliation_to: null,
+          last_closed: 0,
+          products: [],
+        })))
+      }
     } finally {
       setLoading(false)
     }
@@ -101,14 +113,11 @@ export default function ShopPage() {
 
   if (loading) return <p style={{ padding: '1.5rem' }}>Завантаження...</p>
 
-  // suppress unused shops warning — used implicitly via setSummaries length check
-  void shops
-
   return (
     <div style={{ padding: '1.5rem' }}>
       <h2 style={{ marginTop: 0, marginBottom: '1.25rem' }}>Магазин</h2>
 
-      {summaries.length === 0 ? (
+      {shops.length === 0 ? (
         <div style={{ color: '#888', padding: '2rem 0' }}>
           <p>Немає жодного магазину.</p>
           <p style={{ fontSize: '0.85rem' }}>
