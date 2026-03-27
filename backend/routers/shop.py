@@ -68,7 +68,7 @@ def _received_from_receipts(db: Session, shop_client_id: int, date_from: str, da
 
 def _get_shop_price(db: Session, shop_client_id: int, product_id: int, date: str) -> Optional[float]:
     """Ціна виробу для магазину: client_price_overrides → базова ціна."""
-    from backend.models.prices import ClientPriceOverride, Price
+    from backend.models.pricing import ClientPriceOverride, Price
     override = (
         db.query(ClientPriceOverride)
         .filter(
