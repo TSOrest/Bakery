@@ -1,0 +1,167 @@
+"""Сервіс резервного копіювання БД."""
+import json
+import shutil
+import sqlite3
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+
+def _backup_dir(root: Path, custom_dir: str) -> Path:
+    """Повертає папку для бекапів. Якщо custom_dir порожній — використовує root/backups/."""
+    d = Path(custom_dir) if custom_dir.strip() else root / "backups"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def do_backup(
+    db_path: Path,
+    root: Path,
+    custom_dir: str = "",
+    keep_count: int = 7,
+    cloud_paths: Optional[list] = None,
+    app_version: str = "",
+) -> dict:
+    """
+    Робить SQLite online backup → датований файл + sidecar .meta.json.
+    Повертає {name, path, size_kb, app_version, created_at}.
+    """
+    if not db_path.exists():
+        raise FileNotFoundError(f"БД не знайдена: {db_path}")
+
+    backup_dir = _backup_dir(root, custom_dir)
+    ts = time.strftime("%Y-%m-%d_%H-%M")
+    name = f"bakery_{ts}.db"
+    dst = backup_dir / name
+    meta_dst = backup_dir / f"bakery_{ts}.meta.json"
+    created_at = datetime.now().isoformat(timespec="seconds")
+
+    # SQLite online backup API — безпечно при активних з'єднаннях
+    src_con = sqlite3.connect(str(db_path))
+    dst_con = sqlite3.connect(str(dst))
+    with dst_con:
+        src_con.backup(dst_con)
+    dst_con.close()
+    src_con.close()
+
+    # Sidecar метаданих
+    meta = {"app_version": app_version, "created_at": created_at}
+    meta_dst.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+    size_kb = round(dst.stat().st_size / 1024, 1)
+
+    # Копіювання в хмарні папки
+    if cloud_paths:
+        for cp in cloud_paths:
+            cp = cp.strip()
+            if not cp:
+                continue
+            try:
+                cloud_dir = Path(cp)
+                cloud_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(dst, cloud_dir / name)
+                shutil.copy2(meta_dst, cloud_dir / meta_dst.name)
+            except Exception:
+                pass  # Хмарна копія не критична
+
+    # Ротація: видаляти зайві бекапи
+    rotate(backup_dir, keep_count)
+
+    return {"name": name, "path": str(dst), "size_kb": size_kb,
+            "app_version": app_version, "created_at": created_at}
+
+
+def list_backups(root: Path, custom_dir: str = "") -> list:
+    """
+    Повертає список бекапів [{name, size_kb, created_at, app_version}]
+    відсортований від новіших до старіших.
+    """
+    backup_dir = _backup_dir(root, custom_dir)
+    results = []
+    for f in sorted(backup_dir.glob("bakery_*.db"), reverse=True):
+        meta_file = f.with_suffix(".meta.json")
+        app_version = ""
+        created_at = ""
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                app_version = meta.get("app_version", "").lstrip("\ufeff")
+                created_at = meta.get("created_at", "")
+            except Exception:
+                pass
+        if not created_at:
+            # Fallback: з mtime файлу
+            created_at = datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")
+        results.append({
+            "name": f.name,
+            "size_kb": round(f.stat().st_size / 1024, 1),
+            "created_at": created_at,
+            "app_version": app_version,
+        })
+    return results
+
+
+def rotate(backup_dir: Path, keep_count: int) -> int:
+    """
+    Залишає тільки keep_count найновіших бекапів.
+    Видаляє і .db і .meta.json разом.
+    Повертає кількість видалених файлів.
+    """
+    if keep_count <= 0:
+        return 0
+    files = sorted(backup_dir.glob("bakery_*.db"), reverse=True)
+    deleted = 0
+    for old in files[keep_count:]:
+        try:
+            old.unlink()
+            deleted += 1
+        except Exception:
+            pass
+        meta = old.with_suffix(".meta.json")
+        if meta.exists():
+            try:
+                meta.unlink()
+            except Exception:
+                pass
+    return deleted
+
+
+def delete_backup(root: Path, filename: str, custom_dir: str = "") -> bool:
+    """Видаляє бекап по імені файлу (і .db і .meta.json). Повертає True якщо успішно."""
+    backup_dir = _backup_dir(root, custom_dir)
+    db_file = backup_dir / filename
+    if not db_file.exists():
+        return False
+    db_file.unlink()
+    meta = db_file.with_suffix(".meta.json")
+    if meta.exists():
+        meta.unlink()
+    return True
+
+
+def get_backup_meta(root: Path, filename: str, custom_dir: str = "") -> dict:
+    """Повертає метадані бекапу {app_version, created_at} або {}."""
+    backup_dir = _backup_dir(root, custom_dir)
+    meta_file = (backup_dir / filename).with_suffix(".meta.json")
+    if not meta_file.exists():
+        return {}
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if "app_version" in meta:
+            meta["app_version"] = meta["app_version"].lstrip("\ufeff")
+        return meta
+    except Exception:
+        return {}
+
+
+def restore_backup(root: Path, db_path: Path, filename: str, custom_dir: str = "") -> None:
+    """
+    Відновлює бекап: копіює файл бекапу на місце db_path.
+    УВАГА: викликати тільки коли сервер зупинений.
+    """
+    backup_dir = _backup_dir(root, custom_dir)
+    src = backup_dir / filename
+    if not src.exists():
+        raise FileNotFoundError(f"Бекап не знайдений: {src}")
+    shutil.copy2(src, db_path)

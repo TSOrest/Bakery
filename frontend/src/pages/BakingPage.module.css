@@ -1,0 +1,488 @@
+/* Вкладка Випічка */
+
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1rem 1.5rem;
+  box-sizing: border-box;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #1a3a5c;
+}
+
+.empty {
+  color: #666;
+  font-size: 0.95rem;
+  margin-top: 1rem;
+}
+
+.printNotice {
+  margin: 0.5rem 0;
+  padding: 0.6rem 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 0.95rem;
+}
+
+/* ─── Дві колонки ────────────────────────────────────────── */
+
+.twoCol {
+  display: flex;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mainCol {
+  flex: 0 0 50%;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.sideCol {
+  flex: 0 0 50%;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.sideEmpty {
+  margin-top: 2.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+  color: #bbb;
+  font-size: 0.85rem;
+  border: 1px dashed #e0e0e0;
+  border-radius: 8px;
+}
+
+/* ─── Секції ──────────────────────────────────────────────── */
+
+.section { margin-bottom: 2rem; }
+
+.sectionTitle {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+  color: #1a3a5c;
+  border-bottom: 2px solid #1a3a5c;
+  padding-bottom: 0.25rem;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0 0 0.75rem;
+}
+
+/* ─── Групи по типах ──────────────────────────────────────── */
+
+.typeBlock { margin-bottom: 1rem; }
+
+.typeLabel {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #999;
+  margin-bottom: 0.25rem;
+}
+
+/* ─── Таблиця завдань ─────────────────────────────────────── */
+
+.tableWrap { overflow-x: auto; }
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9rem;
+}
+.table thead tr { background: #e8eef5; }
+
+.thName {
+  padding: 0.4rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  min-width: 160px;
+}
+.thNum {
+  padding: 0.4rem 0.6rem;
+  text-align: center;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  min-width: 90px;
+}
+
+.row:hover { background: #fafcff; }
+
+/* Рядок виробу без замовлень і без спеченого */
+.emptyRow { opacity: 0.45; }
+.emptyRow:hover { opacity: 0.75; background: #fafcff; }
+
+/* Лічильник прихованих рядків біля заголовку категорії */
+.hiddenCount { font-weight: 400; font-size: 0.78rem; color: #aaa; text-transform: none; letter-spacing: 0; }
+
+.tdName {
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid #e8e8e8;
+}
+.tdNum {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid #e8e8e8;
+  text-align: center;
+}
+
+.recommended { font-weight: 700; color: #1a3a5c; }
+
+/* Відхилення */
+.surplusCell  { color: #27ae60; font-weight: 600; }
+.shortageCell { color: #e74c3c; font-weight: 600; }
+.exactCell    { color: #27ae60; }
+
+/* Корекція у клітинці Відхилення */
+.diffCell { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+.thDiff {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  min-width: 180px;
+}
+.tdDiff { padding: 0.25rem 0.4rem; border-bottom: 1px solid #e8e8e8; text-align: left; min-width: 180px; }
+.diffRaw  { font-size: 0.72rem; color: #999; font-weight: 400; }
+.diffBadge {
+  font-size: 0.72rem; color: #6a8aac; font-weight: 500;
+  white-space: nowrap;
+}
+.diffEffective { font-weight: 700; line-height: 1.1; }
+.diffEffectiveOk      { color: #27ae60; }
+.diffEffectiveSurplus { color: #27ae60; }
+.diffEffectiveShortage{ color: #e74c3c; }
+.diffEffectiveWarn    { color: #e67e22; }  /* over-allocated або over-reduced */
+
+/* Попередження over-allocation / over-reduction в панелях */
+.overWarning {
+  background: #fff3e0;
+  border: 1px solid #e67e22;
+  border-radius: 5px;
+  padding: 0.45rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #b45309;
+}
+
+/* Інлайн редагування у клітинці таблиці */
+.inlineEditCell {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: center;
+}
+
+/* Роздільник між секціями надлишку / нестачі в одній панелі */
+.sectionDivider {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #888;
+  padding: 0.35rem 0.75rem;
+  background: #f5f5f5;
+  border-top: 1px solid #e8e8e8;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+/* Таблиця нестачі задимлена коли є конфлікт */
+.dimmed { opacity: 0.45; pointer-events: none; }
+
+/* Нетто підсумок внизу панелі (конфлікт) */
+.netSummary {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  background: #f0f0f0;
+  border-top: 1px solid #ddd;
+  color: #555;
+}
+
+.footerRow { background: #f5f8fb; }
+.footerRow td {
+  padding: 0.35rem 0.4rem;
+  border-top: 2px solid #c5d8ed;
+}
+
+/* ─── Поле "Спечено" ──────────────────────────────────────── */
+
+.bakedInput {
+  width: 72px;
+  text-align: center;
+  padding: 0.25rem 0.2rem;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.bakedInput:focus {
+  border-color: #1a3a5c;
+  background: #f0f5ff;
+}
+
+/* ─── Панель надлишків ────────────────────────────────────── */
+
+/* Повністю розподілено — зелений тон */
+.surplusPanel {
+  border: 1px solid #5a9e52;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.surplusPanelHeader {
+  background: linear-gradient(to bottom, #c8e6c9, #dff0dc);
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Частково розподілено — жовтий тон */
+.surplusPanelPartial {
+  border: 1px solid #c9a000;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.surplusPanelHeaderPartial {
+  background: linear-gradient(to bottom, #fff0a0, #fffbe6);
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.surplusPanelName { font-weight: 700; font-size: 0.95rem; }
+
+.headerDiff  { font-size: 0.85rem; font-weight: 700; margin-left: 0.15rem; }
+.headerSep   { color: #aaa; margin: 0 0.3rem; }
+.headerOk    { font-size: 0.85rem; color: #2e7d32; font-weight: 600; }
+.headerMuted { font-size: 0.85rem; color: #666; }
+.headerWarn  { font-size: 0.85rem; color: #c62828; font-weight: 600; }
+
+/* ─── Панель нестачі ──────────────────────────────────────── */
+
+.shortagePanel {
+  border: 1px solid #d9534f;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.shortagePanelHeader {
+  background: linear-gradient(to bottom, #f5c6c6, #fde8e8);
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.shortageTag {
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.shortageReduced {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+/* ─── Таблиця рядків (надлишки / нестача) ────────────────── */
+
+.linesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.linesTable th {
+  padding: 0.3rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  font-size: 0.8rem;
+}
+.linesTable td {
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+.lineQty   { text-align: center; }
+.lineNotes { color: #888; font-size: 0.82rem; }
+.lineType  { white-space: nowrap; }
+.linePrice { text-align: right; color: #2a5080; font-size: 0.82rem; white-space: nowrap; }
+
+.typeExchange {
+  display: inline-block;
+  background: #e0f0ff;
+  color: #1a5090;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.78rem;
+  font-style: italic;
+}
+.typeCustom {
+  display: inline-block;
+  background: #fff3cd;
+  color: #7a5500;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+/* ─── Форма додавання рядка ───────────────────────────────── */
+
+.addLineForm {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: #fafafa;
+  border-top: 1px dashed #ddd;
+  flex-wrap: wrap;
+}
+
+.recipientSelect {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  min-width: 170px;
+}
+
+.addQtyInput {
+  width: 64px;
+  text-align: center;
+  padding: 0.3rem 0.2rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.88rem;
+  outline: none;
+}
+.addQtyInput:focus { border-color: #1a3a5c; }
+
+.addNotesInput {
+  flex: 1;
+  min-width: 100px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  outline: none;
+}
+.addNotesInput:focus { border-color: #1a3a5c; }
+
+/* ─── Підсумок надлишку ───────────────────────────────────── */
+
+.surplusSummary {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.88rem;
+  background: #f9f9f9;
+  border-top: 1px solid #e8e8e8;
+}
+
+.ok          { color: #27ae60; font-weight: 600; }
+.toShopHint  { color: #888; }
+.unallocated { color: #e74c3c; font-weight: 700; }
+
+/* ─── Кнопки ──────────────────────────────────────────────── */
+
+.btnGenerate {
+  padding: 0.42rem 1rem;
+  background: #1a3a5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.btnGenerate:hover { background: #142d48; }
+.btnGenerate:disabled { opacity: 0.5; cursor: default; }
+
+.btnToggleRec {
+  padding: 0.4rem 0.8rem;
+  background: #fff;
+  color: #1a3a5c;
+  border: 1px solid #1a3a5c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.btnToggleRec:hover { background: #e8eef5; }
+
+.btnPrint {
+  padding: 0.4rem 0.9rem;
+  background: #5c7a9c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.btnPrint:hover { background: #486282; }
+
+.btnAdd {
+  padding: 0.3rem 0.75rem;
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.btnAdd:hover { background: #219a52; }
+.btnAdd:disabled { opacity: 0.5; cursor: default; }
+
+.btnDelete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  opacity: 0.5;
+  padding: 0.1rem 0.3rem;
+}
+.btnDelete:hover { opacity: 1; }
+
+.btnApply {
+  padding: 0.3rem 0.8rem;
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btnApply:hover { background: #c0392b; }
+.btnApply:disabled { opacity: 0.5; cursor: default; }

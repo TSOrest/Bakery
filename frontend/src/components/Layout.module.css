@@ -1,0 +1,115 @@
+.root {
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: system-ui, sans-serif;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1.5rem;
+  background: #1a3a5c;
+  color: #fff;
+  flex-wrap: wrap;
+}
+
+.logo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-right: 0.5rem;
+  white-space: nowrap;
+}
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.tab {
+  padding: 0.4rem 0.9rem;
+  border-radius: 4px;
+  color: #c8d8ea;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: background 0.15s;
+}
+
+.tab:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+}
+
+.tab.active {
+  background: rgba(255,255,255,0.22);
+  color: #fff;
+  font-weight: 600;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.datePicker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.25);
+  padding-left: 1rem;
+}
+
+.userName {
+  font-size: 0.88rem;
+  color: #e8f0f8;
+  font-weight: 500;
+}
+
+.userRole {
+  font-size: 0.78rem;
+  color: #9ab5cf;
+  background: rgba(255,255,255,0.10);
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+
+.logoutBtn {
+  background: none;
+  border: none;
+  color: #9ab5cf;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+  line-height: 1;
+}
+.logoutBtn:hover { color: #fff; background: rgba(255,255,255,0.12); }
+
+.datePicker input {
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  border: none;
+  font-size: 0.9rem;
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: #f5f7fa;
+}

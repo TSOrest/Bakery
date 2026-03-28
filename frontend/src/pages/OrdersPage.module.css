@@ -1,0 +1,634 @@
+/* Вкладка Замовлення */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ─── Toolbar ────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #d0dcea;
+  background: #fff;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #1a3a5c;
+  white-space: nowrap;
+}
+
+.bakingBtns {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.btnBaking {
+  padding: 0.32rem 0.8rem;
+  background: #f5f8fb;
+  color: #1a3a5c;
+  border: 1px solid #aac0d8;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.83rem;
+  white-space: nowrap;
+}
+.btnBaking:hover { background: #e0ebf5; }
+
+/* ─── Dropdown друку завдань ─────────────────────────────────── */
+.printDropdown {
+  position: relative;
+}
+.printDropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  background: #fff;
+  border: 1px solid #aac0d8;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  min-width: 160px;
+  overflow: hidden;
+}
+.printDropdownItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.42rem 0.85rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #1a3a5c;
+  white-space: nowrap;
+}
+.printDropdownItem:hover { background: #e8f0f9; }
+
+/* ─── Панель копіювання ──────────────────────────────────────── */
+
+.copyPanel {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #f0f5fa;
+  border-bottom: 1px solid #c5d8ed;
+  padding: 0.45rem 1rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+
+.dateInput {
+  padding: 0.28rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.88rem;
+}
+
+.copyResult { color: #1a5c3a; font-weight: 600; }
+
+/* ─── Основний макет ─────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ─── Ліва панель ────────────────────────────────────────────── */
+
+.sidebar {
+  width: 230px;
+  min-width: 190px;
+  border-right: 1px solid #d0dcea;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #f8fafc;
+}
+
+/* Фільтр маршрутів */
+
+.routeFilter {
+  border-bottom: 2px solid #c5d8ed;
+  flex-shrink: 0;
+}
+
+.routeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.42rem 0.8rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #e0e8f0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.86rem;
+  color: #2a4a6c;
+  transition: background 0.1s;
+}
+.routeBtn:hover { background: #eaf0f8; }
+
+.routeBtnActive {
+  background: #1a3a5c !important;
+  color: #fff;
+}
+.routeBtnActive .routeBtnBadge { color: #a0c0e0; }
+
+.routeBtnName  { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.routeBtnBadge { font-size: 0.75rem; color: #7a9ab8; margin-left: 0.4rem; flex-shrink: 0; }
+
+/* Список клієнтів */
+
+.clientListWrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.clientListHeader {
+  display: flex;
+  align-items: center;
+  padding: 0.22rem 0.5rem 0.22rem 0.8rem;
+  background: #e8eef5;
+  border-bottom: 1px solid #d0dcea;
+  font-size: 0.76rem;
+  color: #5580a0;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.chName { flex: 1; }
+.chNum  { width: 28px; text-align: center; }
+.chBtn  { width: 26px; }
+
+.clientList {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.clientItem {
+  display: flex;
+  align-items: center;
+  padding: 0.28rem 0.4rem 0.28rem 0.8rem;
+  gap: 0.2rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #2a4a6c;
+  border-bottom: 1px solid #f0f4f8;
+  transition: background 0.08s;
+}
+.clientItem:hover { background: #eaf0f8; }
+
+.clientSel  { background: #d0e4f5 !important; font-weight: 600; color: #0a2a4c; }
+.clientHas  .ciName { color: #0a2040; }
+.clientShop { background: #fffbe8; border-left: 3px solid #f0c040; }
+
+.ciName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.84rem; }
+
+.ciNum {
+  width: 28px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: #9ab8d0;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* Підсвічування клітинок Хл/Бул */
+.cellYellow {
+  background: #fff3b0;
+  color: #7a5c00 !important;
+  font-weight: 700;
+}
+.cellRed {
+  background: #ffd0d0;
+  color: #8a0000 !important;
+  font-weight: 700;
+}
+
+.ciAddBtn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: #e8f0f8;
+  color: #1a3a5c;
+  border: 1px solid #b0c8e0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+.ciAddBtn:hover { background: #1a3a5c; color: #fff; border-color: #1a3a5c; }
+
+/* ─── Таблиця замовлень (права панель) ───────────────────────── */
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.ordersTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.88rem;
+}
+
+.ordersTable thead tr { background: #e8eef5; position: sticky; top: 0; z-index: 1; }
+
+.thRoute, .thClient {
+  padding: 0.38rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  white-space: nowrap;
+}
+.thProduct {
+  padding: 0.38rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+}
+.thNum {
+  padding: 0.38rem 0.5rem;
+  text-align: right;
+  font-weight: 600;
+  border-bottom: 2px solid #c5d8ed;
+  white-space: nowrap;
+  width: 70px;
+}
+
+.orderRow { transition: background 0.08s; }
+.orderRow:hover { background: #f2f7fc; }
+.orderRowSel { background: #daeaf8 !important; }
+
+/* Exchange / discount рядки */
+.orderRowExchange { background: #f0f8ff; }
+.orderRowExchange:hover { background: #e6f2ff !important; }
+.orderRowExchange td { color: #2a6aac; font-size: 0.87rem; }
+.orderRowDiscount { background: #fdf8ee; }
+.orderRowDiscount:hover { background: #f8f0d8 !important; }
+.orderRowDiscount td { color: #7a5500; font-size: 0.87rem; }
+.exchangeTag { font-style: italic; opacity: 0.75; }
+.discountTag { font-style: italic; opacity: 0.75; }
+
+/* Рядки з origin_id (надлишок / переміщення) */
+.orderRowSurplus { background: #f2fbf5; }
+.orderRowSurplus:hover { background: #e6f7ee !important; }
+.orderRowSurplus td { color: #2a6a4a; font-size: 0.87rem; }
+.orderRowMoved { background: #faf5fb; }
+.orderRowMoved:hover { background: #f3eaf8 !important; }
+.orderRowMoved td { color: #5a3a7a; font-size: 0.87rem; }
+
+.srcSurplus {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  color: #2a7a4a;
+  cursor: default;
+}
+.srcMoved {
+  font-size: 0.9rem;
+  opacity: 0.7;
+  color: #6a3a9a;
+  cursor: default;
+}
+
+/* Дерево дочірніх рядків (переміщення / повернення) */
+.expandBtn {
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0;
+  color: #7090b0;
+  line-height: 1;
+}
+.expandBtn:hover { color: #1a3a5c; }
+
+.adjQty { font-weight: 600; color: #1a3a5c; }
+.origQty { font-size: 0.75rem; color: #9ab8d0; margin-left: 0.25rem; }
+
+.childRow { background: #f7fbff; }
+.childRow:hover { background: #eef5fc !important; }
+.childRow td { border-bottom: 1px solid #eaf0f8; font-size: 0.83rem; }
+.childLabel { padding: 0.18rem 0.6rem 0.18rem 2rem; color: #4a6a8a; font-style: italic; }
+.childQty   { padding: 0.18rem 0.6rem; text-align: right; color: #c0392b; font-weight: 600; white-space: nowrap; }
+.childNotes { padding: 0.18rem 0.6rem; color: #8fa8c0; }
+
+.tdRoute {
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  color: #7090b0;
+  font-size: 0.82rem;
+}
+.tdClient {
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  color: #1a3a5c;
+  font-size: 0.85rem;
+}
+.tdProduct {
+  position: relative;
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #eee;
+  font-size: 0.87rem;
+  font-weight: 600;
+}
+.tdNum {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.85rem;
+  color: #1a3a5c;
+}
+.tdPrice {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.82rem;
+  color: #5580a0;
+}
+.tdSum {
+  padding: 0.28rem 0.6rem;
+  border-bottom: 1px solid #eee;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1a3a5c;
+}
+
+.thSrc {
+  width: 2rem;
+  padding: 0.28rem 0.3rem;
+  border-bottom: 2px solid #dde3ea;
+}
+
+.tdSrc {
+  padding: 0.28rem 0.3rem;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.emptyMsg {
+  padding: 2rem;
+  text-align: center;
+  color: #8fa8c0;
+  font-size: 0.95rem;
+}
+
+/* ─── Кнопки ─────────────────────────────────────────────────── */
+
+.btnCopy {
+  padding: 0.35rem 0.9rem;
+  background: #fff;
+  color: #1a3a5c;
+  border: 1px solid #1a3a5c;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.btnCopy:hover { background: #e8eef5; }
+
+.btnPrimary {
+  padding: 0.32rem 0.9rem;
+  background: #1a3a5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.btnPrimary:hover { background: #142d48; }
+.btnPrimary:disabled { opacity: 0.5; cursor: default; }
+
+.btnSecondary {
+  padding: 0.32rem 0.8rem;
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.btnSecondary:hover { background: #f5f5f5; }
+
+/* ─── Bot pending panel ──────────────────────────────────────── */
+
+.botPendingPanel {
+  border-bottom: 2px solid #f5a623;
+  background: #fffbf0;
+  flex-shrink: 0;
+}
+
+.botPendingTitle {
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #7a4c00;
+  background: #fff3cd;
+  border-bottom: 1px solid #ffc107;
+}
+
+.botPendingTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.botPendingTable thead tr { background: #fef5d8; }
+.botPendingTable th {
+  padding: 0.28rem 0.7rem;
+  text-align: left;
+  font-weight: 600;
+  color: #7a4c00;
+  border-bottom: 1px solid #ffc107;
+}
+
+.botPendingRow { transition: background 0.08s; }
+.botPendingRow:hover { background: #fef9e7; }
+
+.botTd {
+  padding: 0.28rem 0.7rem;
+  border-bottom: 1px solid #fde68a;
+  vertical-align: middle;
+}
+
+.botActions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.botBtnConfirm {
+  width: 2rem; height: 2rem;
+  background: #c3e6cb;
+  color: #155724;
+  border: 1px solid #a3d4ad;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.botBtnConfirm:hover { background: #a3d4ad; }
+
+.botBtnReject {
+  width: 2rem; height: 2rem;
+  background: #f5c6cb;
+  color: #721c24;
+  border: 1px solid #e8a0a8;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.botBtnReject:hover { background: #e8a0a8; }
+
+.botBtnModify {
+  width: 2rem; height: 2rem;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.botBtnModify:hover { background: #ffc107; }
+
+.botExpandRow {
+  padding: 0.35rem 0.7rem;
+  background: #fef9e7;
+  border-bottom: 1px solid #fde68a;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+}
+
+.botInput {
+  padding: 0.22rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.83rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.botInputQty {
+  padding: 0.22rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.83rem;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.botBtnRejectWide {
+  padding: 0.22rem 0.7rem;
+  background: #f5c6cb;
+  color: #721c24;
+  border: 1px solid #e8a0a8;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.83rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.botBtnRejectWide:hover { background: #e8a0a8; }
+
+.botBtnModifyWide {
+  padding: 0.22rem 0.7rem;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.83rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.botBtnModifyWide:hover { background: #ffc107; }
+
+/* Бот-замовлення: очікує підтвердження — жовтий фон */
+.orderRowPending { background: #fffbe6 !important; }
+.orderRowPending:hover { background: #fff3c0 !important; }
+.orderRowPending td { color: #7a5c00; }
+
+/* Бот-замовлення: відхилено — сірий текст, disabled-вигляд */
+.orderRowRejected { background: #f8f8f8 !important; }
+.orderRowRejected:hover { background: #f2f2f2 !important; }
+.orderRowRejected td { color: #ccc !important; font-size: 0.82rem; }
+
+/* ─── Bot order status ───────────────────────────────────────────────────── */
+
+.botStatusOn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1a7a3a;
+  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  background: #d4edda;
+  border: 1px solid #a3d4b0;
+  border-radius: 4px;
+}
+
+.botStatusOff {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #8a1010;
+  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  background: #fde8e8;
+  border: 1px solid #f5aaaa;
+  border-radius: 4px;
+}
+
+.btnBotStop {
+  color: #8a1010 !important;
+  border-color: #f5aaaa !important;
+  background: #fde8e8 !important;
+}
+.btnBotStop:hover { background: #f5aaaa !important; }
+
+.btnBotResume {
+  color: #1a7a3a !important;
+  border-color: #a3d4b0 !important;
+  background: #d4edda !important;
+}
+.btnBotResume:hover { background: #a3d4b0 !important; }
+
+.ciLocked {
+  background: #f0f4f8 !important;
+  color: #888 !important;
+  border-color: #ccc !important;
+  cursor: default;
+  font-size: 0.7rem;
+}
