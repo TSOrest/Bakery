@@ -81,7 +81,7 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
   const keys = ['7','8','9','←', '4','5','6','C', '1','2','3','', '0','.','00','']
 
   return (
-    <div className={css.overlay} onPointerDown={e => { if (e.target === e.currentTarget) onCancel() }}>
+    <div className={css.overlay} onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
       <div className={css.payModal}>
         <div className={css.payModalTitle}>До оплати</div>
         <div className={css.payModalTotal}>{fmt(total)} грн</div>
@@ -99,7 +99,7 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
             <button
               key={i}
               className={`${css.numKey} ${(k === '←' || k === 'C') ? css.numKeyAction : ''}`}
-              onPointerDown={() => pressKey(k)}
+              onClick={() => pressKey(k)}
             >
               {k}
             </button>
@@ -111,11 +111,11 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
         </div>
 
         <div className={css.payModalButtons}>
-          <button className={css.cancelBtn} onPointerDown={onCancel}>Назад</button>
+          <button className={css.cancelBtn} onClick={onCancel}>Назад</button>
           <button
             className={css.confirmBtn}
             disabled={cash < total}
-            onPointerDown={() => cash >= total && onConfirm(cash)}
+            onClick={() => cash >= total && onConfirm(cash)}
           >
             ПІДТВЕРДИТИ
           </button>
@@ -128,7 +128,7 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PosPage() {
-  const { user, permissions, logout } = useAuth()
+  const { user, permissions, logout, loading: authLoading } = useAuth()
   const navigate = useNavigate()
 
   const [shops, setShops]           = useState<ShopClient[]>([])
@@ -145,14 +145,18 @@ export default function PosPage() {
 
   const today = todayStr()
 
-  // Перевірка доступу
+  // Перевірка доступу (чекаємо поки AuthContext завершить відновлення сесії)
   useEffect(() => {
+    if (authLoading) return
     if (!user) { navigate('/'); return }
+    // seller: маршрут захищений в AppRoutes (тільки /pos доступний), перевірка тут зайва
+    // і спричиняє нескінченну петлю navigate('/') → AppRoutes redirect → /pos → repeat
+    if (user.role === 'seller') return
     const perms: string[] = (permissions as Record<string, string[]>)[user.role] ?? []
     if (!perms.includes('pos') && user.role !== 'admin') {
       navigate('/')
     }
-  }, [user, permissions, navigate])
+  }, [authLoading, user, permissions, navigate])
 
   // Відновлення вибраного магазину
   useEffect(() => {
@@ -170,9 +174,9 @@ export default function PosPage() {
 
   // Завантаження магазинів
   useEffect(() => {
-    api.get<{ id: number; full_name: string; short_name: string | null }[]>('/shop/shops')
+    api.get<{ id: number; name: string; short_name: string | null }[]>('/shop/shops')
       .then(data => {
-        const list = data.map(s => ({ id: s.id, name: s.full_name, short_name: s.short_name ?? undefined }))
+        const list = data.map(s => ({ id: s.id, name: s.name, short_name: s.short_name ?? undefined }))
         setShops(list)
         if (list.length === 1) {
           setShopId(list[0].id)
@@ -190,7 +194,7 @@ export default function PosPage() {
     if (!shopId) return
     api.get<PosProduct[]>(`/shop/pos/products?shop_client_id=${shopId}&date=${today}`)
       .then(data => { setProducts(data); setLoading(false) })
-      .catch(console.error)
+      .catch(e => { console.error(e); setLoading(false) })
   }, [shopId, today])
 
   useEffect(() => { setLoading(true); loadProducts() }, [loadProducts])
@@ -319,7 +323,7 @@ export default function PosPage() {
         )}
         <span className={css.headerDate}>{new Date().toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })}</span>
         <span className={css.headerSeller}>👤 {user.full_name || user.username}</span>
-        <button className={css.headerLogout} onPointerDown={async () => { await logout(); navigate('/') }}>
+        <button className={css.headerLogout} onClick={async () => { await logout(); navigate('/') }}>
           Вийти
         </button>
       </header>
@@ -336,7 +340,7 @@ export default function PosPage() {
               const isOpen = !collapsed.has(group.name)
               return (
                 <div key={group.name} className={css.group}>
-                  <button className={css.groupHeader} onPointerDown={() => toggleGroup(group.name)}>
+                  <button className={css.groupHeader} onClick={() => toggleGroup(group.name)}>
                     <span className={`${css.groupArrow} ${isOpen ? css.groupArrowOpen : css.groupArrowClosed}`}>▼</span>
                     <span className={css.groupName}>{group.name}</span>
                     <span className={css.groupCount}>{group.products.length} поз.</span>
@@ -355,7 +359,7 @@ export default function PosPage() {
                               inCart ? css.productCardInCart : '',
                               isFlash ? css.productCardFlash : '',
                             ].join(' ')}
-                            onPointerDown={() => addToCart(prod)}
+                            onClick={() => addToCart(prod)}
                           >
                             {inCart && <span className={css.cartBadge}>{inCart.qty}</span>}
                             <span className={css.productName}>{prod.short_name || prod.name}</span>
@@ -386,12 +390,12 @@ export default function PosPage() {
                 <div key={item.product_id} className={css.cartItem}>
                   <span className={css.cartItemName}>{item.name}</span>
                   <div className={css.cartQtyControls}>
-                    <button className={css.qtyBtn} onPointerDown={() => changeQty(item.product_id, -1)}>−</button>
+                    <button className={css.qtyBtn} onClick={() => changeQty(item.product_id, -1)}>−</button>
                     <span className={css.qtyValue}>{item.qty}</span>
-                    <button className={css.qtyBtn} onPointerDown={() => changeQty(item.product_id, +1)}>+</button>
+                    <button className={css.qtyBtn} onClick={() => changeQty(item.product_id, +1)}>+</button>
                   </div>
                   <span className={css.cartItemAmount}>{fmt(item.price * item.qty)}</span>
-                  <button className={css.removeBtn} onPointerDown={() => removeFromCart(item.product_id)}>×</button>
+                  <button className={css.removeBtn} onClick={() => removeFromCart(item.product_id)}>×</button>
                 </div>
               ))
             )}
@@ -410,12 +414,12 @@ export default function PosPage() {
             <button
               className={css.payBtn}
               disabled={cart.length === 0}
-              onPointerDown={() => cart.length > 0 && setShowPay(true)}
+              onClick={() => cart.length > 0 && setShowPay(true)}
             >
               ОПЛАТА
             </button>
             {cart.length > 0 && (
-              <button className={css.clearBtn} onPointerDown={() => setCart([])}>
+              <button className={css.clearBtn} onClick={() => setCart([])}>
                 Очистити кошик
               </button>
             )}
