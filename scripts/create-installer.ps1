@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Генерує дистрибутивний Bakery-Setup.bat з вбудованим OAuth App client_id.
 
@@ -80,7 +80,7 @@ exit /b
 '@
 
 # ── Записуємо фінальний файл ─────────────────────────────────────────────────
-$finalContent = $batHeader + $ps1Content
+$finalContent = $batHeader + "`r`n" + $ps1Content
 [IO.File]::WriteAllText($out, $finalContent, [Text.Encoding]::UTF8)
 
 Write-Host ''
