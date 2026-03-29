@@ -1,14 +1,17 @@
 """Хмарні провайдери для резервного копіювання.
 
-Усі три провайдери реалізовані через прямі HTTP-запити (requests),
-без зовнішніх SDK — щоб мінімізувати залежності.
+Credentials реєструються розробником ОДИН РАЗ і вбудовані в застосунок.
+Кінцевий користувач просто натискає "Підключити" і авторизується у своєму акаунті.
 
-Необхідна одноразова реєстрація OAuth-застосунку у кожного провайдера:
-  Google Drive:  https://console.cloud.google.com/ → OAuth 2.0 Client ID (тип: Web)
-  OneDrive:      https://portal.azure.com/ → App registrations (Public client)
-  Dropbox:       https://www.dropbox.com/developers/apps → App Console
+Щоб зареєструвати OAuth-застосунок (для розробника):
+  Google Drive:  console.cloud.google.com → APIs & Services → Credentials → OAuth 2.0 Client ID
+                 Тип: Web application. Redirect URI: http://localhost:8000/api/v1/backup/cloud/callback/google
+  OneDrive:      portal.azure.com → App registrations → New registration
+                 Platform: Web. Redirect URI: http://localhost:8000/api/v1/backup/cloud/callback/onedrive
+  Dropbox:       dropbox.com/developers/apps → Create app → Full Dropbox access
+                 Redirect URI: http://localhost:8000/api/v1/backup/cloud/callback/dropbox
 
-Redirect URI для всіх:  http://localhost:8000/api/v1/backup/cloud/callback/<provider>
+Заповни значення нижче після реєстрації.
 """
 
 import json
@@ -18,6 +21,17 @@ from pathlib import Path
 from typing import Optional
 
 import requests as rq
+
+# ─── Вбудовані credentials (заповнює розробник при деплої) ───────────────────
+# Кінцевий користувач ці значення ніколи не бачить і не вводить.
+
+DEFAULT_GDRIVE_CLIENT_ID     = ""   # TODO: замінити після реєстрації в Google Cloud Console
+DEFAULT_GDRIVE_CLIENT_SECRET = ""   # TODO
+
+DEFAULT_ONEDRIVE_CLIENT_ID   = ""   # TODO: замінити після реєстрації в Azure Portal
+
+DEFAULT_DROPBOX_APP_KEY      = ""   # TODO: замінити після реєстрації в Dropbox Developer Console
+DEFAULT_DROPBOX_APP_SECRET   = ""   # TODO
 
 REDIRECT_BASE = "http://localhost:8000/api/v1/backup/cloud/callback"
 

@@ -3512,77 +3512,36 @@ function BackupTab() {
   } | null>(null)
 
   const BACKUP_SETTINGS = [
-    { key: 'backup_enabled',    label: 'Автобекап (0=вимк, 1=увімк)',        type: 'text' },
-    { key: 'backup_time',       label: 'Час бекапу (HH:MM)',                  type: 'text' },
-    { key: 'backup_keep_count', label: 'Зберігати бекапів',                   type: 'text' },
-    { key: 'backup_local_dir',  label: 'Локальна папка (порожньо = backups/)', type: 'text' },
-    { key: 'cloud_folder_name', label: 'Папка в хмарі (default: bakery-backups)', type: 'text' },
+    { key: 'backup_enabled',      label: 'Автобекап (0=вимк, 1=увімк)',         type: 'text' },
+    { key: 'backup_time',         label: 'Час бекапу (HH:MM)',                   type: 'text' },
+    { key: 'backup_keep_count',   label: 'Зберігати бекапів',                    type: 'text' },
+    { key: 'backup_local_dir',    label: 'Локальна папка (порожньо = backups/)', type: 'text' },
+    { key: 'backup_cloud_1_path', label: 'Google Drive папка',                   type: 'text' },
+    { key: 'backup_cloud_2_path', label: 'OneDrive папка',                       type: 'text' },
+    { key: 'backup_cloud_3_path', label: 'Dropbox папка',                        type: 'text' },
   ]
 
-  type CloudProvider = 'google' | 'onedrive' | 'dropbox'
-  type CloudFile = { id: string; name: string; size_kb: number; modified: string }
-  const [cloudStatus, setCloudStatus] = useState<Record<CloudProvider, boolean>>({ google: false, onedrive: false, dropbox: false })
-  const [cloudFilesModal, setCloudFilesModal] = useState<{ provider: CloudProvider; files: CloudFile[] } | null>(null)
-  const [cloudFilesLoading, setCloudFilesLoading] = useState(false)
+  type DetectedFolders = { google: string | null; onedrive: string | null; dropbox: string | null }
+  const [detected, setDetected] = useState<DetectedFolders>({ google: null, onedrive: null, dropbox: null })
+
   const loadAll = async () => {
     try {
-      const [cfg, bkps, demo, cs] = await Promise.all([
+      const [cfg, bkps, demo, det] = await Promise.all([
         api.get<Record<string, { value: string }>>('/settings/'),
         api.get<BackupMeta[]>('/backup/list'),
         api.get<DemoStatus>('/backup/demo/status'),
-        api.get<Record<CloudProvider, boolean>>('/backup/cloud/status'),
+        api.get<DetectedFolders>('/backup/cloud/detect'),
       ])
       const s: Record<string, string> = {}
       BACKUP_SETTINGS.forEach(({ key }) => { s[key] = cfg[key]?.value ?? '' })
       setForm(s)
       setBackups(bkps)
       setDemoStatus(demo)
-      setCloudStatus(cs)
+      setDetected(det)
     } catch { /* ignore */ }
   }
 
-  useEffect(() => {
-    loadAll()
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type === 'cloud_auth_success') loadAll()
-    }
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, []) // eslint-disable-line
-
-  const handleCloudConnect = async (provider: CloudProvider) => {
-    try {
-      const { auth_url } = await api.get<{ auth_url: string }>(`/backup/cloud/${provider}/connect`)
-      window.open(auth_url, '_blank', 'width=600,height=700')
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  const handleCloudDisconnect = async (provider: CloudProvider) => {
-    if (!confirm(`Відключити ${provider === 'google' ? 'Google Drive' : provider === 'onedrive' ? 'OneDrive' : 'Dropbox'}?`)) return
-    await api.delete(`/backup/cloud/${provider}`)
-    setCloudStatus(s => ({ ...s, [provider]: false }))
-  }
-
-  const handleCloudListFiles = async (provider: CloudProvider) => {
-    setCloudFilesLoading(true)
-    try {
-      const files = await api.get<CloudFile[]>(`/backup/cloud/${provider}/list`)
-      setCloudFilesModal({ provider, files })
-    } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : String(e))
-    } finally { setCloudFilesLoading(false) }
-  }
-
-  const handleCloudDownload = (provider: CloudProvider, file: CloudFile) => {
-    const a = document.createElement('a')
-    a.href = `/api/v1/backup/cloud/${provider}/download/${encodeURIComponent(file.id)}`
-    a.download = file.name
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
+  useEffect(() => { loadAll() }, []) // eslint-disable-line
 
   const handleSaveSettings = async (e: FormEvent) => {
     e.preventDefault()
@@ -3741,83 +3700,63 @@ function BackupTab() {
         </form>
       </div>
 
-      {/* ── 2. Хмарні провайдери ── */}
+      {/* ── 2. Хмарна синхронізація через sync-папки ── */}
       <div style={sectionS}>
         <h3 style={h3S}>Хмарне резервне копіювання</h3>
-
-        {/* Картки провайдерів */}
+        <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: 12 }}>
+          Встановіть desktop-клієнт Google Drive, OneDrive або Dropbox — вони синхронізують локальну папку з хмарою.
+          Вкажіть шлях до цієї папки нижче, і бекапи копіюватимуться туди автоматично.
+        </p>
         {([
-          { id: 'google'  as CloudProvider, label: 'Google Drive', icon: '🟦', hint: 'console.cloud.google.com → OAuth 2.0 Client ID' },
-          { id: 'onedrive'as CloudProvider, label: 'OneDrive',     icon: '🟪', hint: 'portal.azure.com → App registrations (Public client)' },
-          { id: 'dropbox' as CloudProvider, label: 'Dropbox',      icon: '🟦', hint: 'dropbox.com/developers/apps → App Console' },
-        ] as const).map(p => (
-          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #eef2f7' }}>
-            <span style={{ fontSize: 22 }}>{p.icon}</span>
-            <div style={{ flex: 1 }}>
-              <strong style={{ fontSize: '0.9rem' }}>{p.label}</strong>
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{p.hint}</div>
-            </div>
-            {cloudStatus[p.id] ? (
-              <>
-                <span style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600, background: '#f0fdf4', padding: '2px 10px', borderRadius: 10 }}>● Підключено</span>
-                <button style={{ ...btnS, background: '#6c8ebf', padding: '0.2rem 0.8rem', fontSize: '0.8rem' }}
-                  onClick={() => handleCloudListFiles(p.id)} disabled={cloudFilesLoading}>
-                  {cloudFilesLoading ? '...' : '📋 Бекапи'}
+          { id: 'google',   key: 'backup_cloud_1_path', label: 'Google Drive', icon: '🟦',
+            hint: 'Зазвичай: C:\\Users\\Ім\'я\\Google Drive' },
+          { id: 'onedrive', key: 'backup_cloud_2_path', label: 'OneDrive',     icon: '🟪',
+            hint: 'Зазвичай: C:\\Users\\Ім\'я\\OneDrive' },
+          { id: 'dropbox',  key: 'backup_cloud_3_path', label: 'Dropbox',      icon: '🟦',
+            hint: 'Зазвичай: C:\\Users\\Ім\'я\\Dropbox' },
+        ] as const).map(p => {
+          const detectedPath = detected[p.id as keyof DetectedFolders]
+          const currentPath = form[p.key] ?? ''
+          return (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid #eef2f7' }}>
+              <span style={{ fontSize: 20 }}>{p.icon}</span>
+              <div style={{ width: 100, flexShrink: 0 }}>
+                <strong style={{ fontSize: '0.88rem' }}>{p.label}</strong>
+              </div>
+              <div style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  value={currentPath}
+                  placeholder={detectedPath ?? p.hint}
+                  style={{ ...inputS, width: '100%', boxSizing: 'border-box' }}
+                  onChange={e => setForm(f => ({ ...f, [p.key]: e.target.value }))}
+                />
+              </div>
+              {detectedPath && !currentPath && (
+                <button
+                  style={{ ...btnS, background: '#16a34a', padding: '0.2rem 0.7rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                  onClick={() => setForm(f => ({ ...f, [p.key]: detectedPath }))}
+                  title={detectedPath}
+                >
+                  ✓ Виявлено
                 </button>
-                <button style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.8rem', fontSize: '0.8rem' }}
-                  onClick={() => handleCloudDisconnect(p.id)}>✕ Відключити</button>
-              </>
-            ) : (
-              <button style={{ ...btnS, padding: '0.2rem 1rem', fontSize: '0.8rem' }}
-                onClick={() => handleCloudConnect(p.id)}>
-                🔑 Підключити
-              </button>
-            )}
-          </div>
-        ))}
-
+              )}
+              {currentPath && (
+                <button
+                  style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.6rem', fontSize: '0.8rem' }}
+                  onClick={() => setForm(f => ({ ...f, [p.key]: '' }))}
+                  title="Вимкнути синхронізацію"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )
+        })}
+        <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 8 }}>
+          Після зміни натисніть "Зберегти налаштування" у секції вище. Бекапи також зберігаються у вказаних папках.
+        </p>
       </div>
-
-      {/* ── Модал: список хмарних бекапів ── */}
-      {cloudFilesModal && (
-        <Modal title={`Бекапи в хмарі — ${cloudFilesModal.provider === 'google' ? 'Google Drive' : cloudFilesModal.provider === 'onedrive' ? 'OneDrive' : 'Dropbox'}`}
-          wide onClose={() => setCloudFilesModal(null)}>
-          {cloudFilesModal.files.length === 0 ? (
-            <p style={{ color: '#94a3b8', textAlign: 'center', padding: 24 }}>Бекапів у хмарі не знайдено</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                  <th style={{ textAlign: 'left', padding: '0.3rem 0.5rem', color: '#475569' }}>Файл</th>
-                  <th style={{ textAlign: 'right', padding: '0.3rem 0.5rem', color: '#475569', width: 90 }}>Розмір</th>
-                  <th style={{ textAlign: 'center', padding: '0.3rem 0.5rem', color: '#475569', width: 140 }}>Дата</th>
-                  <th style={{ width: 110 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {cloudFilesModal.files.map(f => (
-                  <tr key={f.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.3rem 0.5rem' }}>{f.name}</td>
-                    <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', color: '#64748b' }}>
-                      {f.size_kb >= 1024 ? `${(f.size_kb / 1024).toFixed(1)} MB` : `${f.size_kb} KB`}
-                    </td>
-                    <td style={{ padding: '0.3rem 0.5rem', textAlign: 'center', color: '#64748b' }}>{f.modified}</td>
-                    <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>
-                      <button style={{ ...btnS, background: '#27ae60', padding: '0.2rem 0.7rem', fontSize: '0.8rem' }}
-                        onClick={() => handleCloudDownload(cloudFilesModal.provider, f)}>
-                        ⬇ Завантажити
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <p style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: 12 }}>
-            Після завантаження імпортуйте файл через кнопку "📂 Імпортувати" у секції "Резервні копії".
-          </p>
-        </Modal>
-      )}
 
       {/* ── 2. Бекапи ── */}
       <div style={sectionS}>

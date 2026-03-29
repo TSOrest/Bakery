@@ -1,20 +1,20 @@
 """API для резервного копіювання, відновлення, демо-режиму та архівування."""
 import json
 import logging
+import os
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
-from backend.database import SessionLocal, get_db
+from backend.database import get_db
 from backend.models.settings import Setting
 from backend.services import backup as backup_svc
 from backend.services import archive as archive_svc
-from backend.services import cloud_backup as cloud_svc
 
 log = logging.getLogger(__name__)
 
@@ -37,66 +37,6 @@ def _save_setting(db: Session, key: str, value: str) -> None:
     else:
         db.add(Setting(key=key, value=value, description=""))
     db.commit()
-
-
-def _cloud_upload_bg(backup_path: str) -> None:
-    """Завантажує бекап у підключені хмари. Запускається у фоні."""
-    db = SessionLocal()
-    try:
-        cfg = _get_settings(db)
-        folder = cfg.get("cloud_folder_name", "bakery-backups")
-        file_path = Path(backup_path)
-        if not file_path.exists():
-            return
-
-        # Google Drive
-        gdrive_token_raw = cfg.get("cloud_gdrive_token", "")
-        if gdrive_token_raw:
-            try:
-                token = json.loads(gdrive_token_raw)
-                _, new_token = cloud_svc.gdrive_upload(
-                    _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
-                    _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
-                    token, file_path, folder,
-                )
-                if new_token != token:
-                    _save_setting(db, "cloud_gdrive_token", json.dumps(new_token))
-                log.info("Бекап завантажено на Google Drive: %s", file_path.name)
-            except Exception as e:
-                log.warning("Google Drive upload failed: %s", e)
-
-        # OneDrive
-        onedrive_token_raw = cfg.get("cloud_onedrive_token", "")
-        if onedrive_token_raw:
-            try:
-                token = json.loads(onedrive_token_raw)
-                _, new_token = cloud_svc.onedrive_upload(
-                    _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
-                    token, file_path, folder,
-                )
-                if new_token != token:
-                    _save_setting(db, "cloud_onedrive_token", json.dumps(new_token))
-                log.info("Бекап завантажено на OneDrive: %s", file_path.name)
-            except Exception as e:
-                log.warning("OneDrive upload failed: %s", e)
-
-        # Dropbox
-        dropbox_token_raw = cfg.get("cloud_dropbox_token", "")
-        if dropbox_token_raw:
-            try:
-                token = json.loads(dropbox_token_raw)
-                _, new_token = cloud_svc.dropbox_upload(
-                    _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
-                    _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
-                    token, file_path, folder,
-                )
-                if new_token != token:
-                    _save_setting(db, "cloud_dropbox_token", json.dumps(new_token))
-                log.info("Бекап завантажено на Dropbox: %s", file_path.name)
-            except Exception as e:
-                log.warning("Dropbox upload failed: %s", e)
-    finally:
-        db.close()
 
 
 def _get_settings(db: Session) -> dict:
@@ -129,7 +69,7 @@ def list_backups(db: Session = Depends(get_db)):
 # ── Бекап зараз ────────────────────────────────────────────────────────────────
 
 @router.post("/now")
-def backup_now(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def backup_now(db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     try:
         result = backup_svc.do_backup(
@@ -142,8 +82,6 @@ def backup_now(background_tasks: BackgroundTasks, db: Session = Depends(get_db))
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    # Завантаження в хмари — у фоні, не блокує відповідь
-    background_tasks.add_task(_cloud_upload_bg, result["path"])
     return result
 
 
@@ -158,163 +96,62 @@ def delete_backup(filename: str, db: Session = Depends(get_db)):
     return {"deleted": filename}
 
 
-# ── Хмарні провайдери ─────────────────────────────────────────────────────────
+# ── Хмарна синхронізація (через локальні sync-папки) ──────────────────────────
 
-_PROVIDER_TOKEN_KEY = {
-    "google":   "cloud_gdrive_token",
-    "onedrive": "cloud_onedrive_token",
-    "dropbox":  "cloud_dropbox_token",
-}
-_PROVIDER_LABELS = {"google": "Google Drive", "onedrive": "OneDrive", "dropbox": "Dropbox"}
+def _detect_sync_folders() -> dict:
+    """
+    Визначає папки синхронізації хмарних сховищ встановлених на Windows.
+    Google Drive / OneDrive / Dropbox desktop-клієнти синхронізують локальну
+    папку з хмарою — ми просто копіюємо бекап туди.
+    """
+    home = Path.home()
+    result: dict[str, Optional[str]] = {"google": None, "onedrive": None, "dropbox": None}
 
+    # OneDrive — надійніше через env-змінну
+    for env in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
+        p = os.environ.get(env, "")
+        if p and Path(p).is_dir():
+            result["onedrive"] = p
+            break
+    if not result["onedrive"]:
+        for candidate in [home / "OneDrive", home / "OneDrive - Personal"]:
+            if candidate.is_dir():
+                result["onedrive"] = str(candidate)
+                break
 
-@router.get("/cloud/status")
-def cloud_status(db: Session = Depends(get_db)):
-    """Статус підключення для кожного хмарного провайдера."""
-    cfg = _get_settings(db)
-    return {
-        p: bool(cfg.get(k))
-        for p, k in _PROVIDER_TOKEN_KEY.items()
-    }
+    # Google Drive — кілька варіантів назви
+    for candidate in [
+        home / "Google Drive",
+        home / "My Drive",
+        home / "Google Drive (My Drive)",
+        home / "GoogleDrive",
+    ]:
+        if candidate.is_dir():
+            result["google"] = str(candidate)
+            break
 
+    # Dropbox — читаємо info.json
+    for info_path in [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Dropbox" / "info.json",
+        Path(os.environ.get("APPDATA", "")) / "Dropbox" / "info.json",
+    ]:
+        if info_path.exists():
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+                path = (info.get("personal") or info.get("business") or {}).get("path", "")
+                if path and Path(path).is_dir():
+                    result["dropbox"] = path
+                    break
+            except Exception:
+                pass
 
-def _cred(cfg: dict, key: str, default: str) -> str:
-    """DB-значення як override, інакше вбудований default."""
-    return cfg.get(key, "").strip() or default
-
-
-@router.get("/cloud/{provider}/connect")
-def cloud_connect(provider: str, db: Session = Depends(get_db)):
-    """Повертає OAuth URL для авторизації у браузері."""
-    if provider not in _PROVIDER_LABELS:
-        raise HTTPException(400, "Невідомий провайдер")
-    cfg = _get_settings(db)
-    if provider == "google":
-        cid = _cred(cfg, "cloud_gdrive_client_id", cloud_svc.DEFAULT_GDRIVE_CLIENT_ID)
-        if not cid:
-            raise HTTPException(400, "Google Drive ще не налаштовано. Зверніться до адміністратора.")
-        return {"auth_url": cloud_svc.gdrive_auth_url(cid)}
-    if provider == "onedrive":
-        cid = _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID)
-        if not cid:
-            raise HTTPException(400, "OneDrive ще не налаштовано. Зверніться до адміністратора.")
-        return {"auth_url": cloud_svc.onedrive_auth_url(cid)}
-    if provider == "dropbox":
-        key = _cred(cfg, "cloud_dropbox_app_key", cloud_svc.DEFAULT_DROPBOX_APP_KEY)
-        if not key:
-            raise HTTPException(400, "Dropbox ще не налаштовано. Зверніться до адміністратора.")
-        return {"auth_url": cloud_svc.dropbox_auth_url(key)}
-
-
-@router.get("/cloud/callback/{provider}")
-def cloud_callback(provider: str, code: str = "", error: str = "",
-                   db: Session = Depends(get_db)):
-    """OAuth callback. Обмінює code на токен і зберігає в БД."""
-    _CLOSE_JS = "<script>if(window.opener){window.opener.postMessage({type:'cloud_auth_success',provider:'%s'},'*');window.close();}else{document.body.innerHTML='<p>Авторизацію виконано. Закрийте цю вкладку.</p>';}</script>"
-    if error:
-        return HTMLResponse(f"<p>Авторизацію скасовано: {error}</p>")
-    if not code:
-        return HTMLResponse("<p>Помилка: не отримано код авторизації.</p>")
-    cfg = _get_settings(db)
-    try:
-        if provider == "google":
-            token = cloud_svc.gdrive_exchange(
-                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
-                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET), code)
-        elif provider == "onedrive":
-            token = cloud_svc.onedrive_exchange(
-                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID), code)
-        elif provider == "dropbox":
-            token = cloud_svc.dropbox_exchange(
-                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
-                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET), code)
-        else:
-            return HTMLResponse("<p>Невідомий провайдер.</p>")
-        _save_setting(db, _PROVIDER_TOKEN_KEY[provider], json.dumps(token))
-    except Exception as e:
-        return HTMLResponse(f"<p>Помилка авторизації: {e}</p>")
-    return HTMLResponse(_CLOSE_JS % provider)
+    return result
 
 
-@router.delete("/cloud/{provider}")
-def cloud_disconnect(provider: str, db: Session = Depends(get_db)):
-    if provider not in _PROVIDER_TOKEN_KEY:
-        raise HTTPException(400, "Невідомий провайдер")
-    _save_setting(db, _PROVIDER_TOKEN_KEY[provider], "")
-    return {"disconnected": provider}
-
-
-@router.get("/cloud/{provider}/list")
-def cloud_list_files(provider: str, db: Session = Depends(get_db)):
-    """Список бекапів у хмарі для вибраного провайдера."""
-    cfg = _get_settings(db)
-    folder = cfg.get("cloud_folder_name", "bakery-backups")
-    token_raw = cfg.get(_PROVIDER_TOKEN_KEY.get(provider, ""), "")
-    if not token_raw:
-        raise HTTPException(400, f"{_PROVIDER_LABELS.get(provider, provider)} не підключено")
-    token = json.loads(token_raw)
-    try:
-        if provider == "google":
-            files, new_token = cloud_svc.gdrive_list(
-                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
-                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
-                token, folder)
-        elif provider == "onedrive":
-            files, new_token = cloud_svc.onedrive_list(
-                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
-                token, folder)
-        elif provider == "dropbox":
-            files, new_token = cloud_svc.dropbox_list(
-                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
-                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
-                token, folder)
-        else:
-            raise HTTPException(400, "Невідомий провайдер")
-        if new_token != token:
-            _save_setting(db, _PROVIDER_TOKEN_KEY[provider], json.dumps(new_token))
-        return files
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-@router.get("/cloud/{provider}/download/{file_id:path}")
-def cloud_download_file(provider: str, file_id: str, db: Session = Depends(get_db)):
-    """Завантажує файл з хмари і повертає клієнту."""
-    cfg = _get_settings(db)
-    token_raw = cfg.get(_PROVIDER_TOKEN_KEY.get(provider, ""), "")
-    if not token_raw:
-        raise HTTPException(400, f"{_PROVIDER_LABELS.get(provider, provider)} не підключено")
-    token = json.loads(token_raw)
-    try:
-        if provider == "google":
-            content, name, new_token = cloud_svc.gdrive_download(
-                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
-                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
-                token, file_id)
-        elif provider == "onedrive":
-            content, name, new_token = cloud_svc.onedrive_download(
-                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
-                token, file_id)
-        elif provider == "dropbox":
-            content, name, new_token = cloud_svc.dropbox_download(
-                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
-                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
-                token, file_id)
-        else:
-            raise HTTPException(400, "Невідомий провайдер")
-        if new_token != token:
-            _save_setting(db, _PROVIDER_TOKEN_KEY[provider], json.dumps(new_token))
-        return Response(
-            content=content,
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{name}"'},
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
+@router.get("/cloud/detect")
+def cloud_detect():
+    """Повертає автоматично виявлені папки синхронізації хмарних провайдерів."""
+    return _detect_sync_folders()
 
 
 # ── Завантажити файл бекапу (SaveFile) ────────────────────────────────────────
