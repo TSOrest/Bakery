@@ -3519,21 +3519,11 @@ function BackupTab() {
     { key: 'cloud_folder_name', label: 'Папка в хмарі (default: bakery-backups)', type: 'text' },
   ]
 
-  const CLOUD_CRED_SETTINGS = [
-    { key: 'cloud_gdrive_client_id',    label: 'Google Drive Client ID' },
-    { key: 'cloud_gdrive_client_secret',label: 'Google Drive Client Secret' },
-    { key: 'cloud_onedrive_client_id',  label: 'OneDrive (Azure) Client ID' },
-    { key: 'cloud_dropbox_app_key',     label: 'Dropbox App Key' },
-    { key: 'cloud_dropbox_app_secret',  label: 'Dropbox App Secret' },
-  ]
-
   type CloudProvider = 'google' | 'onedrive' | 'dropbox'
   type CloudFile = { id: string; name: string; size_kb: number; modified: string }
   const [cloudStatus, setCloudStatus] = useState<Record<CloudProvider, boolean>>({ google: false, onedrive: false, dropbox: false })
   const [cloudFilesModal, setCloudFilesModal] = useState<{ provider: CloudProvider; files: CloudFile[] } | null>(null)
   const [cloudFilesLoading, setCloudFilesLoading] = useState(false)
-  const [showCloudCreds, setShowCloudCreds] = useState(false)
-
   const loadAll = async () => {
     try {
       const [cfg, bkps, demo, cs] = await Promise.all([
@@ -3543,7 +3533,7 @@ function BackupTab() {
         api.get<Record<CloudProvider, boolean>>('/backup/cloud/status'),
       ])
       const s: Record<string, string> = {}
-      ;[...BACKUP_SETTINGS, ...CLOUD_CRED_SETTINGS].forEach(({ key }) => { s[key] = cfg[key]?.value ?? '' })
+      BACKUP_SETTINGS.forEach(({ key }) => { s[key] = cfg[key]?.value ?? '' })
       setForm(s)
       setBackups(bkps)
       setDemoStatus(demo)
@@ -3786,36 +3776,6 @@ function BackupTab() {
           </div>
         ))}
 
-        {/* Credentials (згорнуто за замовчуванням) */}
-        <div style={{ marginTop: 12 }}>
-          <button onClick={() => setShowCloudCreds(v => !v)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.82rem', color: '#64748b', padding: 0 }}>
-            {showCloudCreds ? '▼' : '▶'} OAuth credentials (client ID / secret)
-          </button>
-          {showCloudCreds && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem 0.8rem', marginTop: 8 }}>
-              {CLOUD_CRED_SETTINGS.map(({ key, label }) => (
-                <div key={key}>
-                  <div style={{ fontSize: '0.78rem', color: '#666', marginBottom: 2 }}>{label}</div>
-                  <input type="password" style={inputS} value={form[key] ?? ''}
-                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
-                </div>
-              ))}
-              <div style={{ gridColumn: '1/-1', marginTop: 4 }}>
-                <button type="button" style={btnS} onClick={async () => {
-                  setSavingSettings(true)
-                  try {
-                    await Promise.all(CLOUD_CRED_SETTINGS.map(({ key }) =>
-                      api.put(`/settings/${key}`, { value: form[key] ?? '', description: '' })
-                    ))
-                    setSavedSettings(true); setTimeout(() => setSavedSettings(false), 2000)
-                  } finally { setSavingSettings(false) }
-                }} disabled={savingSettings}>Зберегти credentials</button>
-                {savedSettings && <span style={{ color: '#27ae60', fontSize: '0.82rem', marginLeft: 8 }}>✓ Збережено</span>}
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ── Модал: список хмарних бекапів ── */}

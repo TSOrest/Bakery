@@ -55,8 +55,8 @@ def _cloud_upload_bg(backup_path: str) -> None:
             try:
                 token = json.loads(gdrive_token_raw)
                 _, new_token = cloud_svc.gdrive_upload(
-                    cfg.get("cloud_gdrive_client_id", ""),
-                    cfg.get("cloud_gdrive_client_secret", ""),
+                    _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
+                    _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
                     token, file_path, folder,
                 )
                 if new_token != token:
@@ -71,7 +71,7 @@ def _cloud_upload_bg(backup_path: str) -> None:
             try:
                 token = json.loads(onedrive_token_raw)
                 _, new_token = cloud_svc.onedrive_upload(
-                    cfg.get("cloud_onedrive_client_id", ""),
+                    _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
                     token, file_path, folder,
                 )
                 if new_token != token:
@@ -86,8 +86,8 @@ def _cloud_upload_bg(backup_path: str) -> None:
             try:
                 token = json.loads(dropbox_token_raw)
                 _, new_token = cloud_svc.dropbox_upload(
-                    cfg.get("cloud_dropbox_app_key", ""),
-                    cfg.get("cloud_dropbox_app_secret", ""),
+                    _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
+                    _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
                     token, file_path, folder,
                 )
                 if new_token != token:
@@ -178,6 +178,11 @@ def cloud_status(db: Session = Depends(get_db)):
     }
 
 
+def _cred(cfg: dict, key: str, default: str) -> str:
+    """DB-значення як override, інакше вбудований default."""
+    return cfg.get(key, "").strip() or default
+
+
 @router.get("/cloud/{provider}/connect")
 def cloud_connect(provider: str, db: Session = Depends(get_db)):
     """Повертає OAuth URL для авторизації у браузері."""
@@ -185,19 +190,19 @@ def cloud_connect(provider: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "Невідомий провайдер")
     cfg = _get_settings(db)
     if provider == "google":
-        cid = cfg.get("cloud_gdrive_client_id", "")
+        cid = _cred(cfg, "cloud_gdrive_client_id", cloud_svc.DEFAULT_GDRIVE_CLIENT_ID)
         if not cid:
-            raise HTTPException(400, "Не налаштовано Google OAuth Client ID в налаштуваннях")
+            raise HTTPException(400, "Google Drive ще не налаштовано. Зверніться до адміністратора.")
         return {"auth_url": cloud_svc.gdrive_auth_url(cid)}
     if provider == "onedrive":
-        cid = cfg.get("cloud_onedrive_client_id", "")
+        cid = _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID)
         if not cid:
-            raise HTTPException(400, "Не налаштовано OneDrive Client ID в налаштуваннях")
+            raise HTTPException(400, "OneDrive ще не налаштовано. Зверніться до адміністратора.")
         return {"auth_url": cloud_svc.onedrive_auth_url(cid)}
     if provider == "dropbox":
-        key = cfg.get("cloud_dropbox_app_key", "")
+        key = _cred(cfg, "cloud_dropbox_app_key", cloud_svc.DEFAULT_DROPBOX_APP_KEY)
         if not key:
-            raise HTTPException(400, "Не налаштовано Dropbox App Key в налаштуваннях")
+            raise HTTPException(400, "Dropbox ще не налаштовано. Зверніться до адміністратора.")
         return {"auth_url": cloud_svc.dropbox_auth_url(key)}
 
 
@@ -214,14 +219,15 @@ def cloud_callback(provider: str, code: str = "", error: str = "",
     try:
         if provider == "google":
             token = cloud_svc.gdrive_exchange(
-                cfg.get("cloud_gdrive_client_id", ""),
-                cfg.get("cloud_gdrive_client_secret", ""), code)
+                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
+                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET), code)
         elif provider == "onedrive":
-            token = cloud_svc.onedrive_exchange(cfg.get("cloud_onedrive_client_id", ""), code)
+            token = cloud_svc.onedrive_exchange(
+                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID), code)
         elif provider == "dropbox":
             token = cloud_svc.dropbox_exchange(
-                cfg.get("cloud_dropbox_app_key", ""),
-                cfg.get("cloud_dropbox_app_secret", ""), code)
+                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
+                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET), code)
         else:
             return HTMLResponse("<p>Невідомий провайдер.</p>")
         _save_setting(db, _PROVIDER_TOKEN_KEY[provider], json.dumps(token))
@@ -250,15 +256,18 @@ def cloud_list_files(provider: str, db: Session = Depends(get_db)):
     try:
         if provider == "google":
             files, new_token = cloud_svc.gdrive_list(
-                cfg.get("cloud_gdrive_client_id", ""),
-                cfg.get("cloud_gdrive_client_secret", ""), token, folder)
+                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
+                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
+                token, folder)
         elif provider == "onedrive":
             files, new_token = cloud_svc.onedrive_list(
-                cfg.get("cloud_onedrive_client_id", ""), token, folder)
+                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
+                token, folder)
         elif provider == "dropbox":
             files, new_token = cloud_svc.dropbox_list(
-                cfg.get("cloud_dropbox_app_key", ""),
-                cfg.get("cloud_dropbox_app_secret", ""), token, folder)
+                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
+                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
+                token, folder)
         else:
             raise HTTPException(400, "Невідомий провайдер")
         if new_token != token:
@@ -281,15 +290,18 @@ def cloud_download_file(provider: str, file_id: str, db: Session = Depends(get_d
     try:
         if provider == "google":
             content, name, new_token = cloud_svc.gdrive_download(
-                cfg.get("cloud_gdrive_client_id", ""),
-                cfg.get("cloud_gdrive_client_secret", ""), token, file_id)
+                _cred(cfg, "cloud_gdrive_client_id",     cloud_svc.DEFAULT_GDRIVE_CLIENT_ID),
+                _cred(cfg, "cloud_gdrive_client_secret", cloud_svc.DEFAULT_GDRIVE_CLIENT_SECRET),
+                token, file_id)
         elif provider == "onedrive":
             content, name, new_token = cloud_svc.onedrive_download(
-                cfg.get("cloud_onedrive_client_id", ""), token, file_id)
+                _cred(cfg, "cloud_onedrive_client_id", cloud_svc.DEFAULT_ONEDRIVE_CLIENT_ID),
+                token, file_id)
         elif provider == "dropbox":
             content, name, new_token = cloud_svc.dropbox_download(
-                cfg.get("cloud_dropbox_app_key", ""),
-                cfg.get("cloud_dropbox_app_secret", ""), token, file_id)
+                _cred(cfg, "cloud_dropbox_app_key",    cloud_svc.DEFAULT_DROPBOX_APP_KEY),
+                _cred(cfg, "cloud_dropbox_app_secret", cloud_svc.DEFAULT_DROPBOX_APP_SECRET),
+                token, file_id)
         else:
             raise HTTPException(400, "Невідомий провайдер")
         if new_token != token:
