@@ -354,7 +354,7 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at  TEXT DEFAULT (datetime('now'))
 );
 
-INSERT OR IGNORE INTO settings VALUES
+INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('bakery_name',           'Пекарня',       'Назва пекарні'),
     ('director',              '',               'ПІБ директора'),
     ('accountant',            '',               'ПІБ бухгалтера'),
