@@ -323,6 +323,15 @@ def update_invoice_status(
 
     db.commit()
     db.refresh(inv)
+
+    if status == "sent":
+        try:
+            from backend.services.telegram_bot import send_invoice_pdf_to_client
+            send_invoice_pdf_to_client(db, inv)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Telegram invoice send failed: %s", exc)
+
     return inv
 
 

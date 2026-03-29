@@ -3,6 +3,7 @@ import { startDeviceFlow, pollDeviceFlow, getGitHubStatus, githubLogout, type Gi
 import { api } from '../api/client'
 import type { Client, Product, Route, Unit, Category, Price, ClientPriceOverride, Ingredient, ProductIngredient, MarginRow } from '../types'
 import Modal from '../components/Modal'
+import PriceGantt, { type GanttRow, type GanttPriceSegment } from '../components/PriceGantt'
 import formStyles from '../components/Form.module.css'
 import UsersTab from './UsersTab'
 import { useAuth } from '../context/AuthContext'
@@ -207,10 +208,10 @@ export default function AdminPage() {
         {activeTab === 'products' && (
           <ProductsTab products={products} units={units} categories={categories} onReload={reloadProducts} />
         )}
-        {activeTab === 'clients'        && <ClientsTab routes={routes} />}
+        {activeTab === 'clients'        && <ClientsTab routes={routes} products={products} />}
         {activeTab === 'system_clients' && <SystemClientsTab routes={routes} />}
         {activeTab === 'routes'      && <RoutesTab routes={routes} onReload={reloadRoutes} />}
-        {activeTab === 'prices'      && <PricesTab products={products} clients={clients} />}
+        {activeTab === 'prices'      && <PricesTab products={products} clients={clients} categories={categories} />}
         {activeTab === 'units'       && (
           <SimpleListTab
             title="Одиниці виміру"
@@ -246,10 +247,11 @@ interface ProductFormState {
   weight: string
   unit_id: string
   category_id: string
+  initial_price: string  // тільки при створенні; порожньо = не встановлювати
 }
 
 const emptyProduct = (): ProductFormState => ({
-  name: '', short_name: '', weight: '', unit_id: '', category_id: '',
+  name: '', short_name: '', weight: '', unit_id: '', category_id: '', initial_price: '',
 })
 
 function ProductsTab({
@@ -269,11 +271,12 @@ function ProductsTab({
   const openEdit = (p: Product) => {
     setEditing(p)
     setForm({
-      name:        p.name,
-      short_name:  p.short_name ?? '',
-      weight:      p.weight?.toString() ?? '',
-      unit_id:     p.unit_id?.toString() ?? '',
-      category_id: p.category_id?.toString() ?? '',
+      name:          p.name,
+      short_name:    p.short_name ?? '',
+      weight:        p.weight?.toString() ?? '',
+      unit_id:       p.unit_id?.toString() ?? '',
+      category_id:   p.category_id?.toString() ?? '',
+      initial_price: '',
     })
     setModal(true)
   }
@@ -293,7 +296,17 @@ function ProductsTab({
       if (editing) {
         await api.put(`/products/${editing.id}`, body)
       } else {
-        await api.post('/products/', body)
+        const created = await api.post<{ id: number }>('/products/', body)
+        // Автоматично створюємо базову ціну якщо вказана при створенні
+        const price = parseFloat(form.initial_price)
+        if (created?.id && price > 0) {
+          const today = new Date().toISOString().slice(0, 10)
+          await api.post('/prices/', {
+            product_id: created.id,
+            price,
+            valid_from: today,
+          })
+        }
       }
       onReload()
       closeModal()
@@ -374,6 +387,18 @@ function ProductsTab({
                 {categories.filter((c) => c.is_active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
+            {!editing && (
+              <div className={formStyles.field}>
+                <label>Базова ціна, грн</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={form.initial_price}
+                  onChange={(e) => setForm({ ...form, initial_price: e.target.value })}
+                  placeholder="Наприклад: 27.50"
+                />
+                <span className={formStyles.hint}>Встановлюється з сьогоднішньої дати</span>
+              </div>
+            )}
             <div className={formStyles.actions}>
               <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
               <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
@@ -415,13 +440,26 @@ const CLIENT_KIND_LABELS: Record<string, string> = {
   underbaked: 'Недопечено',
 }
 
-function ClientsTab({ routes }: { routes: Route[] }) {
+function ClientsTab({ routes, products }: { routes: Route[]; products: Product[] }) {
+  const today    = new Date().toISOString().slice(0, 10)
+  const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
   const [clients, setClients]   = useState<Client[]>([])
   const [modal, setModal]       = useState(false)
   const [editing, setEditing]   = useState<Client | null>(null)
   const [form, setForm]         = useState<ClientFormState>(emptyClient())
   const [saving, setSaving]     = useState(false)
   const [botUsers, setBotUsers] = useState<BotUser[]>([])
+
+  // Індивідуальні ціни клієнта
+  const [clientOverrides,    setClientOverrides]    = useState<ClientPriceOverride[]>([])
+  const [overrideAddForm,    setOverrideAddForm]    = useState({ product_id: '', price: '', valid_from: today, valid_to: '' })
+  const [overrideAdding,     setOverrideAdding]     = useState(false)
+  const [overrideSaving,     setOverrideSaving]     = useState(false)
+
+  const loadClientOverrides = (clientId: number) =>
+    api.get<ClientPriceOverride[]>(`/prices/overrides?client_id=${clientId}`)
+      .then(setClientOverrides)
+      .catch(() => setClientOverrides([]))
 
   const load = () => api.get<Client[]>('/clients/?active_only=false')
     .then(data => setClients(data.filter(c => c.client_kind === 'customer')))
@@ -443,9 +481,12 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       bot_phones:  c.bot_phones ?? '',
     })
     api.get<BotUser[]>(`/bot/clients/${c.id}/bot-users`).then(setBotUsers).catch(() => setBotUsers([]))
+    loadClientOverrides(c.id)
+    setOverrideAdding(false)
+    setOverrideAddForm({ product_id: '', price: '', valid_from: tomorrow, valid_to: '' })
     setModal(true)
   }
-  const closeModal = () => { setModal(false); setBotUsers([]) }
+  const closeModal = () => { setModal(false); setBotUsers([]); setClientOverrides([]) }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -516,91 +557,242 @@ function ClientsTab({ routes }: { routes: Route[] }) {
       </table>
 
       {modal && (
-        <Modal title={editing ? 'Редагувати клієнта' : 'Новий клієнт'} onClose={closeModal}>
+        <Modal title={editing ? 'Редагувати клієнта' : 'Новий клієнт'} onClose={closeModal} xwide={!!editing}>
           <form onSubmit={handleSubmit} className={formStyles.form}>
-            <div className={formStyles.field}>
-              <label>Повна назва *</label>
-              <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Скорочена назва</label>
-              <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
-              <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
-            </div>
-            <div className={formStyles.field}>
-              <label>Маршрут</label>
-              <select value={form.route_id} onChange={(e) => setForm({ ...form, route_id: e.target.value })}>
-                <option value="">— не призначено —</option>
-                {routes.filter((r) => r.is_active).map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className={formStyles.field}>
-              <label>Знижка %</label>
-              <input type="number" min="0" max="100" step="0.1" value={form.discount_pct}
-                onChange={(e) => setForm({ ...form, discount_pct: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Адреса</label>
-              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Телефон</label>
-              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Директор</label>
-              <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Бухгалтер</label>
-              <input value={form.accountant} onChange={(e) => setForm({ ...form, accountant: e.target.value })} />
-            </div>
-            <div className={formStyles.field}>
-              <label>Телефони для авторизації в боті</label>
-              <input value={form.bot_phones}
-                onChange={(e) => setForm({ ...form, bot_phones: e.target.value })}
-                placeholder="+380501234567, +380671234567" />
-              <span className={formStyles.hint}>Через кому. Клієнт надсилає свій контакт — бот звіряє з цим списком.</span>
-            </div>
-            {editing && botUsers.length > 0 && (
-              <div className={formStyles.field}>
-                <label>Авторизовані користувачі бота</label>
-                <table style={{ width: '100%', fontSize: '0.83rem', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f0f4f8' }}>
-                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Ім'я</th>
-                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Телефон</th>
-                      <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Авторизовано</th>
-                      <th style={{ padding: '0.22rem 0.3rem' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {botUsers.map((u) => (
-                      <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5, borderBottom: '1px solid #eee' }}>
-                        <td style={{ padding: '0.2rem 0.5rem' }}>{u.first_name ?? '—'}</td>
-                        <td style={{ padding: '0.2rem 0.5rem' }}>{u.phone ?? '—'}</td>
-                        <td style={{ padding: '0.2rem 0.5rem', color: '#7090b0' }}>{u.authorized_at?.slice(0, 16) ?? '—'}</td>
-                        <td style={{ padding: '0.2rem 0.3rem' }}>
-                          <button
-                            type="button"
-                            title="Відкликати авторизацію"
-                            onClick={async () => {
-                              if (!confirm(`Відкликати авторизацію ${u.first_name ?? u.chat_id}?`)) return
-                              await api.delete(`/bot/clients/${editing.id}/bot-users/${u.id}`)
-                              setBotUsers((prev) => prev.filter((x) => x.id !== u.id))
-                            }}
-                            style={{ background: '#fde', border: '1px solid #e88', borderRadius: 3, cursor: 'pointer', padding: '0.1rem 0.4rem', color: '#900', fontSize: '0.8rem' }}
-                          >✕</button>
-                        </td>
-                      </tr>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+
+              {/* ── Колонка 1: Основні дані ── */}
+              <div style={{ flex: '0 0 200px' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Основні дані</div>
+                <div className={formStyles.field}>
+                  <label>Повна назва *</label>
+                  <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Скорочена назва</label>
+                  <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
+                  <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Маршрут</label>
+                  <select value={form.route_id} onChange={(e) => setForm({ ...form, route_id: e.target.value })}>
+                    <option value="">— не призначено —</option>
+                    {routes.filter((r) => r.is_active).map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
-                  </tbody>
-                </table>
+                  </select>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Адреса</label>
+                  <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Телефон</label>
+                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                </div>
               </div>
-            )}
-            <div className={formStyles.actions}>
+
+              {/* ── Колонка 2: Реквізити та бот ── */}
+              <div style={{ flex: '0 0 210px' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Реквізити</div>
+                <div className={formStyles.field}>
+                  <label>Директор</label>
+                  <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Бухгалтер</label>
+                  <input value={form.accountant} onChange={(e) => setForm({ ...form, accountant: e.target.value })} />
+                </div>
+                <div className={formStyles.field}>
+                  <label>Телефони для бота</label>
+                  <input value={form.bot_phones}
+                    onChange={(e) => setForm({ ...form, bot_phones: e.target.value })}
+                    placeholder="+380501234567, +380671234567" />
+                  <span className={formStyles.hint}>Через кому. Бот звіряє при авторизації.</span>
+                </div>
+                {editing && botUsers.length > 0 && (
+                  <div className={formStyles.field}>
+                    <label>Авторизовані в боті</label>
+                    <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f0f4f8' }}>
+                          <th style={{ padding: '0.2rem 0.4rem', textAlign: 'left' }}>Ім'я</th>
+                          <th style={{ padding: '0.2rem 0.4rem', textAlign: 'left' }}>Телефон</th>
+                          <th style={{ width: 28 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {botUsers.map((u) => (
+                          <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5, borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '0.18rem 0.4rem' }}>{u.first_name ?? '—'}</td>
+                            <td style={{ padding: '0.18rem 0.4rem', color: '#64748b' }}>{u.phone ?? '—'}</td>
+                            <td style={{ padding: '0.18rem 0.3rem' }}>
+                              <button type="button" title="Відкликати авторизацію"
+                                onClick={async () => {
+                                  if (!confirm(`Відкликати авторизацію ${u.first_name ?? u.chat_id}?`)) return
+                                  await api.delete(`/bot/clients/${editing.id}/bot-users/${u.id}`)
+                                  setBotUsers((prev) => prev.filter((x) => x.id !== u.id))
+                                }}
+                                style={{ background: '#fde', border: '1px solid #e88', borderRadius: 3, cursor: 'pointer', padding: '0.1rem 0.35rem', color: '#900', fontSize: '0.78rem' }}
+                              >✕</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Колонка 3: Ціноутворення (тільки при редагуванні) ── */}
+              {editing && (
+                <div style={{ flex: '0 0 440px', borderLeft: '1px solid #e2e8f0', paddingLeft: 20 }}>
+                  {/* Знижка */}
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Ціноутворення</div>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 14 }}>
+                    <div className={formStyles.field} style={{ margin: 0, flex: '0 0 100px' }}>
+                      <label>Знижка %</label>
+                      <input type="number" min="0" max="100" step="0.1" value={form.discount_pct}
+                        onChange={(e) => setForm({ ...form, discount_pct: e.target.value })} />
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.6, padding: '5px 8px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0', flex: 1 }}>
+                      Пріоритет ціни:<br />
+                      <strong style={{ color: '#dc2626' }}>Р</strong> Ручна&nbsp;→&nbsp;<strong style={{ color: '#2563eb' }}>І</strong> Інд.&nbsp;→&nbsp;<strong style={{ color: '#ea580c' }}>%</strong> Знижка&nbsp;→&nbsp;<strong style={{ color: '#16a34a' }}>Б</strong> Базова
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Індивідуальні ціни</div>
+                    <button type="button" onClick={() => setOverrideAdding(!overrideAdding)}
+                      style={{ fontSize: 12, padding: '2px 10px', border: '1px solid #3b82f6', borderRadius: 6,
+                        background: overrideAdding ? '#eff6ff' : '#fff', color: '#3b82f6', cursor: 'pointer' }}>
+                      {overrideAdding ? 'Скасувати' : '+ Додати'}
+                    </button>
+                  </div>
+
+                  {overrideAdding && (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
+                      padding: '10px 12px', marginBottom: 8, display: 'grid',
+                      gridTemplateColumns: '1fr auto auto auto auto', gap: 6, alignItems: 'flex-end' }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Виріб *</div>
+                        <select required value={overrideAddForm.product_id}
+                          onChange={e => setOverrideAddForm({ ...overrideAddForm, product_id: e.target.value })}
+                          style={{ width: '100%', padding: '4px 6px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12 }}>
+                          <option value="">— оберіть —</option>
+                          {products.filter(p => p.is_active).map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Ціна, ₴ *</div>
+                        <input type="number" step="0.01" min="0.01" required
+                          value={overrideAddForm.price} placeholder="0.00"
+                          onChange={e => setOverrideAddForm({ ...overrideAddForm, price: e.target.value })}
+                          style={{ padding: '4px 6px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12, width: 72 }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Діє з *</div>
+                        <input type="date" required min={tomorrow} value={overrideAddForm.valid_from}
+                          onChange={e => {
+                            setOverrideAddForm({ ...overrideAddForm, valid_from: e.target.value,
+                              valid_to: overrideAddForm.valid_to && overrideAddForm.valid_to < e.target.value ? e.target.value : overrideAddForm.valid_to
+                            })
+                          }}
+                          style={{ padding: '4px 6px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12 }} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>Діє до</div>
+                        <input type="date" min={overrideAddForm.valid_from || tomorrow} value={overrideAddForm.valid_to}
+                          onChange={e => setOverrideAddForm({ ...overrideAddForm, valid_to: e.target.value })}
+                          style={{ padding: '4px 6px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12 }} />
+                      </div>
+                      <button type="button" disabled={overrideSaving || !overrideAddForm.product_id || !overrideAddForm.price}
+                        onClick={async () => {
+                          if (!editing) return
+                          setOverrideSaving(true)
+                          try {
+                            await api.post('/prices/overrides', {
+                              client_id:  editing.id,
+                              product_id: Number(overrideAddForm.product_id),
+                              price:      Number(overrideAddForm.price),
+                              valid_from: overrideAddForm.valid_from,
+                              valid_to:   overrideAddForm.valid_to || null,
+                            })
+                            await loadClientOverrides(editing.id)
+                            setOverrideAddForm({ product_id: '', price: '', valid_from: tomorrow, valid_to: '' })
+                            setOverrideAdding(false)
+                          } catch (err) { alert(String(err)) }
+                          finally { setOverrideSaving(false) }
+                        }}
+                        style={{ padding: '5px 12px', background: '#16a34a', color: '#fff', border: 'none',
+                          borderRadius: 6, fontSize: 12, cursor: 'pointer', alignSelf: 'flex-end' }}>
+                        {overrideSaving ? '...' : 'OK'}
+                      </button>
+                    </div>
+                  )}
+
+                  {clientOverrides.length > 0 ? (
+                    <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                        <thead style={{ position: 'sticky', top: 0 }}>
+                          <tr style={{ background: '#f0f4f8' }}>
+                            <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Виріб</th>
+                            <th style={{ padding: '0.22rem 0.5rem', textAlign: 'right' }}>Ціна</th>
+                            <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Діє з</th>
+                            <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Діє до</th>
+                            <th style={{ padding: '0.22rem 0.5rem', textAlign: 'left' }}>Стан</th>
+                            <th style={{ width: 30 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {clientOverrides.map(o => {
+                            const isActive = o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)
+                            const isPast   = o.valid_to !== null && o.valid_to < today
+                            const canDelete = o.valid_from > today
+                            return (
+                              <tr key={o.id} style={{ borderBottom: '1px solid #eee', background: isActive ? '#f0fdf4' : isPast ? '#fafafa' : '#fffbeb' }}>
+                                <td style={{ padding: '0.2rem 0.5rem' }}>
+                                  {products.find(p => p.id === o.product_id)?.name ?? `#${o.product_id}`}
+                                </td>
+                                <td style={{ padding: '0.2rem 0.5rem', textAlign: 'right', fontWeight: 600 }}>
+                                  {o.price.toFixed(2)} ₴
+                                </td>
+                                <td style={{ padding: '0.2rem 0.5rem', color: '#64748b' }}>{o.valid_from}</td>
+                                <td style={{ padding: '0.2rem 0.5rem', color: '#64748b' }}>{o.valid_to ?? '∞'}</td>
+                                <td style={{ padding: '0.2rem 0.5rem', fontSize: 11 }}>
+                                  {isActive  ? <span style={{ color: '#16a34a' }}>активна</span>
+                                  : isPast   ? <span style={{ color: '#94a3b8' }}>минула</span>
+                                  :            <span style={{ color: '#f59e0b' }}>майбутня</span>}
+                                </td>
+                                <td style={{ padding: '0.2rem 0.3rem' }}>
+                                  <button type="button" disabled={!canDelete}
+                                    title={canDelete ? 'Видалити' : 'Не можна видалити поточну/минулу ціну'}
+                                    onClick={async () => {
+                                      if (!editing) return
+                                      if (!confirm('Видалити індивідуальну ціну?')) return
+                                      await api.delete(`/prices/overrides/${o.id}`)
+                                      await loadClientOverrides(editing.id)
+                                    }}
+                                    style={{ background: 'none', border: 'none', cursor: canDelete ? 'pointer' : 'default',
+                                      color: canDelete ? '#ef4444' : '#cbd5e1', fontSize: '1rem' }}>
+                                    ×
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: '#94a3b8', padding: '12px 0' }}>Індивідуальних цін немає</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={formStyles.actions} style={{ marginTop: 16 }}>
               <button type="button" onClick={closeModal} className={formStyles.btnSecondary}>Скасувати</button>
               <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
                 {saving ? 'Збереження...' : 'Зберегти'}
@@ -836,11 +1028,45 @@ function RoutesTab({ routes, onReload }: { routes: Route[]; onReload: () => void
 
 // ─── Ціни ────────────────────────────────────────────────────────────────────
 
-function PricesTab({ products, clients }: {
-  products: Product[]
-  clients: Client[]
+interface BulkPreviewItem {
+  product_id:     number
+  product_name:   string
+  old_price:      number
+  new_price:      number
+  valid_from:     string
+  has_collision:  boolean
+  collision_date: string | null
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100
+
+/** Чекбокс що підтримує indeterminate (три стани) */
+function IndeterminateCheckbox({ checked, indeterminate, onChange }: {
+  checked: boolean; indeterminate: boolean; onChange: (v: boolean) => void
 }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate }, [indeterminate])
+  return <input type="checkbox" ref={ref} checked={checked}
+    onChange={e => onChange(e.target.checked)} />
+}
+
+/** Рядок у переробленому BulkChangeModal */
+interface BulkRow extends BulkPreviewItem {
+  checked:       boolean
+  locked:        boolean   // true = ціна задана вручну
+  manual_price:  string    // поточне значення у полі вводу
+  category_id:   number | null
+  category_name: string
+}
+
+function PricesTab({ products, clients, categories }: {
+  products:   Product[]
+  clients:    Client[]
+  categories: Category[]
+}) {
+  const today    = new Date().toISOString().slice(0, 10)
+  const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
+
   type InnerTab = 'base' | 'overrides'
   const [innerTab, setInnerTab] = useState<InnerTab>('base')
 
@@ -850,27 +1076,41 @@ function PricesTab({ products, clients }: {
   const [newModal,  setNewModal]  = useState(false)
   const [bulkModal, setBulkModal] = useState(false)
   const [newForm, setNewForm]     = useState({ product_id: '', price: '', valid_from: today })
-  const [editForm, setEditForm]   = useState({ price: '', effective_date: today })
-  const [bulkForm, setBulkForm]   = useState({ pct: '', effective_date: today })
-  const [bulkPreview, setBulkPreview] = useState<{ product_name: string; old_price: number; new_price: number }[]>([])
+  const [editForm, setEditForm]   = useState({ price: '', effective_date: tomorrow })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
-  // ── Індивідуальні ──
-  const [overrides,       setOverrides]       = useState<ClientPriceOverride[]>([])
-  const [filterClientId,  setFilterClientId]  = useState('')
-  const [overrideModal,   setOverrideModal]   = useState(false)
-  const [overrideForm,    setOverrideForm]    = useState({
-    client_id: '', product_id: '', price: '', valid_from: today, valid_to: '',
-  })
+  // Timeframe для Gantt
+  const defaultTimeFrom = (() => {
+    const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().slice(0, 10)
+  })()
+  const defaultTimeTo = (() => {
+    const d = new Date(); d.setMonth(d.getMonth() + 6); return d.toISOString().slice(0, 10)
+  })()
+  const [timeFrom, setTimeFrom] = useState(defaultTimeFrom)
+  const [timeTo,   setTimeTo]   = useState(defaultTimeTo)
 
-  const loadPrices    = () => api.get<Price[]>('/prices/').then(setPrices)
-  const loadOverrides = () => api.get<ClientPriceOverride[]>(
-    `/prices/overrides${filterClientId ? `?client_id=${filterClientId}` : ''}`
-  ).then(setOverrides)
+  // ── Масова зміна (новий стан) ──
+  const [bulkDate, setBulkDate]   = useState(tomorrow)
+  const [bulkPct,  setBulkPct]    = useState('')
+  const [bulkRows, setBulkRows]   = useState<BulkRow[]>([])
+  const [bulkLoading, setBulkLoading] = useState(false)
+
+  // ── Індивідуальні ──
+  const [overrides,        setOverrides]        = useState<ClientPriceOverride[]>([])
+  const [overrideModal,    setOverrideModal]    = useState(false)
+  const [expandedClients,  setExpandedClients]  = useState<Set<number>>(new Set())
+  const [ovModalClient,    setOvModalClient]    = useState('')
+  const [ovModalValidFrom, setOvModalValidFrom] = useState(tomorrow)
+  const [ovModalValidTo,   setOvModalValidTo]   = useState('')
+  type OvRow = { product_id: number; product_name: string; base_price: number | null; cur_override: ClientPriceOverride | null; new_price: string }
+  const [ovModalRows,      setOvModalRows]      = useState<OvRow[]>([])
+
+  const loadPrices    = () => api.get<Price[]>('/prices/?active_only=false').then(setPrices)
+  const loadOverrides = () => api.get<ClientPriceOverride[]>('/prices/overrides').then(setOverrides)
 
   useEffect(() => { loadPrices() }, [])
-  useEffect(() => { if (innerTab === 'overrides') loadOverrides() }, [innerTab, filterClientId]) // eslint-disable-line
+  useEffect(() => { if (innerTab === 'overrides') loadOverrides() }, [innerTab]) // eslint-disable-line
 
   const pName = (id: number) => products.find(p => p.id === id)?.name ?? `#${id}`
   const cName = (id: number) => {
@@ -878,18 +1118,61 @@ function PricesTab({ products, clients }: {
     return c ? (c.short_name ?? c.full_name) : `#${id}`
   }
 
-  // Поточна ціна для кожного продукту (найновіша active)
+  // Поточна ціна для кожного продукту (активна, найновіша)
   const currentPriceMap = new Map<number, Price>()
   for (const p of prices) {
-    if (!currentPriceMap.has(p.product_id)) currentPriceMap.set(p.product_id, p)
+    if (p.is_active && !currentPriceMap.has(p.product_id)) currentPriceMap.set(p.product_id, p)
   }
-  const currentPrices = Array.from(currentPriceMap.values())
-    .sort((a, b) => pName(a.product_id).localeCompare(pName(b.product_id), 'uk'))
 
-  // Редагування — замінює ціну
-  const openEdit = (p: Price) => {
+  // Продукти без поточної ціни
+  const productsWithoutPrice = products.filter(
+    p => p.is_active && !currentPriceMap.has(p.id)
+  )
+
+  /**
+   * Для відображення: якщо сегмент має valid_to=null, але наступний сегмент вже починається —
+   * обрізаємо відображення до (next.valid_from - 1 день). БД не змінюється.
+   */
+  const trimSegments = (segs: GanttPriceSegment[]): GanttPriceSegment[] => {
+    const sorted = [...segs].sort((a, b) => a.valid_from.localeCompare(b.valid_from))
+    return sorted.map((seg, i) => {
+      if (seg.valid_to !== null) return seg
+      const next = sorted[i + 1]
+      if (!next) return seg
+      const d = new Date(next.valid_from)
+      d.setDate(d.getDate() - 1)
+      return { ...seg, valid_to: d.toISOString().slice(0, 10) }
+    })
+  }
+
+  // ── Gantt rows (base prices) ────────────────────────────────────────────────
+  const ganttRows: GanttRow[] = (() => {
+    const rowMap = new Map<number, { product_name: string; prices: GanttPriceSegment[] }>()
+    for (const p of prices) {
+      if (!rowMap.has(p.product_id)) {
+        rowMap.set(p.product_id, { product_name: pName(p.product_id), prices: [] })
+      }
+      rowMap.get(p.product_id)!.prices.push({
+        price_id:   p.id,
+        price:      p.price,
+        valid_from: p.valid_from,
+        valid_to:   p.valid_to ?? null,
+      })
+    }
+    return Array.from(rowMap.entries())
+      .map(([product_id, { product_name, prices: segs }]) => ({
+        product_id, product_name, prices: trimSegments(segs),
+      }))
+      .sort((a, b) => a.product_name.localeCompare(b.product_name, 'uk'))
+  })()
+
+
+  // ── Редагування — замінює ціну ──────────────────────────────────────────────
+  const openEdit = (priceId: number) => {
+    const p = prices.find(x => x.id === priceId)
+    if (!p) return
     setEditPrice(p)
-    setEditForm({ price: String(p.price), effective_date: today })
+    setEditForm({ price: String(p.price), effective_date: tomorrow })
   }
   const submitEdit = async (e: FormEvent) => {
     e.preventDefault()
@@ -903,12 +1186,13 @@ function PricesTab({ products, clients }: {
       })
       setEditPrice(null)
       await loadPrices()
-    } catch (err) {
-      setError(String(err))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg)
     } finally { setSaving(false) }
   }
 
-  // Нова ціна (для продукту без ціни)
+  // ── Нова ціна (для продукту без ціни) ──────────────────────────────────────
   const submitNew = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true); setError('')
@@ -920,69 +1204,171 @@ function PricesTab({ products, clients }: {
       })
       setNewModal(false)
       await loadPrices()
-    } catch (err) {
-      setError(String(err))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg)
     } finally { setSaving(false) }
   }
 
-  // Деактивувати ціну
-  const deactivate = async (id: number) => {
-    if (!confirm('Деактивувати цю ціну?')) return
+  // ── Деактивувати ціну (тільки майбутні) ────────────────────────────────────
+  const deactivate = async (priceId: number) => {
+    const p = prices.find(x => x.id === priceId)
+    if (!p) return
+    if (p.valid_from <= today) {
+      alert('Не можна видалити поточну або минулу ціну')
+      return
+    }
+    if (!confirm('Видалити цю майбутню ціну?')) return
     try {
-      await api.delete(`/prices/${id}`)
+      await api.delete(`/prices/${priceId}`)
       await loadPrices()
     } catch (err) {
       alert(String(err))
     }
   }
 
-  // Масова зміна — превью
-  const loadBulkPreview = async () => {
-    if (!bulkForm.pct || !bulkForm.effective_date) return
+  // ── Масова зміна — завантажити попередній перегляд ─────────────────────────
+  const loadBulkPreview = async (pct: string, date: string) => {
+    if (!pct || !date) { setBulkRows([]); return }
+    setBulkLoading(true)
     try {
-      const data = await api.get<{ items: typeof bulkPreview }>(
-        `/prices/bulk-preview?pct=${bulkForm.pct}&effective_date=${bulkForm.effective_date}`
+      const data = await api.get<{ items: BulkPreviewItem[] }>(
+        `/prices/bulk-preview?pct=${pct}&effective_date=${date}`
       )
-      setBulkPreview(data.items)
-    } catch (err) {
-      setError(String(err))
-    }
+      setBulkRows(data.items.map(item => {
+        const prod = products.find(p => p.id === item.product_id)
+        const cat  = categories.find(c => c.id === prod?.category_id)
+        return {
+          ...item,
+          checked:       true,
+          locked:        false,
+          manual_price:  item.new_price.toFixed(2),
+          category_id:   prod?.category_id ?? null,
+          category_name: cat?.name ?? 'Інше',
+        }
+      }))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg)
+    } finally { setBulkLoading(false) }
   }
-  useEffect(() => { if (bulkModal) loadBulkPreview() }, [bulkForm.pct, bulkForm.effective_date, bulkModal]) // eslint-disable-line
+  useEffect(() => { if (bulkModal) loadBulkPreview(bulkPct, bulkDate) }, [bulkPct, bulkDate, bulkModal]) // eslint-disable-line
 
-  const submitBulk = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!confirm(`Змінити всі ціни на ${bulkForm.pct}% з ${bulkForm.effective_date}?`)) return
+  // Оновити нову ціну в рядку через глобальний % (для незаблокованих)
+  const recalcUnlocked = (pct: string) => {
+    const p = parseFloat(pct)
+    if (isNaN(p)) return
+    setBulkRows(prev => prev.map(r =>
+      r.locked ? r : { ...r, new_price: round2(r.old_price * (1 + p / 100)), manual_price: round2(r.old_price * (1 + p / 100)).toFixed(2) }
+    ))
+  }
+
+  // Підтвердити масову зміну
+  const submitBulk = async () => {
+    const checkedRows = bulkRows.filter(r => r.checked)
+    if (checkedRows.length === 0) return
+    const hasCollision = checkedRows.some(r => r.has_collision)
+    if (hasCollision && !confirm('Деякі вироби мають колізію цін. Продовжити?')) return
     setSaving(true); setError('')
     try {
-      await api.post('/prices/bulk-change', { pct: Number(bulkForm.pct), effective_date: bulkForm.effective_date })
+      // 1. Незаблоковані рядки → bulk-change
+      const unlockedChecked  = checkedRows.filter(r => !r.locked)
+      const lockedChecked    = checkedRows.filter(r =>  r.locked)
+      const excludedIds: number[] = bulkRows
+        .filter(r => !r.checked || r.locked)
+        .map(r => r.product_id)
+
+      if (unlockedChecked.length > 0) {
+        await api.post('/prices/bulk-change', {
+          pct:                  parseFloat(bulkPct) || 0,
+          effective_date:       bulkDate,
+          excluded_product_ids: excludedIds,
+        })
+      }
+
+      // 2. Заблоковані рядки → replace (по одному)
+      for (const row of lockedChecked) {
+        const currentPrice = currentPriceMap.get(row.product_id)
+        if (!currentPrice) continue
+        await api.post('/prices/replace', {
+          old_price_id:   currentPrice.id,
+          price:          parseFloat(row.manual_price) || row.new_price,
+          effective_date: bulkDate,
+        })
+      }
+
       setBulkModal(false)
       await loadPrices()
-    } catch (err) {
-      setError(String(err))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg)
     } finally { setSaving(false) }
   }
 
-  // Нова індивідуальна ціна
-  const submitOverride = async (e: FormEvent) => {
+  // ── Індивідуальні ціни ──────────────────────────────────────────────────────
+  const populateOvRows = (clientId: string) => {
+    const cid = clientId ? Number(clientId) : null
+    const activeOverrideMap = new Map<number, ClientPriceOverride>()
+    if (cid) {
+      for (const o of overrides) {
+        if (o.client_id === cid && o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)) {
+          if (!activeOverrideMap.has(o.product_id)) activeOverrideMap.set(o.product_id, o)
+        }
+      }
+    }
+    setOvModalRows(
+      products
+        .filter(p => p.is_active)
+        .sort((a, b) => a.name.localeCompare(b.name, 'uk'))
+        .map(p => ({
+          product_id:   p.id,
+          product_name: p.name,
+          base_price:   currentPriceMap.get(p.id)?.price ?? null,
+          cur_override: cid ? (activeOverrideMap.get(p.id) ?? null) : null,
+          new_price:    '',
+        }))
+    )
+  }
+
+  const openOverrideModal = (presetClientId = '') => {
+    setOvModalClient(presetClientId)
+    setOvModalValidFrom(tomorrow)
+    setOvModalValidTo('')
+    setError('')
+    populateOvRows(presetClientId)
+    setOverrideModal(true)
+  }
+
+  const submitBulkOverride = async (e: FormEvent) => {
     e.preventDefault()
+    const toCreate = ovModalRows.filter(r => r.new_price !== '' && parseFloat(r.new_price) > 0)
+    if (toCreate.length === 0) return
     setSaving(true); setError('')
     try {
-      await api.post('/prices/overrides', {
-        client_id:  Number(overrideForm.client_id),
-        product_id: Number(overrideForm.product_id),
-        price:      Number(overrideForm.price),
-        valid_from: overrideForm.valid_from,
-        valid_to:   overrideForm.valid_to || null,
-      })
+      for (const row of toCreate) {
+        await api.post('/prices/overrides', {
+          client_id:  Number(ovModalClient),
+          product_id: row.product_id,
+          price:      parseFloat(row.new_price),
+          valid_from: ovModalValidFrom,
+          valid_to:   ovModalValidTo || null,
+        })
+      }
       setOverrideModal(false)
       await loadOverrides()
-    } catch (err) {
-      setError(String(err))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg.match(/"detail":"([^"]+)"/)?.[1] ?? msg)
     } finally { setSaving(false) }
   }
 
   const deleteOverride = async (id: number) => {
+    const o = overrides.find(x => x.id === id)
+    if (!o) return
+    if (o.valid_from <= today) {
+      alert('Не можна видалити поточну або минулу індивідуальну ціну')
+      return
+    }
     if (!confirm('Видалити індивідуальну ціну?')) return
     await api.delete(`/prices/overrides/${id}`)
     loadOverrides()
@@ -1000,9 +1386,33 @@ function PricesTab({ products, clients }: {
     >{label}</button>
   )
 
-  // Продукти без поточної ціни
-  const productsWithoutPrice = products.filter(
-    p => p.is_active && !currentPriceMap.has(p.id)
+  /** Швидкий вибір тимфрейму */
+  const quickRange = (months: number, setFrom: (v: string) => void, setTo: (v: string) => void) => {
+    const from = new Date(); from.setMonth(from.getMonth() - Math.floor(months / 3))
+    const to   = new Date(); to.setMonth(to.getMonth() + Math.ceil(months * 2 / 3))
+    setFrom(from.toISOString().slice(0, 10))
+    setTo(to.toISOString().slice(0, 10))
+  }
+
+  const timeframeBar = (
+    from: string, setFrom: (v: string) => void,
+    to: string,   setTo:   (v: string) => void,
+  ) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+      <span style={{ fontSize: 13, color: '#64748b' }}>Період:</span>
+      <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+        style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+      <span style={{ color: '#94a3b8' }}>—</span>
+      <input type="date" value={to} onChange={e => setTo(e.target.value)}
+        style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+      {[{ label: '6 міс', m: 6 }, { label: '1 рік', m: 12 }, { label: '2 роки', m: 24 }].map(({ label, m }) => (
+        <button key={m} onClick={() => quickRange(m, setFrom, setTo)}
+          style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #cbd5e1', borderRadius: 6,
+            background: '#f8fafc', cursor: 'pointer' }}>
+          {label}
+        </button>
+      ))}
+    </div>
   )
 
   return (
@@ -1015,52 +1425,40 @@ function PricesTab({ products, clients }: {
       {/* ── Базові ціни ── */}
       {innerTab === 'base' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-            <strong>Поточні ціни ({currentPrices.length} виробів)</strong>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+            <strong style={{ fontSize: 14 }}>
+              Ціни ({ganttRows.length} виробів)
+              {productsWithoutPrice.length > 0 && (
+                <span style={{ color: '#e67e22', fontWeight: 400, marginLeft: 8 }}>
+                  ⚠ {productsWithoutPrice.length} без ціни
+                </span>
+              )}
+            </strong>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setBulkModal(true)} style={{ ...addBtnStyle, background: '#e67e22' }}>
+              <button onClick={() => { setBulkModal(true); setError('') }}
+                style={{ ...addBtnStyle, background: '#e67e22' }}>
                 % Масова зміна
               </button>
-              {productsWithoutPrice.length > 0 && (
-                <button onClick={() => setNewModal(true)} style={addBtnStyle}>
-                  + Нова ціна
-                </button>
-              )}
+              <button onClick={() => { setNewModal(true); setError('') }} style={addBtnStyle}>
+                + Нова ціна
+              </button>
             </div>
           </div>
 
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ background: '#e8eef5' }}>
-                <Th>Виріб</Th><Th>Ціна, грн</Th><Th>Діє з</Th><Th>Діє до</Th><th style={{width:120}}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentPrices.map(p => (
-                <tr key={p.id}>
-                  <Td>{pName(p.product_id)}</Td>
-                  <Td><strong>{p.price.toFixed(2)}</strong></Td>
-                  <Td>{p.valid_from}</Td>
-                  <Td>{p.valid_to ? <span style={{ color: '#e67e22' }}>{p.valid_to}</span> : '∞'}</Td>
-                  <Td>
-                    <button onClick={() => openEdit(p)} style={{ ...editBtnStyle, marginRight: 4 }}>
-                      Редагувати
-                    </button>
-                    <button onClick={() => deactivate(p.id)} style={delBtnStyle}>✕</button>
-                  </Td>
-                </tr>
-              ))}
-              {currentPrices.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
-                  Ціни не задані
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+          {timeframeBar(timeFrom, setTimeFrom, timeTo, setTimeTo)}
+
+          <PriceGantt
+            rows={ganttRows}
+            timeFrom={timeFrom}
+            timeTo={timeTo}
+            today={today}
+            onEdit={openEdit}
+            onDelete={deactivate}
+          />
 
           {/* Модал редагування */}
           {editPrice && (
-            <Modal title={`Змінити ціну: ${pName(editPrice.product_id)}`} onClose={() => setEditPrice(null)}>
+            <Modal title={`Змінити ціну: ${pName(editPrice.product_id)}`} onClose={() => { setEditPrice(null); setError('') }}>
               <form onSubmit={submitEdit} className={formStyles.form}>
                 <div className={formStyles.field}>
                   <label>Поточна ціна</label>
@@ -1075,10 +1473,10 @@ function PricesTab({ products, clients }: {
                 </div>
                 <div className={formStyles.field}>
                   <label>Діє з (дата набуття чинності) *</label>
-                  <input required type="date" value={editForm.effective_date}
+                  <input required type="date" min={tomorrow} value={editForm.effective_date}
                     onChange={e => setEditForm({ ...editForm, effective_date: e.target.value })} />
                   <span className={formStyles.hint}>
-                    Стара ціна діятиме до {editForm.effective_date
+                    Мінімум завтра. Стара ціна діятиме до {editForm.effective_date
                       ? new Date(new Date(editForm.effective_date).getTime() - 86400000)
                           .toISOString().slice(0, 10)
                       : '…'}
@@ -1107,11 +1505,39 @@ function PricesTab({ products, clients }: {
                   <select required value={newForm.product_id}
                     onChange={e => setNewForm({ ...newForm, product_id: e.target.value })}>
                     <option value="">— оберіть виріб —</option>
-                    {productsWithoutPrice.map(p => (
+                    {products.filter(p => p.is_active).map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
                 </div>
+                {(() => {
+                  if (!newForm.product_id) return null
+                  const currentPrice = prices
+                    .filter(p => p.product_id === Number(newForm.product_id) && p.valid_from <= today && p.is_active)
+                    .sort((a, b) => b.valid_from.localeCompare(a.valid_from))[0]
+                  if (!currentPrice) return (
+                    <p style={{ margin: '-4px 0 8px', fontSize: 13, color: '#64748b' }}>
+                      Поточна ціна: <em>не встановлена</em>
+                    </p>
+                  )
+                  const newVal = parseFloat(newForm.price)
+                  const pct = !isNaN(newVal) && newVal > 0 && currentPrice.price > 0
+                    ? ((newVal - currentPrice.price) / currentPrice.price * 100)
+                    : null
+                  return (
+                    <p style={{ margin: '-4px 0 8px', fontSize: 13, color: '#64748b' }}>
+                      Поточна ціна: <strong style={{ color: '#1e293b' }}>{currentPrice.price.toFixed(2)} ₴</strong>
+                      {pct !== null && (
+                        <span style={{
+                          marginLeft: 10, fontWeight: 600,
+                          color: pct > 0 ? '#16a34a' : pct < 0 ? '#dc2626' : '#64748b',
+                        }}>
+                          {pct > 0 ? '+' : ''}{pct.toFixed(1)}%
+                        </span>
+                      )}
+                    </p>
+                  )
+                })()}
                 <div className={formStyles.field}>
                   <label>Ціна, грн *</label>
                   <input required type="number" min="0.01" step="0.01"
@@ -1125,7 +1551,7 @@ function PricesTab({ products, clients }: {
                     onChange={e => setNewForm({ ...newForm, valid_from: e.target.value })} />
                 </div>
                 <div className={formStyles.actions}>
-                  <button type="button" onClick={() => setNewModal(false)} className={formStyles.btnSecondary}>
+                  <button type="button" onClick={() => { setNewModal(false); setError('') }} className={formStyles.btnSecondary}>
                     Скасувати
                   </button>
                   <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
@@ -1136,161 +1562,456 @@ function PricesTab({ products, clients }: {
             </Modal>
           )}
 
-          {/* Модал масової зміни */}
-          {bulkModal && (
-            <Modal title="Масова зміна цін" onClose={() => { setBulkModal(false); setError(''); setBulkPreview([]) }}>
-              <form onSubmit={submitBulk} className={formStyles.form}>
-                <div className={formStyles.field}>
-                  <label>Зміна, % (+ збільшення, − зменшення) *</label>
-                  <input required type="number" step="0.1" autoFocus
-                    value={bulkForm.pct}
-                    onChange={e => setBulkForm({ ...bulkForm, pct: e.target.value })}
-                    placeholder="+5 або -10" />
-                </div>
-                <div className={formStyles.field}>
-                  <label>Діє з *</label>
-                  <input required type="date" value={bulkForm.effective_date}
-                    onChange={e => setBulkForm({ ...bulkForm, effective_date: e.target.value })} />
+          {/* ── Модал масової зміни (перероблений) ── */}
+          {bulkModal && (() => {
+            // Групуємо рядки за категорією
+            const groupOrder: string[] = []
+            const groupMap = new Map<string, BulkRow[]>()
+            for (const row of bulkRows) {
+              if (!groupMap.has(row.category_name)) {
+                groupOrder.push(row.category_name)
+                groupMap.set(row.category_name, [])
+              }
+              groupMap.get(row.category_name)!.push(row)
+            }
+
+            const checkedRows  = bulkRows.filter(r => r.checked)
+            const allChecked   = bulkRows.length > 0 && bulkRows.every(r => r.checked)
+            const anyChecked   = bulkRows.some(r => r.checked)
+
+            // Аналітика
+            const avgPct = checkedRows.length > 0
+              ? checkedRows.reduce((acc, r) => {
+                  const p = r.old_price > 0 ? (parseFloat(r.manual_price) - r.old_price) / r.old_price * 100 : 0
+                  return acc + p
+                }, 0) / checkedRows.length
+              : 0
+            const newPrices = checkedRows.map(r => parseFloat(r.manual_price)).filter(v => !isNaN(v))
+            const minNew = newPrices.length ? Math.min(...newPrices) : 0
+            const maxNew = newPrices.length ? Math.max(...newPrices) : 0
+            const totalDelta = checkedRows.reduce((acc, r) =>
+              acc + ((parseFloat(r.manual_price) || 0) - r.old_price), 0)
+
+            const thStyle: React.CSSProperties = {
+              padding: '0.35rem 0.6rem', textAlign: 'left', fontSize: 13,
+              background: '#f8fafc', fontWeight: 600, color: '#475569',
+              position: 'sticky', top: 0, zIndex: 1,
+              borderBottom: '2px solid #e2e8f0',
+            }
+            const td = { padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0', fontSize: 13 }
+
+            return (
+              <Modal title="Масова зміна цін" wide onClose={() => { setBulkModal(false); setError(''); setBulkRows([]) }}>
+                {/* ── Рядок параметрів ── */}
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 3 }}>Дата набуття чинності</label>
+                    <input type="date" min={tomorrow} value={bulkDate}
+                      onChange={e => setBulkDate(e.target.value)}
+                      style={{ padding: '5px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 14 }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 3 }}>Зміна, %</label>
+                    <input type="number" step="0.1" value={bulkPct} placeholder="+5 або -10"
+                      onChange={e => { setBulkPct(e.target.value); recalcUnlocked(e.target.value) }}
+                      style={{ padding: '5px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 14, width: 110 }} />
+                  </div>
+                  {bulkLoading && <div style={{ fontSize: 13, color: '#94a3b8', alignSelf: 'center' }}>Завантаження...</div>}
                 </div>
 
-                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
-                {bulkPreview.length > 0 && (
-                  <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #ddd', borderRadius: 4 }}>
-                    <table style={{ ...tableStyle, margin: 0 }}>
-                      <thead>
-                        <tr style={{ background: '#f0f4f8' }}>
-                          <Th>Виріб</Th>
-                          <Th>Стара ціна</Th>
-                          <Th>Нова ціна</Th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bulkPreview.map((item, i) => (
-                          <tr key={i}>
-                            <Td>{item.product_name}</Td>
-                            <Td>{item.old_price.toFixed(2)}</Td>
-                            <Td><strong style={{ color: Number(bulkForm.pct) > 0 ? '#27ae60' : '#e74c3c' }}>
-                              {item.new_price.toFixed(2)}
-                            </strong></Td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* ── Аналітика ── */}
+                {checkedRows.length > 0 && (
+                  <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', background: '#f0f9ff',
+                    border: '1px solid #bae6fd', borderRadius: 8, padding: '8px 14px',
+                    marginBottom: 10, fontSize: 13 }}>
+                    <span style={{ color: '#0369a1' }}>
+                      <strong>{checkedRows.length}</strong> із {bulkRows.length} виробів
+                    </span>
+                    <span style={{ color: avgPct >= 0 ? '#16a34a' : '#dc2626' }}>
+                      Середня зміна: <strong>{(avgPct >= 0 ? '+' : '') + avgPct.toFixed(1)}%</strong>
+                    </span>
+                    <span style={{ color: '#475569' }}>
+                      Нові ціни: <strong>{minNew.toFixed(2)} – {maxNew.toFixed(2)} ₴</strong>
+                    </span>
+                    <span style={{ color: totalDelta >= 0 ? '#16a34a' : '#dc2626' }}>
+                      Сума змін: <strong>{(totalDelta >= 0 ? '+' : '') + totalDelta.toFixed(2)} ₴</strong>
+                    </span>
                   </div>
                 )}
 
-                <div className={formStyles.actions}>
-                  <button type="button" onClick={() => setBulkModal(false)} className={formStyles.btnSecondary}>
+                {/* Колізійне попередження */}
+                {bulkRows.some(r => r.checked && r.has_collision) && (
+                  <div style={{ background: '#fffbeb', border: '1px solid #fbbf24', borderRadius: 8,
+                    padding: '8px 12px', fontSize: 13, color: '#92400e', marginBottom: 10 }}>
+                    ⚠ {bulkRows.filter(r => r.checked && r.has_collision).length} виробів мають колізію — вже є ціна з цієї або пізнішої дати
+                  </div>
+                )}
+
+                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem', fontSize: 13 }}>{error}</p>}
+
+                {/* ── Таблиця (фіксований заголовок, прокрутка тільки body) ── */}
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                  <table style={{ ...tableStyle, margin: 0, tableLayout: 'fixed', width: '100%' }}>
+                    <colgroup>
+                      <col style={{ width: 32 }} />
+                      <col style={{ width: '28%' }} />
+                      <col style={{ width: 82 }} />
+                      <col style={{ width: 82 }} />
+                      <col style={{ width: 118 }} />
+                      <col style={{ width: 68 }} />
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        {/* "Всі" checkbox */}
+                        <th style={{ ...thStyle, width: 32 }}>
+                          <IndeterminateCheckbox
+                            checked={allChecked}
+                            indeterminate={anyChecked && !allChecked}
+                            onChange={v => setBulkRows(prev => prev.map(r => ({ ...r, checked: v })))}
+                          />
+                        </th>
+                        <th style={thStyle}>Виріб</th>
+                        <th style={thStyle}>Діє з</th>
+                        <th style={thStyle}>Стара ціна</th>
+                        <th style={thStyle}>Нова ціна</th>
+                        <th style={thStyle}>% зміна</th>
+                      </tr>
+                    </thead>
+                  </table>
+
+                  {/* Прокручуваний tbody */}
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    <table style={{ ...tableStyle, margin: 0, tableLayout: 'fixed', width: '100%' }}>
+                      <colgroup>
+                        <col style={{ width: 32 }} />
+                        <col style={{ width: '28%' }} />
+                        <col style={{ width: 82 }} />
+                        <col style={{ width: 82 }} />
+                        <col style={{ width: 118 }} />
+                        <col style={{ width: 68 }} />
+                      </colgroup>
+                      <tbody>
+                        {bulkRows.length === 0 && !bulkLoading && (
+                          <tr><td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8', fontSize: 13 }}>
+                            Введіть % і дату щоб побачити попередній перегляд
+                          </td></tr>
+                        )}
+                        {groupOrder.map(groupName => {
+                          const rows = groupMap.get(groupName)!
+                          const allG = rows.every(r => r.checked)
+                          const anyG = rows.some(r => r.checked)
+                          return (
+                            <>
+                              {/* Рядок-заголовок групи */}
+                              <tr key={`g-${groupName}`} style={{ background: '#f1f5f9' }}>
+                                <td style={{ ...td, padding: '0.25rem 0.5rem' }}>
+                                  <IndeterminateCheckbox
+                                    checked={allG}
+                                    indeterminate={anyG && !allG}
+                                    onChange={v => setBulkRows(prev => prev.map(r =>
+                                      r.category_name === groupName ? { ...r, checked: v } : r))}
+                                  />
+                                </td>
+                                <td colSpan={5} style={{ ...td, fontWeight: 700, color: '#334155',
+                                  fontSize: 12, letterSpacing: '0.04em', textTransform: 'uppercase',
+                                  padding: '0.25rem 0.6rem' }}>
+                                  {groupName}
+                                  <span style={{ fontWeight: 400, color: '#94a3b8', marginLeft: 6 }}>
+                                    ({rows.filter(r => r.checked).length}/{rows.length})
+                                  </span>
+                                </td>
+                              </tr>
+                              {/* Рядки виробів групи */}
+                              {rows.map(row => {
+                                const idx = bulkRows.findIndex(r => r.product_id === row.product_id)
+                                const pct = row.old_price > 0
+                                  ? ((parseFloat(row.manual_price) || row.new_price) - row.old_price) / row.old_price * 100
+                                  : 0
+                                const pctStr = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%'
+                                const pctColor = pct > 0 ? '#16a34a' : pct < 0 ? '#dc2626' : '#64748b'
+                                return (
+                                  <tr key={row.product_id}
+                                    style={{ background: row.has_collision && row.checked ? '#fffbeb' : undefined,
+                                      opacity: row.checked ? 1 : 0.45 }}>
+                                    <td style={td}>
+                                      <input type="checkbox" checked={row.checked}
+                                        onChange={e => setBulkRows(prev => prev.map((r, j) =>
+                                          j === idx ? { ...r, checked: e.target.checked } : r))} />
+                                    </td>
+                                    <td style={{ ...td, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                      {row.product_name}
+                                      {row.has_collision && (
+                                        <span style={{ color: '#f59e0b', marginLeft: 5 }}
+                                          title={`Конфліктна ціна: ${row.collision_date}`}>⚠</span>
+                                      )}
+                                    </td>
+                                    <td style={{ ...td, fontSize: 11, color: '#94a3b8' }}>{row.valid_from}</td>
+                                    <td style={td}>{row.old_price.toFixed(2)}</td>
+                                    <td style={td}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                                        <input type="number" step="0.01" min="0.01"
+                                          value={row.manual_price}
+                                          onChange={e => setBulkRows(prev => prev.map((r, j) =>
+                                            j === idx ? { ...r, manual_price: e.target.value, locked: true } : r))}
+                                          style={{ width: 70, padding: '2px 5px', border: '1px solid #cbd5e1',
+                                            borderRadius: 4, fontSize: 13,
+                                            background: row.locked ? '#eff6ff' : undefined }} />
+                                        {row.locked && (
+                                          <button type="button" title="Зняти блокування"
+                                            onClick={() => {
+                                              const newP = round2(row.old_price * (1 + (parseFloat(bulkPct) || 0) / 100))
+                                              setBulkRows(prev => prev.map((r, j) =>
+                                                j === idx ? { ...r, locked: false, manual_price: newP.toFixed(2), new_price: newP } : r))
+                                            }}
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                              fontSize: 14, color: '#3b82f6', padding: 0, lineHeight: 1 }}>
+                                            🔒
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td style={{ ...td, color: pctColor, fontWeight: 600 }}>{pctStr}</td>
+                                  </tr>
+                                )
+                              })}
+                            </>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                  <button type="button" onClick={() => { setBulkModal(false); setBulkRows([]); setError('') }}
+                    className={formStyles.btnSecondary}>
                     Скасувати
                   </button>
-                  <button type="submit" disabled={saving || bulkPreview.length === 0} className={formStyles.btnPrimary}>
-                    {saving ? 'Збереження...' : `Застосувати (${bulkPreview.length} цін)`}
+                  <button type="button"
+                    disabled={saving || checkedRows.length === 0}
+                    onClick={submitBulk}
+                    className={formStyles.btnPrimary}>
+                    {saving ? 'Збереження...' : `Підтвердити зміни (${checkedRows.length})`}
                   </button>
                 </div>
-              </form>
-            </Modal>
-          )}
+              </Modal>
+            )
+          })()}
         </>
       )}
 
       {/* ── Індивідуальні ціни ── */}
-      {innerTab === 'overrides' && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10, gap: 8, flexWrap: 'wrap' }}>
-            <select value={filterClientId} onChange={e => setFilterClientId(e.target.value)}
-              style={{ padding: '5px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13 }}>
-              <option value="">Всі клієнти</option>
-              {clients.filter(c => c.is_active).map(c => (
-                <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
-              ))}
-            </select>
-            <button onClick={() => setOverrideModal(true)} style={addBtnStyle}>
-              + Додати індивідуальну ціну
-            </button>
-          </div>
+      {innerTab === 'overrides' && (() => {
+        const ovThStyle: React.CSSProperties = {
+          padding: '0.35rem 0.65rem', textAlign: 'left', fontSize: 13,
+          fontWeight: 600, color: '#475569', background: '#f1f5f9',
+          borderBottom: '1px solid #e2e8f0',
+        }
+        const ovTdStyle: React.CSSProperties = {
+          padding: '0.3rem 0.65rem', fontSize: 13, borderBottom: '1px solid #f0f0f0',
+        }
+        // Group overrides by client
+        const clientMap = new Map<number, ClientPriceOverride[]>()
+        for (const o of overrides) {
+          if (!clientMap.has(o.client_id)) clientMap.set(o.client_id, [])
+          clientMap.get(o.client_id)!.push(o)
+        }
+        const sortedClients = Array.from(clientMap.entries())
+          .sort(([a], [b]) => cName(a).localeCompare(cName(b), 'uk'))
 
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ background: '#e8eef5' }}>
-                <Th>Клієнт</Th><Th>Виріб</Th><Th>Ціна, грн</Th><Th>Діє з</Th><Th>Діє до</Th><th style={{width:60}}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {overrides.map(o => (
-                <tr key={o.id}>
-                  <Td>{cName(o.client_id)}</Td>
-                  <Td>{pName(o.product_id)}</Td>
-                  <Td><strong>{o.price.toFixed(2)}</strong></Td>
-                  <Td>{o.valid_from}</Td>
-                  <Td>{o.valid_to ?? '∞'}</Td>
-                  <Td>
-                    <button onClick={() => deleteOverride(o.id)} style={delBtnStyle}>✕</button>
-                  </Td>
-                </tr>
-              ))}
-              {overrides.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
-                  Немає індивідуальних цін
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+        return (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <button onClick={() => openOverrideModal()} style={addBtnStyle}>
+                + Встановити індивідуальні ціни
+              </button>
+            </div>
 
-          {overrideModal && (
-            <Modal title="Нова індивідуальна ціна" onClose={() => { setOverrideModal(false); setError('') }}>
-              <form onSubmit={submitOverride} className={formStyles.form}>
-                {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
-                <div className={formStyles.field}>
-                  <label>Клієнт *</label>
-                  <select required value={overrideForm.client_id}
-                    onChange={e => setOverrideForm({ ...overrideForm, client_id: e.target.value })}>
-                    <option value="">— оберіть клієнта —</option>
-                    {clients.filter(c => c.is_active).map(c => (
-                      <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
-                    ))}
-                  </select>
+            {sortedClients.length === 0 && (
+              <p style={{ color: '#94a3b8', padding: 24, textAlign: 'center' }}>Немає індивідуальних цін</p>
+            )}
+
+            {sortedClients.map(([clientId, cOverrides]) => {
+              const isExpanded = expandedClients.has(clientId)
+              const activeOvs = cOverrides.filter(
+                o => o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)
+              )
+              const activeSum = activeOvs.reduce((s, o) => s + o.price, 0)
+              const toggleExpand = () => setExpandedClients(prev => {
+                const next = new Set(prev)
+                if (isExpanded) next.delete(clientId); else next.add(clientId)
+                return next
+              })
+              return (
+                <div key={clientId} style={{ marginBottom: 6, border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                  <div onClick={toggleExpand} style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px',
+                    background: '#f8fafc', cursor: 'pointer', userSelect: 'none',
+                    borderBottom: isExpanded ? '1px solid #e2e8f0' : 'none',
+                  }}>
+                    <span style={{ fontSize: 12, color: '#64748b', width: 12 }}>{isExpanded ? '▼' : '▶'}</span>
+                    <strong style={{ flex: 1, fontSize: 14, color: '#1e293b' }}>{cName(clientId)}</strong>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>
+                      {cOverrides.length} {cOverrides.length === 1 ? 'запис' : cOverrides.length < 5 ? 'записи' : 'записів'}
+                    </span>
+                    {activeOvs.length > 0 && (
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', background: '#f0fdf4', padding: '2px 8px', borderRadius: 4 }}>
+                        активних: {activeOvs.length} · {activeSum.toFixed(2)} ₴
+                      </span>
+                    )}
+                    <button
+                      onClick={e => { e.stopPropagation(); openOverrideModal(String(clientId)) }}
+                      style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #3b82f6', borderRadius: 6, background: 'white', color: '#2563eb', cursor: 'pointer' }}
+                    >+ Ціни</button>
+                  </div>
+                  {isExpanded && (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={ovThStyle}>Виріб</th>
+                          <th style={{ ...ovThStyle, width: 90 }}>Ціна, ₴</th>
+                          <th style={{ ...ovThStyle, width: 100 }}>Діє з</th>
+                          <th style={{ ...ovThStyle, width: 100 }}>Діє до</th>
+                          <th style={{ ...ovThStyle, width: 80 }}>Стан</th>
+                          <th style={{ ...ovThStyle, width: 44 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...cOverrides]
+                          .sort((a, b) => pName(a.product_id).localeCompare(pName(b.product_id), 'uk'))
+                          .map(o => {
+                            const isActive = o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)
+                            const isPast   = o.valid_to !== null && o.valid_to < today
+                            const isFuture = o.valid_from > today
+                            const canDel   = o.valid_from > today
+                            return (
+                              <tr key={o.id} style={{ background: isActive ? '#f0fdf4' : isPast ? '#fafafa' : '#fffbeb' }}>
+                                <td style={ovTdStyle}>{pName(o.product_id)}</td>
+                                <td style={{ ...ovTdStyle, fontWeight: 600 }}>{o.price.toFixed(2)}</td>
+                                <td style={ovTdStyle}>{o.valid_from}</td>
+                                <td style={{ ...ovTdStyle, color: '#64748b' }}>{o.valid_to ?? '∞'}</td>
+                                <td style={{ ...ovTdStyle, fontSize: 11 }}>
+                                  {isActive  ? <span style={{ color: '#16a34a' }}>активна</span>
+                                  : isPast   ? <span style={{ color: '#94a3b8' }}>минула</span>
+                                  : isFuture ? <span style={{ color: '#f59e0b' }}>майбутня</span>
+                                  : null}
+                                </td>
+                                <td style={{ ...ovTdStyle, textAlign: 'center' }}>
+                                  <button disabled={!canDel}
+                                    title={canDel ? 'Видалити' : 'Не можна видалити активну або минулу ціну'}
+                                    onClick={() => deleteOverride(o.id)}
+                                    style={{ background: 'none', border: 'none', cursor: canDel ? 'pointer' : 'default', color: canDel ? '#ef4444' : '#cbd5e1', fontSize: 16 }}
+                                  >×</button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-                <div className={formStyles.field}>
-                  <label>Виріб *</label>
-                  <select required value={overrideForm.product_id}
-                    onChange={e => setOverrideForm({ ...overrideForm, product_id: e.target.value })}>
-                    <option value="">— оберіть виріб —</option>
-                    {products.filter(p => p.is_active).map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className={formStyles.field}>
-                  <label>Ціна, грн *</label>
-                  <input required type="number" min="0.01" step="0.01"
-                    value={overrideForm.price}
-                    onChange={e => setOverrideForm({ ...overrideForm, price: e.target.value })}
-                    placeholder="0.00" />
-                </div>
-                <div className={formStyles.field}>
-                  <label>Діє з *</label>
-                  <input required type="date" value={overrideForm.valid_from}
-                    onChange={e => setOverrideForm({ ...overrideForm, valid_from: e.target.value })} />
-                </div>
-                <div className={formStyles.field}>
-                  <label>Діє до</label>
-                  <input type="date" value={overrideForm.valid_to}
-                    onChange={e => setOverrideForm({ ...overrideForm, valid_to: e.target.value })} />
-                  <span className={formStyles.hint}>Порожньо — безстроково</span>
-                </div>
-                <div className={formStyles.actions}>
-                  <button type="button" onClick={() => setOverrideModal(false)} className={formStyles.btnSecondary}>
-                    Скасувати
-                  </button>
-                  <button type="submit" disabled={saving} className={formStyles.btnPrimary}>
-                    {saving ? 'Збереження...' : 'Зберегти'}
-                  </button>
-                </div>
-              </form>
-            </Modal>
-          )}
-        </>
-      )}
+              )
+            })}
+
+            {overrideModal && (
+              <Modal title="Індивідуальні ціни клієнта" wide onClose={() => { setOverrideModal(false); setError('') }}>
+                <form onSubmit={submitBulkOverride} className={formStyles.form}>
+                  {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, alignItems: 'flex-end' }}>
+                    <div className={formStyles.field} style={{ flex: '1 1 200px', minWidth: 180, margin: 0 }}>
+                      <label>Клієнт *</label>
+                      <select required value={ovModalClient}
+                        onChange={e => { setOvModalClient(e.target.value); populateOvRows(e.target.value) }}>
+                        <option value="">— оберіть клієнта —</option>
+                        {clients.filter(c => c.is_active).map(c => (
+                          <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className={formStyles.field} style={{ flex: '0 0 140px', margin: 0 }}>
+                      <label>Діє з *</label>
+                      <input required type="date" min={tomorrow} value={ovModalValidFrom}
+                        onChange={e => {
+                          setOvModalValidFrom(e.target.value)
+                          if (ovModalValidTo && ovModalValidTo < e.target.value) setOvModalValidTo(e.target.value)
+                        }} />
+                    </div>
+                    <div className={formStyles.field} style={{ flex: '0 0 160px', margin: 0 }}>
+                      <label>Діє до <span style={{ fontWeight: 400, color: '#94a3b8' }}>(необов'язково)</span></label>
+                      <input type="date" min={ovModalValidFrom || tomorrow} value={ovModalValidTo}
+                        onChange={e => setOvModalValidTo(e.target.value)} />
+                    </div>
+                  </div>
+
+                  {ovModalClient && (
+                    <>
+                      <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr>
+                              {['Виріб', 'Базова ціна', 'Поточна інд. ціна', 'Нова ціна, ₴', '% від бази'].map(h => (
+                                <th key={h} style={{
+                                  padding: '0.35rem 0.6rem', textAlign: 'left', fontSize: 13,
+                                  background: '#f8fafc', fontWeight: 600, color: '#475569',
+                                  position: 'sticky', top: 0, zIndex: 1, borderBottom: '2px solid #e2e8f0',
+                                }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ovModalRows.map((row, idx) => {
+                              const newVal = parseFloat(row.new_price)
+                              const pct = !isNaN(newVal) && newVal > 0 && row.base_price
+                                ? ((newVal - row.base_price) / row.base_price * 100) : null
+                              return (
+                                <tr key={row.product_id} style={{ background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                  <td style={{ padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0' }}>{row.product_name}</td>
+                                  <td style={{ padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0', color: '#64748b' }}>
+                                    {row.base_price !== null ? `${row.base_price.toFixed(2)} ₴` : '—'}
+                                  </td>
+                                  <td style={{ padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0', fontWeight: row.cur_override ? 600 : 400, color: row.cur_override ? '#1e293b' : '#94a3b8' }}>
+                                    {row.cur_override ? `${row.cur_override.price.toFixed(2)} ₴` : '—'}
+                                  </td>
+                                  <td style={{ padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0' }}>
+                                    <input type="number" min="0.01" step="0.01" placeholder="не змінювати"
+                                      value={row.new_price}
+                                      onChange={e => setOvModalRows(prev => prev.map((r, i) =>
+                                        i === idx ? { ...r, new_price: e.target.value } : r
+                                      ))}
+                                      style={{ width: '100%', padding: '3px 6px', border: '1px solid #cbd5e1', borderRadius: 4, fontSize: 13 }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '0.3rem 0.55rem', borderBottom: '1px solid #f0f0f0', fontWeight: 600,
+                                    color: pct === null ? '#94a3b8' : pct > 0 ? '#16a34a' : pct < 0 ? '#dc2626' : '#64748b',
+                                  }}>
+                                    {pct !== null ? `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 0' }}>
+                        Заповніть ціни лише для потрібних виробів. Порожні рядки пропускаються.
+                      </p>
+                    </>
+                  )}
+
+                  <div className={formStyles.actions}>
+                    <button type="button" onClick={() => { setOverrideModal(false); setError('') }} className={formStyles.btnSecondary}>
+                      Скасувати
+                    </button>
+                    <button type="submit" disabled={saving || !ovModalClient || ovModalRows.every(r => !r.new_price || parseFloat(r.new_price) <= 0)} className={formStyles.btnPrimary}>
+                      {saving ? 'Збереження...' : `Зберегти (${ovModalRows.filter(r => r.new_price !== '' && parseFloat(r.new_price) > 0).length})`}
+                    </button>
+                  </div>
+                </form>
+              </Modal>
+            )}
+          </>
+        )
+      })()}
     </section>
   )
 }
@@ -1904,11 +2625,12 @@ function SettingsTab({ section }: { section: SettingsSection }) {
 // ─── Шаблони повідомлень Telegram-бота ────────────────────────────────────────
 
 const BOT_TEMPLATES: { key: string; label: string; hint: string }[] = [
-  { key: 'bot_tpl_reminder',  label: 'Нагадування про замовлення',       hint: 'Змінні: {date}' },
-  { key: 'bot_tpl_deadline',  label: 'Стоп-прийом замовлень',           hint: 'Змінні: {date}' },
-  { key: 'bot_tpl_confirmed', label: 'Підтверджено оператором',          hint: 'Змінні: {product}, {qty}, {date}, {sum}' },
-  { key: 'bot_tpl_rejected',  label: 'Відхилено оператором',             hint: 'Змінні: {product}, {qty}, {date}, {reason}' },
-  { key: 'bot_tpl_modified',  label: 'Підтверджено зі змінами',          hint: 'Змінні: {product}, {qty}, {new_qty}, {date}, {sum}, {reason}' },
+  { key: 'bot_tpl_reminder',      label: 'Нагадування про замовлення',       hint: 'Змінні: {date}' },
+  { key: 'bot_tpl_deadline',      label: 'Стоп-прийом замовлень',           hint: 'Змінні: {date}' },
+  { key: 'bot_tpl_confirmed',     label: 'Підтверджено оператором',          hint: 'Змінні: {product}, {qty}, {date}, {sum}' },
+  { key: 'bot_tpl_rejected',      label: 'Відхилено оператором',             hint: 'Змінні: {product}, {qty}, {date}, {reason}' },
+  { key: 'bot_tpl_modified',      label: 'Підтверджено зі змінами',          hint: 'Змінні: {product}, {qty}, {new_qty}, {date}, {sum}, {reason}' },
+  { key: 'bot_tpl_invoice_sent',  label: 'Накладна відправлена (PDF)',       hint: 'Змінні: {date}' },
 ]
 
 function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, labelStyle, addBtnStyle }: {

@@ -2,6 +2,9 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Category, Client, Order, Product } from '../types'
 import styles from './OrderModal.module.css'
+import PriceTypeBadge, { type PriceSource } from './PriceTypeBadge'
+
+type EffectivePriceInfo = { price: number; source: PriceSource }
 
 type CellKey = `${number}-${number}`
 type SavingMap = Record<CellKey, 'saving' | 'saved' | 'error'>
@@ -28,7 +31,7 @@ export default function OrderModal({
   const [filter,  setFilter]  = useState<'all' | number>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
-  const [prices,  setPrices]  = useState<Record<number, number>>({})
+  const [prices,  setPrices]  = useState<Record<number, EffectivePriceInfo>>({})
 
   const yesterday = (() => { const d = new Date(workDate); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) })()
   const [repeatDate,    setRepeatDate]    = useState(yesterday)
@@ -60,8 +63,17 @@ export default function OrderModal({
 
   // Завантажуємо ефективні ціни при відкритті
   useEffect(() => {
-    api.get<Record<number, number>>(`/prices/effective?client_id=${client.id}&date=${workDate}`)
-      .then(setPrices).catch(() => {})
+    api.get<Record<number, EffectivePriceInfo | number>>(`/prices/effective?client_id=${client.id}&date=${workDate}`)
+      .then(raw => {
+        // Normalize: backend may return {id: number} (old) or {id: {price, source}} (new)
+        const normalized: Record<number, EffectivePriceInfo> = {}
+        for (const [k, v] of Object.entries(raw)) {
+          normalized[Number(k)] = typeof v === 'number'
+            ? { price: v, source: 'base' }
+            : v as EffectivePriceInfo
+        }
+        setPrices(normalized)
+      }).catch(() => {})
   }, [client.id, workDate])
 
   // Завантажуємо частоту клієнта при перемиканні на сортування за частотою
@@ -132,7 +144,7 @@ export default function OrderModal({
   const uniqueCount = new Set(clientOrders.map(o => o.product_id)).size
   const totalQty    = clientOrders.reduce((s, o) => s + o.qty, 0)
   const totalSum    = clientOrders.reduce((s, o) => {
-    const price = o.price_override != null ? o.price_override : (prices[o.product_id] ?? 0)
+    const price = o.price_override != null ? o.price_override : (prices[o.product_id]?.price ?? 0)
     return s + o.qty * price
   }, 0)
 
@@ -279,7 +291,8 @@ export default function OrderModal({
                   const state      = saving[key]
                   const qty        = getQty(product.id)
                   const freq       = freqs[product.id]
-                  const price      = prices[product.id]
+                  const priceInfo  = prices[product.id]
+                  const price      = priceInfo?.price
                   const extraLines = getExtraLines(product.id)
                   const showAdd    = addLine?.productId === product.id
 
@@ -297,7 +310,9 @@ export default function OrderModal({
                           {product.weight ? <span>{product.weight}</span> : null}
                         </td>
                         <td className={styles.tdPrice}>
-                          {price != null && price > 0 ? fmt(price) : '—'}
+                          {price != null && price > 0
+                            ? <>{fmt(price)}<PriceTypeBadge source={priceInfo!.source} /></>
+                            : '—'}
                         </td>
                         <td className={styles.tdAct}>
                           {!locked && !showAdd && (

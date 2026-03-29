@@ -39,7 +39,9 @@ from backend.models.baking import BakingTask
 from backend.models.invoices import Invoice
 from backend.models.references import Client, Product, ClientBotUser
 from backend.services.finance import get_summary, get_all_balances, get_client_balance
-from backend.services.prices import get_price
+from backend.services.prices import get_price, get_price_with_source
+
+_PRICE_SOURCE_LABEL = {'base': 'Б', 'discounted': '%', 'individual': 'І', 'manual': 'Р'}
 
 log = logging.getLogger("bakery.telegram")
 
@@ -219,6 +221,47 @@ def send_to_chat(chat_id: int, text: str) -> None:
         _send(token, chat_id, text)
 
 
+def send_invoice_pdf_to_client(db: Session, invoice) -> None:
+    """Надсилає PDF накладної всім авторизованим chat_id клієнта (при переході статусу в 'sent')."""
+    token = _get_token()
+    if not token:
+        return
+
+    users = (
+        db.query(ClientBotUser)
+        .filter(ClientBotUser.client_id == invoice.client_id, ClientBotUser.is_active == 1)
+        .all()
+    )
+    if not users:
+        return
+
+    tpl = _get_setting(db, "bot_tpl_invoice_sent",
+                       "Ваше замовлення на {date} відправлено. Ось ваша накладна.")
+    text = tpl.replace("{date}", invoice.invoice_date)
+
+    try:
+        from backend.routers.print_views import render_invoice_pdf_bytes
+        pdf_bytes = render_invoice_pdf_bytes(invoice, db)
+    except Exception as exc:
+        log.warning("PDF generation failed for invoice %s: %s", invoice.invoice_number, exc)
+        for u in users:
+            _send(token, u.chat_id, text)
+        return
+
+    filename = f"invoice_{invoice.invoice_number}.pdf"
+    for u in users:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendDocument"
+            rq.post(
+                url,
+                data={"chat_id": u.chat_id, "caption": text, "parse_mode": "HTML"},
+                files={"document": (filename, pdf_bytes, "application/pdf")},
+                timeout=30,
+            )
+        except Exception as exc:
+            log.warning("Failed to send invoice PDF to chat %s: %s", u.chat_id, exc)
+
+
 # ── Клавіатури ────────────────────────────────────────────────────────────────
 
 def _request_contact_keyboard() -> dict:
@@ -287,7 +330,8 @@ def _products_inline_kb(products: list, page: int) -> dict:
         for p in chunk[i: i + 2]:
             label = p["name"]
             if p.get("price") is not None:
-                label += f" — {p['price']:.0f} грн"
+                src = p.get("price_source", "Б")
+                label += f" — {p['price']:.0f} грн [{src}]"
             row.append({"text": label, "callback_data": f"prod:{p['id']}"})
         rows.append(row)
 
@@ -524,7 +568,8 @@ def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str
         name = ln.product.name if ln.product else f"#{ln.product_id}"
         s = ln.sum
         order_sum += s
-        lines.append(f"• {name} × {ln.qty:.0f} шт — {s:.2f} грн")
+        src_tag = f" [Р]" if ln.price_override is not None else ""
+        lines.append(f"• {name} × {ln.qty:.0f} шт — {s:.2f} грн{src_tag}")
 
     lines += ["", SEP, f"За товар: <b>{order_sum:.2f} грн</b>"]
 
@@ -553,14 +598,16 @@ def _get_products_by_category(category_id: int, client_id: int, order_date: str)
             .order_by(Product.name)
             .all()
         )
-        return [
-            {
+        result = []
+        for p in products:
+            price, source = get_price_with_source(db, p.id, client_id, order_date)
+            result.append({
                 "id": p.id,
                 "name": p.name,
-                "price": get_price(db, p.id, client_id, order_date),
-            }
-            for p in products
-        ]
+                "price": price,
+                "price_source": _PRICE_SOURCE_LABEL.get(source, 'Б'),
+            })
+        return result
 
 
 def _is_bot_accepting() -> tuple[bool, str]:

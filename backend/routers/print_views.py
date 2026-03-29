@@ -1,6 +1,7 @@
 """Ендпоінти для друку: повертають готовий HTML для відкриття у браузері."""
 
 from typing import Optional
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -313,6 +314,323 @@ body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; background: 
     box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 }
 </style>"""
+
+
+# ─── PDF для Telegram ────────────────────────────────────────────────────────
+
+# CSS без flexbox — сумісний з xhtml2pdf (FONTS_DIR_PLACEHOLDER замінюється динамічно)
+_PDF_CSS_TPL = """<style>
+@font-face {
+    font-family: ArialCYR;
+    src: url('FONTS_DIR_PLACEHOLDER/arial_uni.ttf');
+}
+@font-face {
+    font-family: ArialCYR;
+    src: url('FONTS_DIR_PLACEHOLDER/arial_bold.ttf');
+    font-weight: bold;
+}
+@font-face {
+    font-family: ArialCYR;
+    src: url('FONTS_DIR_PLACEHOLDER/arial_italic.ttf');
+    font-style: italic;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: ArialCYR, Arial, sans-serif; font-size: 9pt; color: #000; background: #fff; }
+.inv-block { border: 1px solid #aaa; padding: 5mm 4mm; }
+.inv-top { width: 100%; margin-bottom: 1mm; font-size: 8.5pt; overflow: hidden; }
+.city { }
+.inv-date { font-style: italic; float: right; }
+.copy-label { font-size: 8pt; color: #555; }
+.inv-title { font-size: 13pt; font-weight: bold; text-align: center;
+  margin: 2mm 0 3mm; border-bottom: 2px solid #000; padding-bottom: 2mm; }
+.inv-num { border-bottom: 1px solid #000; }
+.meta-tbl { width: 100%; border: none; margin-bottom: 2mm; }
+.meta-tbl td { border: none; padding: 0.8mm 0; font-size: 8.5pt; }
+.ml { width: 28mm; color: #333; }
+.mv { border-bottom: 1px solid #000; }
+.lines-tbl { width: 100%; border-collapse: collapse; margin-bottom: 2mm; font-size: 8.5pt; }
+.lines-tbl th { background: #d8d8d8; border: 1px solid #777;
+  padding: 1.5mm 1.5mm; font-size: 8pt; font-weight: bold; }
+.lines-tbl td { border: 1px solid #aaa; padding: 1mm 1.5mm; }
+.lines-tbl tr.subtotal td { background: #f0f0f0; border-top: 1px solid #888; }
+.c { text-align: center; }
+.r { text-align: right; }
+.exch-section { margin-top: 2mm; }
+.exch-title { font-size: 8pt; font-weight: bold; text-transform: uppercase; color: #555;
+  border-top: 1px dashed #aaa; padding-top: 1.5mm; margin-bottom: 1mm; }
+.total-line { font-size: 8.5pt; margin: 2mm 0 0.5mm; }
+.total-box { font-size: 12pt; font-weight: bold;
+  border: 2px solid #000; padding: 0.5mm 3mm; }
+.kopiyky { font-size: 8pt; color: #555; margin-bottom: 3mm; }
+.sigs { width: 100%; border-top: 1px solid #bbb; padding-top: 1.5mm;
+  font-size: 8pt; margin-top: 2mm; overflow: hidden; }
+.sig-left { float: left; width: 48%; }
+.sig-right { float: right; width: 48%; text-align: right; }
+</style>"""
+
+
+_FONTS_DIR = Path(__file__).parent.parent / "fonts"
+_FONTS_REGISTERED = False
+
+
+def _register_cyrillic_fonts() -> None:
+    """Реєструє шрифти з підтримкою кирилиці в ReportLab (один раз)."""
+    global _FONTS_REGISTERED
+    if _FONTS_REGISTERED:
+        return
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfbase.pdfmetrics import registerFontFamily
+        pdfmetrics.registerFont(TTFont("ArialCYR",        str(_FONTS_DIR / "arial_uni.ttf")))
+        pdfmetrics.registerFont(TTFont("ArialCYR-Bold",   str(_FONTS_DIR / "arial_bold.ttf")))
+        pdfmetrics.registerFont(TTFont("ArialCYR-Italic", str(_FONTS_DIR / "arial_italic.ttf")))
+        registerFontFamily("ArialCYR",
+                           normal="ArialCYR",
+                           bold="ArialCYR-Bold",
+                           italic="ArialCYR-Italic",
+                           boldItalic="ArialCYR-Bold")
+        _FONTS_REGISTERED = True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Font registration failed: %s", e)
+
+
+def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
+    """Генерує PDF-байти однієї накладної через ReportLab (для Telegram)."""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+
+    _register_cyrillic_fonts()
+
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+    director    = cfg.get("director", "")
+    accountant  = cfg.get("accountant", "")
+
+    client     = inv.client
+    c_name     = (client.short_name or client.full_name) if client else "—"
+    c_addr     = (client.address or "") if client else ""
+    route_name = (client.route.name if client and client.route else "") if client else ""
+
+    FONT      = "ArialCYR"
+    FONT_BOLD = "ArialCYR-Bold"
+    FONT_IT   = "ArialCYR-Italic"
+    FS        = 8.0   # базовий розмір шрифту (як у паперовій накладній)
+
+    def S(text, font=FONT, size=FS, align=TA_LEFT, color=colors.black) -> Paragraph:
+        st = ParagraphStyle("s", fontName=font, fontSize=size, textColor=color,
+                            alignment=align, leading=size * 1.2)
+        return Paragraph(str(text), st)
+
+    # Вузький формат — контент ~116мм як у паперовому друку (half A4 landscape мінус поля)
+    PAGE_W, PAGE_H = 124*mm, 210*mm
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=(PAGE_W, PAGE_H),
+                            leftMargin=4*mm, rightMargin=4*mm,
+                            topMargin=5*mm, bottomMargin=5*mm)
+    W = PAGE_W - 8*mm  # ширина контенту
+
+    story = []
+
+    LBL = colors.HexColor("#444444")
+
+    # ── Шапка ────────────────────────────────────────────────────────────────
+    header_tbl = Table(
+        [[S(f"<b>{route_name}</b>", font=FONT_BOLD, size=FS),
+          S(ua_date(inv.invoice_date), font=FONT_IT, size=FS, align=TA_RIGHT)]],
+        colWidths=[W * 0.6, W * 0.4],
+    )
+    header_tbl.setStyle(TableStyle([
+        ("TOPPADDING", (0,0),(-1,-1), 0), ("BOTTOMPADDING", (0,0),(-1,-1), 1)
+    ]))
+    story.append(header_tbl)
+    story.append(HRFlowable(width=W, thickness=0.5, color=colors.grey))
+    story.append(Spacer(1, 1.5*mm))
+
+    # ── Назва ─────────────────────────────────────────────────────────────────
+    story.append(S(f"Накладна № {inv.invoice_number}", font=FONT_BOLD, size=11, align=TA_CENTER))
+    story.append(HRFlowable(width=W, thickness=1.5, color=colors.black))
+    story.append(Spacer(1, 1.5*mm))
+
+    # ── Мета ─────────────────────────────────────────────────────────────────
+    meta_data = [
+        [S("Від кого:", size=FS, color=LBL), S(f"<b>{bakery_name}</b>", font=FONT_BOLD, size=FS)],
+        [S("Кому:",     size=FS, color=LBL), S(f"<b>{c_name}</b>",      font=FONT_BOLD, size=FS)],
+        [S("Через:",    size=FS, color=LBL), S(c_addr, size=FS)],
+        [S("Дов. №:",   size=FS, color=LBL), S("__________  від  __________", size=FS)],
+    ]
+    # Права колонка = тільки скільки потрібно тексту (решта ширина сторінки)
+    meta_tbl = Table(meta_data, colWidths=[20*mm, W - 20*mm])
+    meta_tbl.setStyle(TableStyle([
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 0.8),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.black),  # підкреслення під кожним рядком
+        ("LINEBELOW", (0, -1), (-1, -1), 0, colors.white),   # але не під останнім
+        ("INNERGRID", (0, 0), (-1, -1), 0, colors.white),    # без вертикальних ліній
+        ("BOX",       (0, 0), (-1, -1), 0, colors.white),    # без рамки
+    ]))
+    story.append(meta_tbl)
+    story.append(Spacer(1, 1.5*mm))
+
+    # ── Таблиця товарів ───────────────────────────────────────────────────────
+    from backend.models.references import Category as CatModel
+    all_cats = {c.id: c for c in db.query(CatModel).all()}
+    main_lines = [l for l in inv.lines if not l.is_exchange]
+    exch_lines = [l for l in inv.lines if l.is_exchange]
+
+    groups: dict = {}
+    cat_order: list = []
+    for line in main_lines:
+        product = db.get(Product, line.product_id)
+        cid = product.category_id if product else None
+        if cid not in groups:
+            groups[cid] = []
+            cat_order.append(cid)
+        groups[cid].append((line, product))
+    cat_order.sort(key=lambda cid: all_cats[cid].sort_order if cid and cid in all_cats else 999)
+
+    HDR_BG  = colors.HexColor("#d8d8d8")
+    SUB_BG  = colors.HexColor("#f0f0f0")
+    BORDER  = colors.HexColor("#aaaaaa")
+    # Назва | Кільк | Од | Ціна | Сума — пропорції з HTML CSS (38px/32px/54px/60px → pt: 13/9/19/21mm)
+    C_QTY, C_UNIT, C_PRICE, C_SUM = 13*mm, 9*mm, 19*mm, 21*mm
+    COL_W = [W - C_QTY - C_UNIT - C_PRICE - C_SUM, C_QTY, C_UNIT, C_PRICE, C_SUM]
+
+    lines_data = [[
+        S("Назва", font=FONT_BOLD, size=FS, align=TA_CENTER),
+        S("Кільк.", font=FONT_BOLD, size=FS, align=TA_CENTER),
+        S("Од.", font=FONT_BOLD, size=FS, align=TA_CENTER),
+        S("Ціна", font=FONT_BOLD, size=FS, align=TA_RIGHT),
+        S("Сума", font=FONT_BOLD, size=FS, align=TA_RIGHT),
+    ]]
+
+    total_qty = 0
+    total_names = 0
+    for cid in cat_order:
+        for line, product in groups[cid]:
+            p_name    = product.name if product else f"#{line.product_id}"
+            unit      = product.unit.name if product and product.unit else "шт"
+            eff_price = line.price_override if line.price_override else line.price
+            total_qty    += line.qty
+            total_names  += 1
+            lines_data.append([
+                S(p_name, size=FS),
+                S(f"{line.qty:g}", size=FS, align=TA_CENTER),
+                S(unit, size=FS, align=TA_CENTER),
+                S(fmt(eff_price), size=FS, align=TA_RIGHT),
+                S(fmt(line.sum), size=FS, align=TA_RIGHT),
+            ])
+        cat_label = all_cats[cid].name if cid and cid in all_cats else "Інше"
+        g_sum = sum(l.sum for l, _ in groups[cid])
+        lines_data.append([
+            S(f"Сума по  <b>{cat_label}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT),
+            S(""), S(""), S(""),
+            S(f"<b>{fmt(g_sum)}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT),
+        ])
+
+    lines_tbl = Table(lines_data, colWidths=COL_W, repeatRows=1)
+    base_style = [
+        ("BACKGROUND",  (0, 0), (-1, 0), HDR_BG),
+        ("GRID",        (0, 0), (-1, 0), 0.5, colors.HexColor("#777777")),
+        ("BOX",         (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID",   (0, 1), (-1, -1), 0.5, BORDER),
+        ("TOPPADDING",    (0, 0), (-1, -1), 1.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 1.5),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 1.5),
+    ]
+    # Subtotal rows (last row of each group)
+    row = 1
+    for cid in cat_order:
+        row += len(groups[cid])
+        base_style.append(("BACKGROUND",  (0, row), (-1, row), SUB_BG))
+        base_style.append(("SPAN",        (0, row), (3, row)))
+        # Прибираємо вертикальні лінії всередині заспаненого діапазону
+        base_style.append(("LINEAFTER",   (0, row), (2, row), 0, colors.white))
+        row += 1
+    lines_tbl.setStyle(TableStyle(base_style))
+    story.append(lines_tbl)
+
+    # Обмін (якщо є)
+    if exch_lines:
+        story.append(Spacer(1, 1.5*mm))
+        story.append(HRFlowable(width=W, thickness=0.5, color=colors.grey, dash=(3, 3)))
+        story.append(S("ОБМІН", font=FONT_BOLD, size=6.5, color=colors.HexColor("#555555")))
+        exch_data = [[S("Назва", font=FONT_BOLD, size=FS),
+                      S("Кільк.", font=FONT_BOLD, size=FS, align=TA_CENTER),
+                      S("Од.", font=FONT_BOLD, size=FS, align=TA_CENTER),
+                      S("Ціна", font=FONT_BOLD, size=FS, align=TA_RIGHT),
+                      S("Сума", font=FONT_BOLD, size=FS, align=TA_RIGHT)]]
+        exch_total = 0.0
+        for line in exch_lines:
+            product   = db.get(Product, line.product_id)
+            p_name    = product.name if product else f"#{line.product_id}"
+            unit      = product.unit.name if product and product.unit else "шт"
+            eff_price = line.price_override if line.price_override else line.price
+            exch_total += line.sum
+            exch_data.append([S(p_name, size=FS), S(f"{line.qty:g}", size=FS, align=TA_CENTER),
+                               S(unit, size=FS, align=TA_CENTER),
+                               S(fmt(eff_price), size=FS, align=TA_RIGHT),
+                               S(fmt(line.sum), size=FS, align=TA_RIGHT)])
+        exch_data.append([S("Сума обміну", size=FS, align=TA_RIGHT), S(""), S(""), S(""),
+                          S(f"<b>{fmt(exch_total)}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT)])
+        exch_tbl = Table(exch_data, colWidths=COL_W)
+        exch_tbl.setStyle(TableStyle([
+            ("BACKGROUND",  (0, 0), (-1, 0), HDR_BG),
+            ("BOX",         (0, 0), (-1, -1), 0.5, BORDER),
+            ("INNERGRID",   (0, 0), (-1, -1), 0.5, BORDER),
+            ("BACKGROUND",  (0, -1), (-1, -1), SUB_BG),
+            ("SPAN",        (0, -1), (3, -1)),
+            ("TOPPADDING",  (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 1.5),
+        ]))
+        story.append(exch_tbl)
+
+    # ── Підсумок ──────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 1.5*mm))
+    total_tbl = Table([[
+        S(f"Усього  <b>{total_names}</b>  найменувань,  <b>{total_qty:g}</b>  штук, на суму:", size=FS),
+        S(f"<b>{fmt(inv.total_sum)}</b>", font=FONT_BOLD, size=11, align=TA_CENTER),
+    ]], colWidths=[W - 36*mm, 36*mm])
+    total_tbl.setStyle(TableStyle([
+        ("BOX",    (1, 0), (1, 0), 1.5, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]))
+    story.append(total_tbl)
+    story.append(S("грн. ____ коп.", size=6.5, color=colors.HexColor("#555555")))
+    story.append(Spacer(1, 2*mm))
+
+    # ── Підписи ───────────────────────────────────────────────────────────────
+    sig_style = [
+        ("LINEABOVE", (0, 0), (-1, 0), 0.5, colors.HexColor("#bbbbbb")),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]
+    sigs1 = Table([[
+        S(f"Директор:  <i>{director or '________________'}</i>", font=FONT_IT, size=FS),
+        S(f"Бухгалтер:  <i>{accountant or '________________'}</i>", font=FONT_IT, size=FS, align=TA_RIGHT),
+    ]], colWidths=[W * 0.5, W * 0.5])
+    sigs1.setStyle(TableStyle(sig_style))
+    story.append(sigs1)
+    sigs2 = Table([[
+        S("Прийняв:  ________________", size=FS),
+        S("Відпускає:  <i>Диспетчер</i>", font=FONT_IT, size=FS, align=TA_RIGHT),
+    ]], colWidths=[W * 0.5, W * 0.5])
+    sigs2.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1)]))
+    story.append(sigs2)
+
+    doc.build(story)
+    return buf.getvalue()
 
 
 # ─── Одна накладна ───────────────────────────────────────────────────────────

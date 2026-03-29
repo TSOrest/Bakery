@@ -3,13 +3,15 @@ import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
 import OrderModal from '../components/OrderModal'
+import PriceTypeBadge, { type PriceSource } from '../components/PriceTypeBadge'
 import styles from './OrdersPage.module.css'
 
 type CellKey = `${number}-${number}`
 type SavingMap = Record<CellKey, 'saving' | 'saved' | 'error'>
 
-// effectivePrices[clientId][productId] = price
-type PricesCache = Record<number, Record<number, number>>
+// effectivePrices[clientId][productId] = {price, source}
+type PriceEntry = { price: number; source: PriceSource }
+type PricesCache = Record<number, Record<number, PriceEntry>>
 
 const fmt = (n: number) =>
   n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -121,9 +123,14 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     if (missing.length === 0) return
     Promise.all(
       missing.map(cid =>
-        api.get<Record<number, number>>(`/prices/effective?client_id=${cid}&date=${date}`)
-          .then(p => ({ cid, p }))
-          .catch(() => ({ cid, p: {} as Record<number, number> }))
+        api.get<Record<number, number | PriceEntry>>(`/prices/effective?client_id=${cid}&date=${date}`)
+          .then(raw => {
+            const p: Record<number, PriceEntry> = {}
+            for (const [k, v] of Object.entries(raw))
+              p[Number(k)] = typeof v === 'number' ? { price: v, source: 'base' } : v as PriceEntry
+            return { cid, p }
+          })
+          .catch(() => ({ cid, p: {} as Record<number, PriceEntry> }))
       )
     ).then(results => {
       setPrices(prev => {
@@ -155,9 +162,14 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       if (uniqueIds.length > 0) {
         Promise.all(
           uniqueIds.map(cid =>
-            api.get<Record<number, number>>(`/prices/effective?client_id=${cid}&date=${date}`)
-              .then(pr => ({ cid, pr }))
-              .catch(() => ({ cid, pr: {} as Record<number, number> }))
+            api.get<Record<number, number | PriceEntry>>(`/prices/effective?client_id=${cid}&date=${date}`)
+              .then(raw => {
+                const pr: Record<number, PriceEntry> = {}
+                for (const [k, v] of Object.entries(raw))
+                  pr[Number(k)] = typeof v === 'number' ? { price: v, source: 'base' } : v as PriceEntry
+                return { cid, pr }
+              })
+              .catch(() => ({ cid, pr: {} as Record<number, PriceEntry> }))
           )
         ).then(results => {
           const cache: PricesCache = {}
@@ -619,9 +631,11 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                 const product = productMap.get(order.product_id)
                 const isExchange = order.exchange_type !== 'none'
                 const isDiscount = order.exchange_type === 'none' && order.price_override != null
+                const priceEntry = prices[order.client_id]?.[order.product_id]
                 const displayPrice = isExchange
                   ? 0
-                  : (order.price_override ?? prices[order.client_id]?.[order.product_id])
+                  : (order.price_override ?? priceEntry?.price)
+                const priceSource: PriceSource = order.price_override != null ? 'manual' : (priceEntry?.source ?? 'base')
 
                 // Дочірні рядки (знімання нестачі)
                 const children   = childOrdersMap.get(order.id) ?? []
@@ -678,7 +692,9 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                         ) : order.qty}
                       </td>
                       <td className={styles.tdPrice}>
-                        {isExchange ? '0.00' : displayPrice != null ? fmt(displayPrice) : '—'}
+                        {isExchange ? '0.00' : displayPrice != null
+                          ? <>{fmt(displayPrice)}<PriceTypeBadge source={priceSource} /></>
+                          : '—'}
                       </td>
                       <td className={styles.tdSum}>
                         {isExchange ? '—' : sum != null ? fmt(sum) : '—'}
