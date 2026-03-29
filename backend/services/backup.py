@@ -157,11 +157,23 @@ def get_backup_meta(root: Path, filename: str, custom_dir: str = "") -> dict:
 
 def restore_backup(root: Path, db_path: Path, filename: str, custom_dir: str = "") -> None:
     """
-    Відновлює бекап: копіює файл бекапу на місце db_path.
+    Відновлює бекап через SQLite backup API (не raw copy).
+    Правильно обробляє WAL-режим і гарантує чистий checkpoint.
     УВАГА: викликати тільки коли сервер зупинений.
     """
     backup_dir = _backup_dir(root, custom_dir)
     src = backup_dir / filename
     if not src.exists():
         raise FileNotFoundError(f"Бекап не знайдений: {src}")
-    shutil.copy2(src, db_path)
+    # Видаляємо старий WAL/SHM щоб не було конфлікту
+    for ext in ("-wal", "-shm"):
+        p = Path(str(db_path) + ext)
+        if p.exists():
+            p.unlink(missing_ok=True)
+    # SQLite backup API — правильно checkpoint-ує WAL в source
+    src_con = sqlite3.connect(str(src))
+    dst_con = sqlite3.connect(str(db_path))
+    src_con.backup(dst_con)
+    dst_con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    dst_con.close()
+    src_con.close()

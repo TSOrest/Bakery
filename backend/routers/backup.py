@@ -189,6 +189,29 @@ async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_
     content = await file.read()
     dest.write_bytes(content)
 
+    # Перевірка цілісності: файл має бути дійсною SQLite БД
+    import sqlite3 as _sqlite3
+    try:
+        conn = _sqlite3.connect(f"file:{dest}?mode=ro", uri=True)
+        row = conn.execute("PRAGMA quick_check(1)").fetchone()
+        conn.close()
+        if not row or row[0] != "ok":
+            dest.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Файл пошкоджений (PRAGMA quick_check: {row[0] if row else '?'}). "
+                       "Завантажте бекап, створений через меню Налаштування → Бекап.",
+            )
+    except HTTPException:
+        raise
+    except _sqlite3.DatabaseError as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Файл не є дійсною базою SQLite: {exc}. "
+                   "Завантажте бекап, створений через меню Налаштування → Бекап.",
+        )
+
     # Мінімальний meta-файл
     import json as _json
     from datetime import datetime

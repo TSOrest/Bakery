@@ -657,7 +657,17 @@ def _action_restore_backup(icon, backup_path: str, rollback_first: bool,
     action_stop(icon)
     time.sleep(2)
     try:
-        shutil.copy2(backup_path, DB_FILE)
+        # Використовуємо SQLite backup API замість raw copy:
+        # правильно checkpoint-ує WAL і не зберігає stale WAL від попередньої БД.
+        import sqlite3 as _sqlite3
+        _clear_wal(DB_FILE)
+        src_con = _sqlite3.connect(str(backup_path))
+        dst_con = _sqlite3.connect(str(DB_FILE))
+        src_con.backup(dst_con)
+        dst_con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        dst_con.close()
+        src_con.close()
+        _clear_wal(DB_FILE)
     except Exception as e:
         _msgbox("Bakery — помилка", f"Не вдалося відновити базу:\n{e}", 0)
         return
