@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Bakery — Інсталятор системи управління пекарнею
@@ -393,45 +393,62 @@ import sqlite3, pathlib
 root    = pathlib.Path(r'$escapedDir')
 db_path = root / 'bakery.db'
 
-def open_db():
-    c = sqlite3.connect(str(db_path))
-    c.execute('PRAGMA journal_mode=WAL')
-    c.execute('PRAGMA foreign_keys=ON')
-    return c
+import sys, os
+os.chdir(str(root))
+sys.path.insert(0, str(root))
 
-db = open_db()
-
-def run_sql(sql_text, strict=False):
-    for stmt in sql_text.split(';'):
-        # Прибираємо рядки-коментарі перед SQL-командою
-        lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
-        stmt = '\n'.join(lines).strip()
-        if not stmt:
-            continue
-        if strict:
-            db.execute(stmt)
-        else:
-            try:
-                db.execute(stmt)
-            except Exception:
-                pass
-    db.commit()
-
-# При повторному встановленні — завжди починаємо з чистої БД
-db.close()
+# Видаляємо стару БД — завжди починаємо з чистого аркуша
 for suffix in ('', '-wal', '-shm'):
     p = pathlib.Path(str(db_path) + suffix)
     if p.exists():
         p.unlink()
-db = open_db()
-run_sql((root / 'database' / 'schema.sql').read_text('utf-8'), strict=True)
-print('Schema applied.')
 
+# create_all гарантовано синхронний з моделями — не потребує підтримки schema.sql вручну
+from backend.database import engine, Base
+import backend.models.references
+import backend.models.orders
+import backend.models.pricing
+import backend.models.baking
+import backend.models.invoices
+import backend.models.movements
+import backend.models.finances
+import backend.models.shop
+import backend.models.settings
+import backend.models.auth
+Base.metadata.create_all(engine)
+print('Tables created.')
+
+# Дефолтні налаштування з schema.sql (тільки INSERT-блок)
+db = sqlite3.connect(str(db_path))
+db.execute('PRAGMA journal_mode=WAL')
+db.execute('PRAGMA foreign_keys=ON')
+
+schema_sql = (root / 'database' / 'schema.sql').read_text('utf-8')
+for stmt in schema_sql.split(';'):
+    lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
+    stmt = '\n'.join(lines).strip()
+    if stmt.upper().startswith('INSERT'):
+        try:
+            db.execute(stmt)
+        except Exception:
+            pass
+db.commit()
+
+# Міграції (тільки для UPDATE-сценарію — при fresh install ігноруються через IF NOT EXISTS / try)
 mig_dir = root / 'database' / 'migrations'
 if mig_dir.exists():
     for f in sorted(mig_dir.glob('*.sql')):
-        run_sql(f.read_text('utf-8'))
-        print(f'  {f.name}')
+        for stmt in f.read_text('utf-8').split(';'):
+            lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
+            stmt = '\n'.join(lines).strip()
+            if stmt:
+                try:
+                    db.execute(stmt)
+                except Exception:
+                    pass
+        db.commit()
+
+print('Schema applied.')
 
 # Зберігаємо GitHub-токен та логін
 def upsert(key, value, desc):
