@@ -27,3 +27,9 @@ scripts/run-server.ps1
 # Temporary dev/debug scripts
 test_import.py
 wal_check.py
+
+# Dev-only files
+start-dev.bat
+scripts/start-dev.ps1
+.claude/settings.json
+tests/
