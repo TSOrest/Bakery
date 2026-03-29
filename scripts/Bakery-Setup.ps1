@@ -399,8 +399,10 @@ db = open_db()
 
 def run_sql(sql_text, strict=False):
     for stmt in sql_text.split(';'):
-        stmt = stmt.strip()
-        if not stmt or stmt.startswith('--'):
+        # Прибираємо рядки-коментарі перед SQL-командою
+        lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
+        stmt = '\n'.join(lines).strip()
+        if not stmt:
             continue
         if strict:
             db.execute(stmt)
@@ -411,20 +413,15 @@ def run_sql(sql_text, strict=False):
                 pass
     db.commit()
 
-has_settings = db.execute(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
-).fetchone()
-
-if not has_settings:
-    # Неповна або пошкоджена БД — видаляємо і починаємо з нуля
-    db.close()
-    for suffix in ('', '-wal', '-shm'):
-        p = pathlib.Path(str(db_path) + suffix)
-        if p.exists():
-            p.unlink()
-    db = open_db()
-    run_sql((root / 'database' / 'schema.sql').read_text('utf-8'), strict=True)
-    print('Schema applied.')
+# При повторному встановленні — завжди починаємо з чистої БД
+db.close()
+for suffix in ('', '-wal', '-shm'):
+    p = pathlib.Path(str(db_path) + suffix)
+    if p.exists():
+        p.unlink()
+db = open_db()
+run_sql((root / 'database' / 'schema.sql').read_text('utf-8'), strict=True)
+print('Schema applied.')
 
 mig_dir = root / 'database' / 'migrations'
 if mig_dir.exists():
