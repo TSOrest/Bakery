@@ -144,8 +144,8 @@ try {
 
 $deviceCode = $deviceResp.device_code
 $userCode   = $deviceResp.user_code
-$pollSec    = [int]($deviceResp.interval ?? 5)
-$expiresAt  = [datetime]::Now.AddSeconds([int]($deviceResp.expires_in ?? 900))
+$pollSec    = if ($deviceResp.interval) { [int]$deviceResp.interval } else { 5 }
+$expiresAt  = [datetime]::Now.AddSeconds($(if ($deviceResp.expires_in) { [int]$deviceResp.expires_in } else { 900 }))
 
 Write-Host ''
 Write-Host '  ┌─────────────────────────────────────────────────┐' -ForegroundColor Yellow
