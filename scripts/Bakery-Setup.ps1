@@ -389,28 +389,41 @@ import sqlite3, pathlib
 root    = pathlib.Path(r'$escapedDir')
 db_path = root / 'bakery.db'
 
-db = sqlite3.connect(str(db_path))
-db.execute('PRAGMA journal_mode=WAL')
-db.execute('PRAGMA foreign_keys=ON')
+def open_db():
+    c = sqlite3.connect(str(db_path))
+    c.execute('PRAGMA journal_mode=WAL')
+    c.execute('PRAGMA foreign_keys=ON')
+    return c
 
-# Перевіряємо за наявністю таблиці settings, а не розміром файлу —
-# sqlite3.connect() створює файл одразу, навіть якщо схема ще не застосована.
-fresh = not db.execute(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
-).fetchone()
+db = open_db()
 
-def run_sql(sql_text):
+def run_sql(sql_text, strict=False):
     for stmt in sql_text.split(';'):
         stmt = stmt.strip()
-        if stmt and not stmt.startswith('--'):
+        if not stmt or stmt.startswith('--'):
+            continue
+        if strict:
+            db.execute(stmt)
+        else:
             try:
                 db.execute(stmt)
             except Exception:
                 pass
     db.commit()
 
-if fresh:
-    run_sql((root / 'database' / 'schema.sql').read_text('utf-8'))
+has_settings = db.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
+).fetchone()
+
+if not has_settings:
+    # Неповна або пошкоджена БД — видаляємо і починаємо з нуля
+    db.close()
+    for suffix in ('', '-wal', '-shm'):
+        p = pathlib.Path(str(db_path) + suffix)
+        if p.exists():
+            p.unlink()
+    db = open_db()
+    run_sql((root / 'database' / 'schema.sql').read_text('utf-8'), strict=True)
     print('Schema applied.')
 
 mig_dir = root / 'database' / 'migrations'
