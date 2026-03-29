@@ -389,11 +389,15 @@ import sqlite3, pathlib
 root    = pathlib.Path(r'$escapedDir')
 db_path = root / 'bakery.db'
 
-fresh = not (db_path.exists() and db_path.stat().st_size > 0)
-
 db = sqlite3.connect(str(db_path))
 db.execute('PRAGMA journal_mode=WAL')
 db.execute('PRAGMA foreign_keys=ON')
+
+# Перевіряємо за наявністю таблиці settings, а не розміром файлу —
+# sqlite3.connect() створює файл одразу, навіть якщо схема ще не застосована.
+fresh = not db.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'"
+).fetchone()
 
 def run_sql(sql_text):
     for stmt in sql_text.split(';'):
