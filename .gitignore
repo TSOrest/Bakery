@@ -8,12 +8,12 @@ __pycache__/
 *.pyc
 .env
 
-# Generated installer (contains tokens — never commit)
-Bakery-Setup.ps1
-Bakery-Setup.bat
+# Generated distributable installer (contains embedded tokens — never commit)
+# Template lives in scripts/Bakery-Setup.ps1 and IS committed
+/Bakery-Setup.ps1
+/Bakery-Setup.bat
 bakery.db.bak-*
 DEV.md
-scripts/create-installer.ps1
 null
 .Old version as a ref/Пекарня_base.accdb
 .Old version as a ref/Пекарня.accdb
