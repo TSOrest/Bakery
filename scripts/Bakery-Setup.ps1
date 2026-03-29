@@ -23,6 +23,10 @@ Set-StrictMode -Off
 $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
+# UTF-8 у консолі — без цього PS 5.1 показує ? замість українських літер і/ї/є/ґ
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding          = [Text.UTF8Encoding]::new($false)
+
 # ── Конфігурація (заповнюється через create-installer.ps1) ────────────────────
 $GITHUB_CLIENT_ID = 'Ov23livInSt2afY13irB'  # OAuth App client_id (публічний, не секрет)
 $REPO_OWNER       = 'TSOrest'
