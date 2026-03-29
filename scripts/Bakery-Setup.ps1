@@ -24,7 +24,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference    = 'SilentlyContinue'
 
 # ── Конфігурація (заповнюється через create-installer.ps1) ────────────────────
-$GITHUB_CLIENT_ID = ''          # OAuth App client_id (публічний, не секрет)
+$GITHUB_CLIENT_ID = 'Ov23livInSt2afY13irB'  # OAuth App client_id (публічний, не секрет)
 $REPO_OWNER       = 'TSOrest'
 $REPO_NAME        = 'Bakery'
 $REPO_URL         = "https://github.com/$REPO_OWNER/$REPO_NAME.git"

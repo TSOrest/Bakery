@@ -25,9 +25,8 @@
     Щоб заблокувати клієнта — видаліть його GitHub-акаунт зі співробітників репозиторію.
 #>
 param(
-    [Parameter(Mandatory)]
-    [string]$ClientId,
-    [string]$OutFile = ''
+    [string]$ClientId = '',   # якщо не вказано — використовується значення з шаблону
+    [string]$OutFile  = ''
 )
 
 $ROOT     = Split-Path -Parent $PSScriptRoot
@@ -42,17 +41,24 @@ if (-not (Test-Path $template)) {
 # ── Читаємо і патчимо шаблон ────────────────────────────────────────────────
 $ps1Content = Get-Content $template -Raw -Encoding UTF8
 
-$before = $ps1Content
-$ps1Content = $ps1Content -replace `
-    "(\`$GITHUB_CLIENT_ID\s*=\s*)'[^']*'", `
-    "`$1'$ClientId'"
-
-if ($ps1Content -eq $before) {
-    Write-Host "ПОМИЛКА: рядок з `$GITHUB_CLIENT_ID не знайдено у шаблоні." -ForegroundColor Red
-    exit 1
+if ($ClientId) {
+    $before = $ps1Content
+    $ps1Content = $ps1Content -replace `
+        "(\`$GITHUB_CLIENT_ID\s*=\s*)'[^']*'", `
+        "`$1'$ClientId'"
+    if ($ps1Content -eq $before) {
+        Write-Host "ПОМИЛКА: рядок з `$GITHUB_CLIENT_ID не знайдено у шаблоні." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  ClientId: замінено на $($ClientId.Substring(0, [Math]::Min(8,$ClientId.Length)))..." -ForegroundColor Yellow
+} else {
+    # Витягуємо ClientId що вже є в шаблоні для відображення
+    if ($ps1Content -match "\`$GITHUB_CLIENT_ID\s*=\s*'([^']+)'") {
+        Write-Host "  ClientId: з шаблону ($($Matches[1].Substring(0, [Math]::Min(8,$Matches[1].Length)))...)" -ForegroundColor Gray
+    } else {
+        Write-Host "ПОПЕРЕДЖЕННЯ: `$GITHUB_CLIENT_ID порожній у шаблоні — клієнт не зможе авторизуватись!" -ForegroundColor Red
+    }
 }
-
-Write-Host "  ClientId: вбудовано ($($ClientId.Substring(0, [Math]::Min(8,$ClientId.Length)))...)" -ForegroundColor Yellow
 
 # ── BAT-заголовок (launcher) ─────────────────────────────────────────────────
 # Клієнт двічі клікає .bat → Windows запускає CMD → CMD витягує вбудований
