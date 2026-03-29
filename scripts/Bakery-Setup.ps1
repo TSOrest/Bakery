@@ -229,8 +229,8 @@ if (-not $pythonExe) {
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Info 'winget install Python.Python.3.12 ...'
-        & winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements 2>&1 |
-            Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
+        $out = & winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements 2>&1
+        $out | Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
     } else {
         $pyUrl  = 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe'
         $pyInst = "$env:TEMP\python-setup-$PID.exe"
@@ -258,8 +258,8 @@ if (-not $npmExe) {
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Info 'winget install OpenJS.NodeJS.LTS ...'
-        & winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1 |
-            Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
+        $out = & winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1
+        $out | Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
     } else {
         $nodeUrl  = 'https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi'
         $nodeInst = "$env:TEMP\node-setup-$PID.msi"
@@ -300,7 +300,8 @@ if ($gitExe) {
 
 if ($isUpdate -and $gitExe -and (Test-Path "$InstallDir\.git")) {
     Write-Info 'git pull --rebase ...'
-    & $gitExe -C $InstallDir pull --rebase 2>&1 | ForEach-Object { Write-Info $_ }
+    $gitOut = & $gitExe -C $InstallDir pull --rebase 2>&1
+    $gitOut | ForEach-Object { Write-Info $_ }
     if ($LASTEXITCODE -eq 0) {
         $useGit = $true
         Write-OK 'Код оновлено'
@@ -314,7 +315,8 @@ if (-not $useGit) {
     if ($gitExe) {
         Write-Info 'git clone --depth 1 ...'
         if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
-        & $gitExe clone --depth 1 $cloneUrl $InstallDir 2>&1 | ForEach-Object { Write-Info $_ }
+        $gitOut = & $gitExe clone --depth 1 $cloneUrl $InstallDir 2>&1
+        $gitOut | ForEach-Object { Write-Info $_ }
         if ($LASTEXITCODE -eq 0) {
             # Прибираємо токен з remote (credential helper вже налаштований)
             & $gitExe -C $InstallDir remote set-url origin $REPO_URL 2>$null
