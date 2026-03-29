@@ -6,6 +6,7 @@ import type {
   Product, Route, RouteKpi, ClientState,
 } from '../types'
 import styles from './RoutesPage.module.css'
+import PriceTypeBadge from '../components/PriceTypeBadge'
 
 // ─── Лейбли статусів ───────────────────────────────────────────────────────────
 
@@ -543,6 +544,7 @@ function InvoiceDetailPanel({
                   <td className={styles.numTd}>{line.qty}</td>
                   <td className={styles.numTd}>
                     {(line.price_override ?? line.price).toFixed(2)} ₴
+                    {line.price_override != null && <PriceTypeBadge source="manual" />}
                   </td>
                   <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
                 </tr>

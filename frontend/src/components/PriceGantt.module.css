@@ -1,0 +1,159 @@
+/* PriceGantt — CSS-based Gantt chart */
+
+.root {
+  overflow-x: auto;
+  font-size: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+/* ── Row layout ────────────────────────────────────────────────── */
+
+.headerRow,
+.row {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.headerRow { background: #f8fafc; font-weight: 600; color: #64748b; min-height: 30px; }
+.row:last-child { border-bottom: none; }
+.row:hover { background: #fafbfc; }
+
+.rowLabel {
+  flex: 0 0 200px;
+  padding: 4px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #1e293b;
+  border-right: 1px solid #e2e8f0;
+}
+
+.barArea {
+  flex: 1;
+  position: relative;
+  height: 36px;
+  min-width: 0;
+}
+
+.actionsCol {
+  flex: 0 0 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-left: 1px solid #e2e8f0;
+  padding: 2px 4px;
+}
+
+/* ── Timeline header ───────────────────────────────────────────── */
+
+.timeline {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.monthMark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed #cbd5e1;
+  pointer-events: none;
+}
+
+.monthLabel {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.todayLine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ef4444;
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ── Bars ──────────────────────────────────────────────────────── */
+
+.bar {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  background: #94a3b8; /* базовий (не класифікований) */
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  cursor: default;
+  min-width: 2px;
+  transition: opacity 0.12s;
+}
+.bar:hover { opacity: 0.85; }
+
+/* Минула ціна */
+.barPast {
+  background: #94a3b8;
+}
+
+/* Діюча ціна — зелена */
+.barCurrent {
+  background: #16a34a;
+}
+
+/* Майбутня ціна — жовта/бурштин */
+.barFuture {
+  background: #f59e0b;
+}
+.barFuture .barLabel {
+  color: #1c1917; /* темний текст для кращої читабельності на жовтому */
+}
+
+.barLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Action buttons ────────────────────────────────────────────── */
+
+.actionBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+  padding: 0;
+}
+.actionBtn:hover { background: #e2e8f0; }
+
+.deleteBtn { color: #ef4444; }
+.deleteBtn:hover { background: #fef2f2; border-color: #fca5a5; }

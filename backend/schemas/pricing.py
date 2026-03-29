@@ -29,15 +29,19 @@ class PriceReplaceRequest(BaseModel):
 
 class BulkChangeRequest(BaseModel):
     """Масова % зміна всіх активних цін."""
-    pct:            float   # +10 або -5
-    effective_date: str     # YYYY-MM-DD — з якої дати нові ціни
+    pct:                  float          # +10 або -5
+    effective_date:       str            # YYYY-MM-DD — з якої дати нові ціни
+    excluded_product_ids: List[int] = [] # вироби, які виключити зі зміни
 
 
 class BulkChangePreviewItem(BaseModel):
-    product_id:   int
-    product_name: str
-    old_price:    float
-    new_price:    float
+    product_id:     int
+    product_name:   str
+    old_price:      float
+    new_price:      float
+    valid_from:     str             # дата початку поточної ціни
+    has_collision:  bool = False    # вже є ціна з valid_from >= effective_date
+    collision_date: Optional[str] = None  # дата конфліктної ціни
 
 
 class BulkChangePreview(BaseModel):

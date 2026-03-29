@@ -5,7 +5,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -80,6 +81,54 @@ def delete_backup(filename: str, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=404, detail="Бекап не знайдений")
     return {"deleted": filename}
+
+
+# ── Завантажити файл бекапу (SaveFile) ────────────────────────────────────────
+
+@router.get("/download/{filename}")
+def download_backup(filename: str, db: Session = Depends(get_db)):
+    """Повертає файл бекапу для збереження користувачем."""
+    cfg = _get_settings(db)
+    backup_dir = backup_svc._backup_dir(ROOT, cfg.get("backup_local_dir", ""))
+    path = backup_dir / filename
+    if not path.exists() or not path.name.startswith("bakery_") or path.suffix != ".db":
+        raise HTTPException(status_code=404, detail="Бекап не знайдений")
+    return FileResponse(
+        path=str(path),
+        media_type="application/octet-stream",
+        filename=filename,
+    )
+
+
+# ── Імпортувати файл бекапу (OpenFile) ─────────────────────────────────────────
+
+@router.post("/upload")
+async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Приймає .db файл і зберігає його в папку бекапів."""
+    if not file.filename or not file.filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="Файл має мати розширення .db")
+    cfg = _get_settings(db)
+    backup_dir = backup_svc._backup_dir(ROOT, cfg.get("backup_local_dir", ""))
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Безпечна назва файлу — лишаємо тільки допустимі символи
+    import re
+    safe_name = re.sub(r"[^\w.\-]", "_", file.filename)
+    dest = backup_dir / safe_name
+    content = await file.read()
+    dest.write_bytes(content)
+
+    # Мінімальний meta-файл
+    import json as _json
+    from datetime import datetime
+    meta = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "app_version": _read_version(),
+        "imported": True,
+    }
+    dest.with_suffix(".meta.json").write_text(_json.dumps(meta))
+
+    return {"filename": safe_name, "size_kb": round(len(content) / 1024, 1)}
 
 
 # ── Перевірка сумісності бекапу з поточною версією ────────────────────────────

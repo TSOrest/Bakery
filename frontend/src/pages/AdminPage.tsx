@@ -462,7 +462,7 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
       .catch(() => setClientOverrides([]))
 
   const load = () => api.get<Client[]>('/clients/?active_only=false')
-    .then(data => setClients(data.filter(c => c.client_kind === 'customer')))
+    .then(data => setClients(data.filter(c => c.client_kind === 'customer' || c.client_kind === 'shop')))
   useEffect(() => { load() }, [])
 
   const openNew  = () => { setEditing(null); setForm(emptyClient()); setBotUsers([]); setModal(true) }
@@ -500,7 +500,7 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
       accountant:  form.accountant || null,
       route_id:    form.route_id ? Number(form.route_id) : null,
       discount_pct: Number(form.discount_pct),
-      client_kind: 'customer',
+      client_kind: form.client_kind || 'customer',
       bot_phones:  form.bot_phones.trim() || null,
     }
     try {
@@ -528,33 +528,55 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
         <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>
       </div>
 
-      <table style={tableStyle}>
-        <thead>
-          <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
-            <Th>Знижка %</Th><Th>Телефон</Th><Th>Активний</Th><Th>Дії</Th>
+      {(() => {
+        const shops     = clients.filter(c => c.client_kind === 'shop')
+        const customers = clients.filter(c => c.client_kind !== 'shop')
+        const renderRow = (c: Client) => (
+          <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
+            <Td>{c.full_name}</Td>
+            <Td>{c.short_name ?? '—'}</Td>
+            <Td>{routeName(c.route_id)}</Td>
+            <Td>{c.discount_pct}</Td>
+            <Td>{c.phone ?? '—'}</Td>
+            <Td>{c.is_active ? '✓' : '✗'}</Td>
+            <Td>
+              <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+              {c.is_active === 1
+                ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+                : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+              }
+            </Td>
           </tr>
-        </thead>
-        <tbody>
-          {clients.map((c) => (
-            <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
-              <Td>{c.full_name}</Td>
-              <Td>{c.short_name ?? '—'}</Td>
-              <Td>{routeName(c.route_id)}</Td>
-              <Td>{c.discount_pct}</Td>
-              <Td>{c.phone ?? '—'}</Td>
-              <Td>{c.is_active ? '✓' : '✗'}</Td>
-              <Td>
-                <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-                {c.is_active === 1
-                  ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
-                  : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
-                }
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        )
+        return (
+          <table style={tableStyle}>
+            <thead>
+              <tr style={{ background: '#e8eef5' }}>
+                <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
+                <Th>Знижка %</Th><Th>Телефон</Th><Th>Активний</Th><Th>Дії</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shops.length > 0 && (
+                <tr>
+                  <td colSpan={7} style={{ background: '#f0f4f8', padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    Магазини ({shops.length})
+                  </td>
+                </tr>
+              )}
+              {shops.map(renderRow)}
+              {shops.length > 0 && customers.length > 0 && (
+                <tr>
+                  <td colSpan={7} style={{ background: '#f0f4f8', padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    Клієнти ({customers.length})
+                  </td>
+                </tr>
+              )}
+              {customers.map(renderRow)}
+            </tbody>
+          </table>
+        )
+      })()}
 
       {modal && (
         <Modal title={editing ? 'Редагувати клієнта' : 'Новий клієнт'} onClose={closeModal} xwide={!!editing}>
@@ -564,6 +586,15 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
               {/* ── Колонка 1: Основні дані ── */}
               <div style={{ flex: '0 0 200px' }}>
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Основні дані</div>
+                {!editing && (
+                  <div className={formStyles.field}>
+                    <label>Тип *</label>
+                    <select value={form.client_kind} onChange={(e) => setForm({ ...form, client_kind: e.target.value })}>
+                      <option value="customer">Клієнт</option>
+                      <option value="shop">Магазин</option>
+                    </select>
+                  </div>
+                )}
                 <div className={formStyles.field}>
                   <label>Повна назва *</label>
                   <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
@@ -807,21 +838,21 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
 
 // ─── Системні клієнти ────────────────────────────────────────────────────────
 
-const SYSTEM_KINDS = ['shop', 'writeoff', 'ration', 'underbaked'] as const
+const SYSTEM_KINDS = ['writeoff', 'ration', 'underbaked'] as const
 const PROTECTED_KINDS = new Set(['writeoff', 'ration', 'underbaked'])
 
 function SystemClientsTab({ routes }: { routes: Route[] }) {
   const [clients, setClients]   = useState<Client[]>([])
   const [modal, setModal]       = useState(false)
   const [editing, setEditing]   = useState<Client | null>(null)
-  const [form, setForm]         = useState<ClientFormState>({ ...emptyClient(), client_kind: 'shop' })
+  const [form, setForm]         = useState<ClientFormState>({ ...emptyClient(), client_kind: 'writeoff' })
   const [saving, setSaving]     = useState(false)
 
   const load = () => api.get<Client[]>('/clients/?active_only=false')
-    .then(data => setClients(data.filter(c => c.client_kind !== 'customer')))
+    .then(data => setClients(data.filter(c => c.client_kind !== 'customer' && c.client_kind !== 'shop')))
   useEffect(() => { load() }, [])
 
-  const openNew  = () => { setEditing(null); setForm({ ...emptyClient(), client_kind: 'shop' }); setModal(true) }
+  const openNew  = () => { setEditing(null); setForm({ ...emptyClient(), client_kind: 'writeoff' }); setModal(true) }
   const openEdit = (c: Client) => {
     setEditing(c)
     setForm({
@@ -1099,7 +1130,9 @@ function PricesTab({ products, clients, categories }: {
   // ── Індивідуальні ──
   const [overrides,        setOverrides]        = useState<ClientPriceOverride[]>([])
   const [overrideModal,    setOverrideModal]    = useState(false)
-  const [expandedClients,  setExpandedClients]  = useState<Set<number>>(new Set())
+  const [expandedClient,   setExpandedClient]   = useState<number | null>(null)
+  const [ovTimeFrom,       setOvTimeFrom]       = useState(defaultTimeFrom)
+  const [ovTimeTo,         setOvTimeTo]         = useState(defaultTimeTo)
   const [ovModalClient,    setOvModalClient]    = useState('')
   const [ovModalValidFrom, setOvModalValidFrom] = useState(tomorrow)
   const [ovModalValidTo,   setOvModalValidTo]   = useState('')
@@ -1372,6 +1405,37 @@ function PricesTab({ products, clients, categories }: {
     if (!confirm('Видалити індивідуальну ціну?')) return
     await api.delete(`/prices/overrides/${id}`)
     loadOverrides()
+  }
+
+  // ── Редагування одного запису індивідуальної ціни ──
+  const [ovEditId,   setOvEditId]   = useState<number | null>(null)
+  const [ovEditForm, setOvEditForm] = useState({ price: '', valid_to: '' })
+
+  const openOvEdit = (priceId: number) => {
+    const o = overrides.find(x => x.id === priceId)
+    if (!o) return
+    setOvEditForm({ price: String(o.price), valid_to: o.valid_to ?? '' })
+    setOvEditId(priceId)
+  }
+
+  const submitOvEdit = async () => {
+    const o = overrides.find(x => x.id === ovEditId)
+    if (!o) return
+    const newPrice = parseFloat(ovEditForm.price)
+    if (isNaN(newPrice) || newPrice <= 0) { alert('Введіть коректну ціну'); return }
+    setSaving(true)
+    try {
+      await api.delete(`/prices/overrides/${o.id}`)
+      await api.post('/prices/overrides', {
+        client_id:  o.client_id,
+        product_id: o.product_id,
+        price:      newPrice,
+        valid_from: o.valid_from,
+        valid_to:   ovEditForm.valid_to || null,
+      })
+      setOvEditId(null)
+      loadOverrides()
+    } finally { setSaving(false) }
   }
 
   const tabBtn = (t: InnerTab, label: string) => (
@@ -1802,14 +1866,6 @@ function PricesTab({ products, clients, categories }: {
 
       {/* ── Індивідуальні ціни ── */}
       {innerTab === 'overrides' && (() => {
-        const ovThStyle: React.CSSProperties = {
-          padding: '0.35rem 0.65rem', textAlign: 'left', fontSize: 13,
-          fontWeight: 600, color: '#475569', background: '#f1f5f9',
-          borderBottom: '1px solid #e2e8f0',
-        }
-        const ovTdStyle: React.CSSProperties = {
-          padding: '0.3rem 0.65rem', fontSize: 13, borderBottom: '1px solid #f0f0f0',
-        }
         // Group overrides by client
         const clientMap = new Map<number, ClientPriceOverride[]>()
         for (const o of overrides) {
@@ -1832,16 +1888,30 @@ function PricesTab({ products, clients, categories }: {
             )}
 
             {sortedClients.map(([clientId, cOverrides]) => {
-              const isExpanded = expandedClients.has(clientId)
+              const isExpanded = expandedClient === clientId
               const activeOvs = cOverrides.filter(
                 o => o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)
               )
               const activeSum = activeOvs.reduce((s, o) => s + o.price, 0)
-              const toggleExpand = () => setExpandedClients(prev => {
-                const next = new Set(prev)
-                if (isExpanded) next.delete(clientId); else next.add(clientId)
-                return next
-              })
+              const toggleExpand = () => setExpandedClient(isExpanded ? null : clientId)
+
+              // Будуємо GanttRow[] з індивідуальних цін клієнта
+              const productMap = new Map<number, import('../components/PriceGantt').GanttPriceSegment[]>()
+              for (const o of cOverrides) {
+                if (!productMap.has(o.product_id)) productMap.set(o.product_id, [])
+                productMap.get(o.product_id)!.push({
+                  price_id: o.id, price: o.price,
+                  valid_from: o.valid_from, valid_to: o.valid_to ?? null,
+                })
+              }
+              const ovGanttRows = Array.from(productMap.entries())
+                .sort(([a], [b]) => pName(a).localeCompare(pName(b), 'uk'))
+                .map(([pid, segs]) => ({
+                  product_id: pid,
+                  product_name: pName(pid),
+                  prices: [...segs].sort((a, b) => a.valid_from.localeCompare(b.valid_from)),
+                }))
+
               return (
                 <div key={clientId} style={{ marginBottom: 6, border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
                   <div onClick={toggleExpand} style={{
@@ -1865,53 +1935,58 @@ function PricesTab({ products, clients, categories }: {
                     >+ Ціни</button>
                   </div>
                   {isExpanded && (
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={ovThStyle}>Виріб</th>
-                          <th style={{ ...ovThStyle, width: 90 }}>Ціна, ₴</th>
-                          <th style={{ ...ovThStyle, width: 100 }}>Діє з</th>
-                          <th style={{ ...ovThStyle, width: 100 }}>Діє до</th>
-                          <th style={{ ...ovThStyle, width: 80 }}>Стан</th>
-                          <th style={{ ...ovThStyle, width: 44 }}></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...cOverrides]
-                          .sort((a, b) => pName(a.product_id).localeCompare(pName(b.product_id), 'uk'))
-                          .map(o => {
-                            const isActive = o.valid_from <= today && (o.valid_to === null || o.valid_to >= today)
-                            const isPast   = o.valid_to !== null && o.valid_to < today
-                            const isFuture = o.valid_from > today
-                            const canDel   = o.valid_from > today
-                            return (
-                              <tr key={o.id} style={{ background: isActive ? '#f0fdf4' : isPast ? '#fafafa' : '#fffbeb' }}>
-                                <td style={ovTdStyle}>{pName(o.product_id)}</td>
-                                <td style={{ ...ovTdStyle, fontWeight: 600 }}>{o.price.toFixed(2)}</td>
-                                <td style={ovTdStyle}>{o.valid_from}</td>
-                                <td style={{ ...ovTdStyle, color: '#64748b' }}>{o.valid_to ?? '∞'}</td>
-                                <td style={{ ...ovTdStyle, fontSize: 11 }}>
-                                  {isActive  ? <span style={{ color: '#16a34a' }}>активна</span>
-                                  : isPast   ? <span style={{ color: '#94a3b8' }}>минула</span>
-                                  : isFuture ? <span style={{ color: '#f59e0b' }}>майбутня</span>
-                                  : null}
-                                </td>
-                                <td style={{ ...ovTdStyle, textAlign: 'center' }}>
-                                  <button disabled={!canDel}
-                                    title={canDel ? 'Видалити' : 'Не можна видалити активну або минулу ціну'}
-                                    onClick={() => deleteOverride(o.id)}
-                                    style={{ background: 'none', border: 'none', cursor: canDel ? 'pointer' : 'default', color: canDel ? '#ef4444' : '#cbd5e1', fontSize: 16 }}
-                                  >×</button>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                      </tbody>
-                    </table>
+                    <div style={{ padding: '8px 0 4px' }}>
+                      {timeframeBar(ovTimeFrom, setOvTimeFrom, ovTimeTo, setOvTimeTo)}
+                      <PriceGantt
+                        rows={ovGanttRows}
+                        timeFrom={ovTimeFrom}
+                        timeTo={ovTimeTo}
+                        today={today}
+                        onEdit={(id) => openOvEdit(id)}
+                        onDelete={(id) => deleteOverride(id)}
+                      />
+                    </div>
                   )}
                 </div>
               )
             })}
+
+            {ovEditId !== null && (() => {
+              const o = overrides.find(x => x.id === ovEditId)!
+              // min для valid_to: max(valid_from + 1 день, завтра)
+              const minValidTo = o.valid_from >= tomorrow
+                ? (() => { const d = new Date(o.valid_from); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
+                : tomorrow
+              return (
+                <Modal title={`Редагувати ціну — ${pName(o.product_id)}`} onClose={() => setOvEditId(null)}>
+                  <div className={formStyles.form}>
+                    <div className={formStyles.field}>
+                      <label>Ціна, ₴ *</label>
+                      <input type="number" min="0.01" step="0.01" required
+                        value={ovEditForm.price}
+                        onChange={e => setOvEditForm(f => ({ ...f, price: e.target.value }))} />
+                    </div>
+                    <div className={formStyles.field}>
+                      <label>Діє з</label>
+                      <input type="text" disabled value={o.valid_from}
+                        style={{ background: '#f8fafc', color: '#64748b' }} />
+                    </div>
+                    <div className={formStyles.field}>
+                      <label>Діє до <span style={{ fontWeight: 400, color: '#94a3b8' }}>(порожньо = безстроково)</span></label>
+                      <input type="date" min={minValidTo}
+                        value={ovEditForm.valid_to}
+                        onChange={e => setOvEditForm(f => ({ ...f, valid_to: e.target.value }))} />
+                    </div>
+                    <div className={formStyles.actions}>
+                      <button type="button" onClick={() => setOvEditId(null)} className={formStyles.btnSecondary}>Скасувати</button>
+                      <button type="button" disabled={saving} onClick={submitOvEdit} className={formStyles.btnPrimary}>
+                        {saving ? 'Збереження...' : 'Зберегти'}
+                      </button>
+                    </div>
+                  </div>
+                </Modal>
+              )
+            })()}
 
             {overrideModal && (
               <Modal title="Індивідуальні ціни клієнта" wide onClose={() => { setOverrideModal(false); setError('') }}>
@@ -3496,6 +3571,29 @@ function BackupTab() {
     setBackups(prev => prev.filter(b => b.name !== name))
   }
 
+  const handleDownloadBackup = (name: string) => {
+    const a = document.createElement('a')
+    a.href = `/api/v1/backup/download/${encodeURIComponent(name)}`
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const fd = new FormData()
+    fd.append('file', file)
+    try {
+      await fetch('/api/v1/backup/upload', { method: 'POST', body: fd })
+      await loadAll()
+    } catch (err) {
+      alert(`Помилка імпорту: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const handleRestoreClick = async (b: BackupMeta) => {
     const check = await api.get<{
       compatible: boolean; backup_version: string; current_version: string; rollback_available: boolean
@@ -3604,9 +3702,15 @@ function BackupTab() {
       <div style={sectionS}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
           <h3 style={{ ...h3S, margin: 0 }}>Резервні копії</h3>
-          <button style={btnS} onClick={handleBackupNow} disabled={backingUp}>
-            {backingUp ? 'Зберігання...' : '+ Зробити бекап зараз'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <label style={{ ...btnS, background: '#27ae60', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+              📂 Імпортувати
+              <input type="file" accept=".db" style={{ display: 'none' }} onChange={handleImportBackup} />
+            </label>
+            <button style={btnS} onClick={handleBackupNow} disabled={backingUp}>
+              {backingUp ? 'Зберігання...' : '+ Зробити бекап зараз'}
+            </button>
+          </div>
         </div>
         {backups.length === 0 && (
           <div style={{ ...s, color: '#aaa' }}>Бекапів ще немає</div>
@@ -3635,6 +3739,11 @@ function BackupTab() {
                     {b.app_version || '—'}
                   </td>
                   <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button
+                      style={{ ...btnS, background: '#27ae60', padding: '0.2rem 0.6rem' }}
+                      onClick={() => handleDownloadBackup(b.name)}
+                      title="Зберегти файл бекапу"
+                    >⬇ Зберегти</button>
                     <button
                       style={{ ...btnS, background: '#6c8ebf', padding: '0.2rem 0.6rem' }}
                       onClick={() => handleRestoreClick(b)}

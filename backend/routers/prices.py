@@ -1,7 +1,7 @@
 """Ендпоінти для управління цінами."""
 
 from typing import Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
@@ -14,18 +14,24 @@ from backend.schemas.pricing import (
     BulkChangeRequest, BulkChangePreview, BulkChangePreviewItem,
     ClientPriceOverrideCreate, ClientPriceOverrideOut,
 )
-from backend.services.prices import get_price
+from backend.services.prices import get_price, get_price_with_source
 
 router = APIRouter(prefix="/prices", tags=["Ціни"])
 
 
 # ── Ефективні ціни для клієнта ─────────────────────────────────────────────────
 
-@router.get("/effective", response_model=Dict[int, float])
+@router.get("/effective")
 def effective_prices_for_client(client_id: int, date: str, db: Session = Depends(get_db)):
-    """Ефективні ціни всіх активних продуктів для клієнта на задану дату."""
+    """Ефективні ціни всіх активних продуктів для клієнта на задану дату.
+    Повертає {product_id: {price, source}} де source ∈ base|discounted|individual|manual.
+    """
     prods = db.query(Product).filter(Product.is_active == 1).all()
-    return {p.id: get_price(db, p.id, client_id, date) for p in prods}
+    result = {}
+    for p in prods:
+        price, source = get_price_with_source(db, p.id, client_id, date)
+        result[p.id] = {"price": price, "source": source}
+    return result
 
 
 # ── Базові ціни ────────────────────────────────────────────────────────────────
@@ -46,6 +52,25 @@ def list_prices(
 
 @router.post("/", response_model=PriceOut, status_code=201)
 def create_price(data: PriceCreate, db: Session = Depends(get_db)):
+    # Якщо нова ціна безстрокова — закриваємо попередні відкриті ціни того ж продукту
+    if data.valid_to is None:
+        prev_day = (date.fromisoformat(data.valid_from) - timedelta(days=1)).isoformat()
+        prev_prices = (
+            db.query(Price)
+            .filter(
+                Price.product_id == data.product_id,
+                Price.is_active == 1,
+                Price.valid_from < data.valid_from,
+                Price.valid_to == None,
+            )
+            .all()
+        )
+        for pp in prev_prices:
+            if prev_day >= pp.valid_from:
+                pp.valid_to = prev_day
+            else:
+                pp.is_active = 0
+
     p = Price(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)
     db.commit()
@@ -62,12 +87,38 @@ def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db)):
     """
     Закриває стару ціну (old_price_id) і створює нову починаючи з effective_date.
     Стара ціна отримує valid_to = effective_date - 1 день.
+    Дата набуття чинності має бути мінімум завтра.
     """
     old = db.get(Price, data.old_price_id)
     if not old:
         raise HTTPException(status_code=404, detail="Ціну не знайдено")
 
-    eff  = date.fromisoformat(data.effective_date)
+    eff = date.fromisoformat(data.effective_date)
+
+    # Дата не може бути сьогодні або в минулому
+    if eff <= date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Дата набуття чинності має бути мінімум завтра",
+        )
+
+    # Перевіряємо колізію: чи вже є активна ціна з valid_from >= effective_date для цього продукту
+    collision = (
+        db.query(Price)
+        .filter(
+            Price.product_id == old.product_id,
+            Price.is_active == 1,
+            Price.valid_from >= data.effective_date,
+            Price.id != data.old_price_id,
+        )
+        .first()
+    )
+    if collision:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Вже існує ціна з датою {collision.valid_from} для цього виробу",
+        )
+
     prev = (eff - timedelta(days=1)).isoformat()
 
     # Закриваємо стару ціну
@@ -95,9 +146,20 @@ def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db)):
 def bulk_preview(
     pct:            float,
     effective_date: str,
-    db: Session  = Depends(get_db),
+    excluded_ids:   str = Query(default=""),   # product_ids через кому
+    db: Session = Depends(get_db),
 ):
-    """Повертає попередній перегляд масової зміни цін (без збереження)."""
+    """Повертає попередній перегляд масової зміни цін (без збереження).
+    Повертає valid_from поточної ціни і has_collision (якщо вже є ціна з >= effective_date).
+    """
+    excluded_set: set[int] = set()
+    if excluded_ids:
+        for x in excluded_ids.split(","):
+            x = x.strip()
+            if x.isdigit():
+                excluded_set.add(int(x))
+
+    # Поточні активні ціни (чинні на effective_date)
     active = (
         db.query(Price)
         .filter(
@@ -107,9 +169,20 @@ def bulk_preview(
         .filter(
             (Price.valid_to == None) | (Price.valid_to >= effective_date)
         )
-        .order_by(Price.product_id)
+        .order_by(Price.product_id, Price.valid_from.desc())
         .all()
     )
+
+    # Майбутні ціни для колізійної перевірки: valid_from > effective_date
+    future_prices: dict[int, str] = {}
+    future_rows = (
+        db.query(Price)
+        .filter(Price.is_active == 1, Price.valid_from > effective_date)
+        .all()
+    )
+    for fp in future_rows:
+        if fp.product_id not in future_prices:
+            future_prices[fp.product_id] = fp.valid_from
 
     products = {p.id: p.name for p in db.query(Product).all()}
     items = []
@@ -118,13 +191,21 @@ def bulk_preview(
     for p in active:
         if p.product_id in seen_products:
             continue
+        if p.product_id in excluded_set:
+            seen_products.add(p.product_id)
+            continue
         seen_products.add(p.product_id)
         new_price = round(p.price * (1 + pct / 100), 2)
+
+        collision_date = future_prices.get(p.product_id)
         items.append(BulkChangePreviewItem(
-            product_id   = p.product_id,
-            product_name = products.get(p.product_id, f"#{p.product_id}"),
-            old_price    = p.price,
-            new_price    = new_price,
+            product_id     = p.product_id,
+            product_name   = products.get(p.product_id, f"#{p.product_id}"),
+            old_price      = p.price,
+            new_price      = new_price,
+            valid_from     = p.valid_from,
+            has_collision  = collision_date is not None,
+            collision_date = collision_date,
         ))
 
     return BulkChangePreview(items=items)
@@ -136,8 +217,19 @@ def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db)):
     Масова зміна цін:
     - Закриває всі поточні активні ціни (valid_to = effective_date - 1 день)
     - Створює нові з % зміною, що починаються з effective_date
+    - Пропускає вироби з excluded_product_ids
+    - Дата набуття чинності має бути мінімум завтра
     """
-    eff      = date.fromisoformat(data.effective_date)
+    eff = date.fromisoformat(data.effective_date)
+
+    # Дата не може бути сьогодні або в минулому
+    if eff <= date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Дата набуття чинності має бути мінімум завтра",
+        )
+
+    excluded_set = set(data.excluded_product_ids)
     prev_day = (eff - timedelta(days=1)).isoformat()
     eff_str  = data.effective_date
 
@@ -150,6 +242,7 @@ def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db)):
         .filter(
             (Price.valid_to == None) | (Price.valid_to >= eff_str)
         )
+        .order_by(Price.product_id, Price.valid_from.desc())
         .all()
     )
 
@@ -157,6 +250,9 @@ def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db)):
     seen_products: set[int] = set()
 
     for p in active:
+        # Пропускаємо вироби зі списку виключень
+        if p.product_id in excluded_set:
+            continue
         # Беремо лише першу (найсвіжішу) ціну на виріб
         if p.product_id in seen_products:
             p.is_active = 0
