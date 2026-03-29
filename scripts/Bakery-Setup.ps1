@@ -47,6 +47,17 @@ function Abort {
     exit 1
 }
 
+# Запускає нативну команду, захоплює stdout+stderr, не кидає NativeCommandError.
+# У PS 5.1 пайп native 2>&1 | ... кидає термінальну помилку якщо exit!=0.
+function Invoke-Native {
+    param([string]$Exe, [string[]]$CmdArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $out = & $Exe @CmdArgs 2>&1 | ForEach-Object { "$_" }
+    $ErrorActionPreference = $prev
+    return $out
+}
+
 function Refresh-Path {
     $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
                 [System.Environment]::GetEnvironmentVariable('Path','User')
@@ -229,7 +240,7 @@ if (-not $pythonExe) {
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Info 'winget install Python.Python.3.12 ...'
-        $out = & winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements 2>&1
+        $out = Invoke-Native winget @('install','Python.Python.3.12','--silent','--accept-package-agreements','--accept-source-agreements')
         $out | Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
     } else {
         $pyUrl  = 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe'
@@ -246,7 +257,7 @@ if (-not $pythonExe) {
     if (-not $pythonExe) { Abort 'Python встановлено але не знайдено в PATH. Перезапустіть інсталятор.' }
 }
 
-Write-OK "Python $((& $pythonExe --version 2>&1) -replace 'Python ','')"
+Write-OK "Python $((Invoke-Native $pythonExe @('--version')) -replace 'Python ','')"
 
 # ── КРОК 4: Node.js 18+ ───────────────────────────────────────────────────────
 Write-Step 'Перевірка Node.js 18+'
@@ -258,7 +269,7 @@ if (-not $npmExe) {
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Info 'winget install OpenJS.NodeJS.LTS ...'
-        $out = & winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1
+        $out = Invoke-Native winget @('install','OpenJS.NodeJS.LTS','--silent','--accept-package-agreements','--accept-source-agreements')
         $out | Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
     } else {
         $nodeUrl  = 'https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi'
@@ -275,7 +286,7 @@ if (-not $npmExe) {
     if (-not $npmExe) { Abort 'Node.js встановлено але npm не знайдено. Перезапустіть інсталятор.' }
 }
 
-Write-OK "Node.js $((& node --version 2>&1))"
+Write-OK "Node.js $((Invoke-Native node @('--version')))"
 
 # ── КРОК 5: Завантаження коду з GitHub ────────────────────────────────────────
 Write-Step 'Завантаження Пекарня з GitHub'
@@ -300,7 +311,7 @@ if ($gitExe) {
 
 if ($isUpdate -and $gitExe -and (Test-Path "$InstallDir\.git")) {
     Write-Info 'git pull --rebase ...'
-    $gitOut = & $gitExe -C $InstallDir pull --rebase 2>&1
+    $gitOut = Invoke-Native $gitExe @('-C',$InstallDir,'pull','--rebase')
     $gitOut | ForEach-Object { Write-Info $_ }
     if ($LASTEXITCODE -eq 0) {
         $useGit = $true
@@ -315,7 +326,7 @@ if (-not $useGit) {
     if ($gitExe) {
         Write-Info 'git clone --depth 1 ...'
         if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
-        $gitOut = & $gitExe clone --depth 1 $cloneUrl $InstallDir 2>&1
+        $gitOut = Invoke-Native $gitExe @('clone','--depth','1',$cloneUrl,$InstallDir)
         $gitOut | ForEach-Object { Write-Info $_ }
         if ($LASTEXITCODE -eq 0) {
             # Прибираємо токен з remote (credential helper вже налаштований)
@@ -354,13 +365,13 @@ $venvPip    = "$venvDir\Scripts\pip.exe"
 
 if (-not (Test-Path $venvPython)) {
     Write-Info 'Створення virtual environment...'
-    & $pythonExe -m venv $venvDir
+    Invoke-Native $pythonExe @('-m','venv',$venvDir) | ForEach-Object { Write-Info $_ }
     if ($LASTEXITCODE -ne 0) { Abort 'Не вдалося створити venv.' }
 }
 
 Write-Info 'pip install (може тривати 1-2 хв)...'
-& $venvPython -m pip install --upgrade pip -q --no-warn-script-location
-& $venvPip install -r "$InstallDir\backend\requirements.txt" -q --no-warn-script-location
+Invoke-Native $venvPython @('-m','pip','install','--upgrade','pip','-q','--no-warn-script-location') | Out-Null
+Invoke-Native $venvPip @('install','-r',"$InstallDir\backend\requirements.txt",'-q','--no-warn-script-location') | Out-Null
 if ($LASTEXITCODE -ne 0) { Abort 'pip install завершився з помилкою.' }
 
 Write-OK 'Python залежності встановлено'
@@ -424,11 +435,16 @@ print('DB OK')
 
 $tmpScript = "$env:TEMP\bakery_db_init_$PID.py"
 [IO.File]::WriteAllText($tmpScript, $dbScript, [Text.Encoding]::UTF8)
-$r = & $venvPython $tmpScript 2>&1
+$r = Invoke-Native $venvPython @($tmpScript)
 Remove-Item $tmpScript -Force -ErrorAction SilentlyContinue
 
-Write-Info "$r"
-if ("$r" -notmatch 'DB OK') { Abort 'Помилка ініціалізації бази даних.' }
+$rText = $r -join "`n"
+Write-Info $rText
+if ($rText -notmatch 'DB OK') {
+    Write-Host "    Вивід Python:" -ForegroundColor Red
+    $r | ForEach-Object { Write-Host "      $_" -ForegroundColor Red }
+    Abort 'Помилка ініціалізації бази даних.'
+}
 Write-OK 'База даних готова'
 
 # ── КРОК 8: Збірка фронтенду ──────────────────────────────────────────────────
