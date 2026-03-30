@@ -2436,6 +2436,23 @@ function SettingsTab({ section }: { section: SettingsSection }) {
   const [tgMsg,     setTgMsg]     = useState('')
   const [showToken, setShowToken] = useState(false)
 
+  // Скидання БД
+  const [resetModal,       setResetModal]       = useState(false)
+  const [resetConfirmText, setResetConfirmText] = useState('')
+  const [resetBusy,        setResetBusy]        = useState(false)
+  const [resetErr,         setResetErr]         = useState('')
+
+  const handleReset = async () => {
+    setResetBusy(true); setResetErr('')
+    try {
+      await api.post('/settings/reset-db', null)
+      setResetModal(false)
+      window.location.reload()
+    } catch (e) {
+      setResetErr(String(e))
+    } finally { setResetBusy(false) }
+  }
+
   const load = () =>
     api.get<SettingsMap>('/settings/').then((data) => {
       setSettings(data)
@@ -2568,6 +2585,77 @@ function SettingsTab({ section }: { section: SettingsSection }) {
             </span>
           </label>
         </div>
+
+        {/* ── Зона небезпеки ── */}
+        <div style={{ marginTop: '2rem', borderTop: '2px solid #fde8e8', paddingTop: '1.25rem' }}>
+          <div style={{ fontWeight: 700, color: '#c0392b', marginBottom: '0.5rem', fontSize: '0.9rem', letterSpacing: '0.03em' }}>
+            Зона небезпеки
+          </div>
+          <p style={{ fontSize: '0.85rem', color: '#666', marginTop: 0, marginBottom: '0.75rem', maxWidth: 520 }}>
+            Повністю очищає базу даних. Видаляє всі вироби, клієнтів, замовлення, накладні,
+            ціни, фінанси та всі інші робочі дані. Системні клієнти, користувачі та
+            налаштування залишаться.
+          </p>
+          <button
+            type="button"
+            onClick={() => { setResetModal(true); setResetConfirmText(''); setResetErr('') }}
+            style={{ background: '#fff', border: '1.5px solid #e74c3c', color: '#e74c3c', padding: '0.45rem 1rem', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 }}
+          >
+            Скинути базу даних...
+          </button>
+        </div>
+
+        {/* ── Модаль підтвердження скидання ── */}
+        {resetModal && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          }}>
+            <div style={{
+              background: '#fff', borderRadius: 10, padding: '1.75rem', maxWidth: 460, width: '90%',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ margin: '0 0 1rem', color: '#c0392b', fontSize: '1.1rem' }}>Скидання бази даних</h3>
+              <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+                Ця дія <strong>незворотна</strong>. Будуть видалені всі вироби, клієнти,
+                замовлення, накладні, ціни, фінанси та всі інші робочі дані.
+              </p>
+              <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+                Системні клієнти (магазин, списання, пайок), користувачі та налаштування залишаться.
+              </p>
+              <p style={{ fontSize: '0.9rem', marginBottom: '0.4rem' }}>
+                Щоб підтвердити, введіть <strong>СКИНУТИ</strong>:
+              </p>
+              <input
+                autoFocus
+                value={resetConfirmText}
+                onChange={e => setResetConfirmText(e.target.value.toUpperCase())}
+                placeholder="СКИНУТИ"
+                style={{ padding: '0.4rem 0.7rem', border: '1.5px solid #ccc', borderRadius: 4, fontSize: '1rem', width: '100%', marginBottom: '0.85rem', boxSizing: 'border-box' }}
+              />
+              {resetErr && <div style={{ color: '#c0392b', fontSize: '0.85rem', marginBottom: '0.6rem' }}>{resetErr}</div>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button type="button" onClick={() => setResetModal(false)} disabled={resetBusy}
+                  style={{ ...editBtnStyle, padding: '0.4rem 1rem' }}>
+                  Скасувати
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  disabled={resetConfirmText !== 'СКИНУТИ' || resetBusy}
+                  style={{
+                    background: resetConfirmText === 'СКИНУТИ' ? '#e74c3c' : '#ccc',
+                    color: '#fff', border: 'none', padding: '0.4rem 1.1rem', borderRadius: 4,
+                    cursor: resetConfirmText === 'СКИНУТИ' ? 'pointer' : 'not-allowed',
+                    fontWeight: 600, fontSize: '0.9rem',
+                  }}
+                >
+                  {resetBusy ? 'Очищення...' : 'Скинути'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </>}
 
       {/* ── Telegram Бот ── */}

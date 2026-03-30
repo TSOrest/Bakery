@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -88,6 +89,63 @@ def telegram_authorized(db: Session = Depends(get_db)):
     except Exception:
         pass
     return {"chats": [{"chat_id": k, "phone": v} for k, v in chats.items()]}
+
+
+# ── Скидання бази даних ───────────────────────────────────────────────────────
+
+@router.post("/reset-db")
+def reset_database(db: Session = Depends(get_db)):
+    """
+    Очищає всі робочі дані.
+    Залишає: системних клієнтів (client_kind != 'customer'), користувачів,
+    налаштування, статті фінансів.
+    """
+    conn = db.connection()
+    conn.execute(text("PRAGMA foreign_keys = OFF"))
+    try:
+        # Залежні таблиці — спочатку
+        for tbl in (
+            "shop_disposal_lines",
+            "shop_reconciliation_lines",
+            "shop_reconciliations",
+            "shop_receipts",
+            "shop_sales",
+            "shop_counts",
+            "other_stock_in",
+            "invoice_lines",
+            "invoices",
+            "cancellation_lines",
+            "route_cancellations",
+            "surplus_allocations",
+            "baking_tasks",
+            "finances",
+            "movements",
+            "daily_balances",
+            "client_price_overrides",
+            "client_bot_users",
+            "prices",
+            "product_ingredients",
+            "other_products",
+            "ingredients",
+        ):
+            conn.execute(text(f"DELETE FROM {tbl}"))  # noqa: S608
+
+        # Замовлення — self-referential FK, спочатку обнулити
+        conn.execute(text("UPDATE orders SET parent_order_id = NULL"))
+        conn.execute(text("DELETE FROM orders"))
+
+        # Лише регулярних клієнтів
+        conn.execute(text("DELETE FROM clients WHERE client_kind = 'customer'"))
+
+        # Довідники без залежностей
+        for tbl in ("products", "categories", "units", "routes"):
+            conn.execute(text(f"DELETE FROM {tbl}"))  # noqa: S608
+
+    finally:
+        conn.execute(text("PRAGMA foreign_keys = ON"))
+
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.delete("/telegram/authorized/{chat_id}")
