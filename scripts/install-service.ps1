@@ -40,12 +40,15 @@ Unregister-ScheduledTask -TaskName $TASK -Confirm:$false -ErrorAction SilentlyCo
 # Генеруємо run-server.ps1 в ProgramData (не в папці коду — переживає перевстановлення)
 $dataScriptsDir = "$DATA_DIR\scripts"
 New-Item -ItemType Directory -Path $dataScriptsDir -Force | Out-Null
+New-Item -ItemType Directory -Path "$DATA_DIR\logs" -Force | Out-Null
 $runnerPath = "$dataScriptsDir\run-server.ps1"
 
-$rootEsc   = $ROOT.Replace("'", "''")
-$pythonEsc = $python.Replace("'", "''")
+$rootEsc    = $ROOT.Replace("'", "''")
+$pythonEsc  = $python.Replace("'", "''")
+$dataDirEsc = $DATA_DIR.Replace("'", "''")
 $runnerContent = @"
-`$log    = '$rootEsc\logs\bakery.log'
+`$env:BAKERY_DATA_DIR = '$dataDirEsc'
+`$log    = '$dataDirEsc\logs\bakery.log'
 `$python = '$pythonEsc'
 
 # Перевірка: якщо порт 8000 вже зайнятий — вбиваємо той процес

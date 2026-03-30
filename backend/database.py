@@ -1,10 +1,16 @@
 """Підключення до SQLite та сесія SQLAlchemy."""
 
 import os
+from pathlib import Path
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bakery.db")
+_data_dir = os.getenv("BAKERY_DATA_DIR")
+if _data_dir:
+    _db_path = Path(_data_dir) / "bakery.db"
+    DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
+else:
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./bakery.db")
 
 engine = create_engine(
     DATABASE_URL,

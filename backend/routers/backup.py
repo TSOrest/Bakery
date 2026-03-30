@@ -20,14 +20,15 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
-ROOT    = Path(__file__).parent.parent.parent   # project root
-DB_FILE = ROOT / "bakery.db"
+ROOT     = Path(__file__).parent.parent.parent   # project root (code)
+DATA_DIR = Path(os.environ.get("BAKERY_DATA_DIR", ROOT))
+DB_FILE  = DATA_DIR / "bakery.db"
 
 # Файли-прапори для взаємодії з tray.py
-DEMO_ACTIVE           = ROOT / "DEMO_ACTIVE"
-DEMO_ENTER_REQUESTED  = ROOT / "DEMO_ENTER_REQUESTED"
-DEMO_EXIT_REQUESTED   = ROOT / "DEMO_EXIT_REQUESTED"
-RESTORE_REQUESTED     = ROOT / "RESTORE_REQUESTED"
+DEMO_ACTIVE           = DATA_DIR / "DEMO_ACTIVE"
+DEMO_ENTER_REQUESTED  = DATA_DIR / "DEMO_ENTER_REQUESTED"
+DEMO_EXIT_REQUESTED   = DATA_DIR / "DEMO_EXIT_REQUESTED"
+RESTORE_REQUESTED     = DATA_DIR / "RESTORE_REQUESTED"
 
 
 def _save_setting(db: Session, key: str, value: str) -> None:
@@ -63,7 +64,7 @@ def _cloud_paths(cfg: dict) -> list:
 @router.get("/list")
 def list_backups(db: Session = Depends(get_db)):
     cfg = _get_settings(db)
-    return backup_svc.list_backups(ROOT, cfg.get("backup_local_dir", ""))
+    return backup_svc.list_backups(DATA_DIR, cfg.get("backup_local_dir", ""))
 
 
 # ── Бекап зараз ────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ def backup_now(db: Session = Depends(get_db)):
     try:
         result = backup_svc.do_backup(
             db_path=DB_FILE,
-            root=ROOT,
+            root=DATA_DIR,
             custom_dir=cfg.get("backup_local_dir", ""),
             keep_count=int(cfg.get("backup_keep_count", "7") or "7"),
             cloud_paths=_cloud_paths(cfg),
@@ -90,7 +91,7 @@ def backup_now(db: Session = Depends(get_db)):
 @router.delete("/{filename}")
 def delete_backup(filename: str, db: Session = Depends(get_db)):
     cfg = _get_settings(db)
-    ok = backup_svc.delete_backup(ROOT, filename, cfg.get("backup_local_dir", ""))
+    ok = backup_svc.delete_backup(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
     if not ok:
         raise HTTPException(status_code=404, detail="Бекап не знайдений")
     return {"deleted": filename}
@@ -160,7 +161,7 @@ def cloud_detect():
 def download_backup(filename: str, db: Session = Depends(get_db)):
     """Повертає файл бекапу для збереження користувачем."""
     cfg = _get_settings(db)
-    backup_dir = backup_svc._backup_dir(ROOT, cfg.get("backup_local_dir", ""))
+    backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
     path = backup_dir / filename
     if not path.exists() or not path.name.startswith("bakery_") or path.suffix != ".db":
         raise HTTPException(status_code=404, detail="Бекап не знайдений")
@@ -179,7 +180,7 @@ async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_
     if not file.filename or not file.filename.endswith(".db"):
         raise HTTPException(status_code=400, detail="Файл має мати розширення .db")
     cfg = _get_settings(db)
-    backup_dir = backup_svc._backup_dir(ROOT, cfg.get("backup_local_dir", ""))
+    backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     # Безпечна назва файлу — лишаємо тільки допустимі символи
@@ -230,7 +231,7 @@ async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_
 @router.get("/restore/{filename}/check")
 def check_restore(filename: str, db: Session = Depends(get_db)):
     cfg = _get_settings(db)
-    meta = backup_svc.get_backup_meta(ROOT, filename, cfg.get("backup_local_dir", ""))
+    meta = backup_svc.get_backup_meta(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
     backup_version = meta.get("app_version", "")
     current_version = _read_version()
     compatible = (not backup_version) or (backup_version == current_version)
@@ -269,10 +270,10 @@ def restore_backup(
     (зупинить сервер, відновить БД, запустить сервер).
     """
     cfg = _get_settings(db)
-    meta = backup_svc.get_backup_meta(ROOT, filename, cfg.get("backup_local_dir", ""))
+    meta = backup_svc.get_backup_meta(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
     backup_version = meta.get("app_version", "")
 
-    backup_dir = backup_svc._backup_dir(ROOT, cfg.get("backup_local_dir", ""))
+    backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
     backup_path = str(backup_dir / filename)
 
     RESTORE_REQUESTED.write_text(
@@ -298,13 +299,13 @@ def demo_status():
             since = data.get("since", "")
         except Exception:
             pass
-    demo_db_exists = (ROOT / "demo.db").exists()
+    demo_db_exists = (DATA_DIR / "demo.db").exists()
     return {"active": active, "since": since, "demo_db_exists": demo_db_exists}
 
 
 @router.post("/demo/enter")
 def demo_enter():
-    if not (ROOT / "demo.db").exists():
+    if not (DATA_DIR / "demo.db").exists():
         raise HTTPException(status_code=404, detail="demo.db не знайдено. Спочатку згенеруйте демо базу.")
     if DEMO_ACTIVE.exists():
         raise HTTPException(status_code=400, detail="Демо режим вже активний")
@@ -373,7 +374,7 @@ def run_archive(
     try:
         backup_svc.do_backup(
             db_path=DB_FILE,
-            root=ROOT,
+            root=DATA_DIR,
             custom_dir=cfg.get("backup_local_dir", ""),
             keep_count=int(cfg.get("backup_keep_count", "7") or "7"),
             cloud_paths=_cloud_paths(cfg),

@@ -2,6 +2,7 @@
 Bakery — system tray application.
 Manages the BakeryApp Task Scheduler task and provides quick access via tray icon.
 """
+import os
 import sys
 import time
 import shutil
@@ -18,11 +19,12 @@ from urllib.request import urlopen
 
 # Bootstrap crash log before other imports, so any failure is visible
 _ROOT_BOOT = Path(__file__).parent
-_CRASH_LOG = _ROOT_BOOT / "logs" / "tray_crash.log"
-_CRASH_LOG.parent.mkdir(exist_ok=True)
+_DATA_DIR_BOOT = Path(os.environ.get("BAKERY_DATA_DIR", _ROOT_BOOT))
+_CRASH_LOG = _DATA_DIR_BOOT / "logs" / "tray_crash.log"
+_CRASH_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 # ── Single-instance guard (lock file) ─────────────────────────────────────────
-_LOCK_FILE = _ROOT_BOOT / "logs" / "tray.lock"
+_LOCK_FILE = _DATA_DIR_BOOT / "logs" / "tray.lock"
 try:
     _lock_fd = open(_LOCK_FILE, "w")
     import msvcrt
@@ -41,12 +43,13 @@ except Exception:
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 ROOT       = Path(__file__).parent
+DATA_DIR   = Path(os.environ.get("BAKERY_DATA_DIR", ROOT))
 TASK_NAME  = "BakeryApp"
 TRAY_TASK  = "BakeryTray"
 HEALTH_URL = "http://localhost:8000/api/health"
 APP_URL    = "http://localhost:8000"
-LOG_FILE   = ROOT / "logs" / "bakery.log"
-DB_FILE    = ROOT / "bakery.db"
+LOG_FILE   = DATA_DIR / "logs" / "bakery.log"
+DB_FILE    = DATA_DIR / "bakery.db"
 PYTHON     = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 PYTHONW    = ROOT / "backend" / "venv" / "Scripts" / "pythonw.exe"
 GITHUB_REPO     = "https://api.github.com/repos/TSOrest/Bakery"
@@ -58,10 +61,10 @@ UPDATE_INTERVAL   = 3600  # update check, seconds
 BACKUP_INTERVAL   = 60    # scheduled backup check, seconds
 
 # Файли-прапори демо-режиму та відновлення бекапу
-DEMO_ACTIVE          = ROOT / "DEMO_ACTIVE"
-DEMO_ENTER_REQUESTED = ROOT / "DEMO_ENTER_REQUESTED"
-DEMO_EXIT_REQUESTED  = ROOT / "DEMO_EXIT_REQUESTED"
-RESTORE_REQUESTED    = ROOT / "RESTORE_REQUESTED"
+DEMO_ACTIVE          = DATA_DIR / "DEMO_ACTIVE"
+DEMO_ENTER_REQUESTED = DATA_DIR / "DEMO_ENTER_REQUESTED"
+DEMO_EXIT_REQUESTED  = DATA_DIR / "DEMO_EXIT_REQUESTED"
+RESTORE_REQUESTED    = DATA_DIR / "RESTORE_REQUESTED"
 
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 
@@ -188,7 +191,7 @@ def _read_setting(key: str) -> str:
 def _backup_dir_path() -> Path:
     """Повертає папку для бекапів (з налаштувань або backups/)."""
     custom = _read_setting("backup_local_dir").strip()
-    d = Path(custom) if custom else ROOT / "backups"
+    d = Path(custom) if custom else DATA_DIR / "backups"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -573,7 +576,7 @@ def action_rollback(icon, _item=None) -> None:
 
 def _action_demo_enter(icon) -> None:
     """Активує демо режим: backup → swap demo.db → restart."""
-    demo_db = ROOT / "demo.db"
+    demo_db = DATA_DIR / "demo.db"
     if not demo_db.exists():
         _msgbox("Bakery — демо", "demo.db не знайдено.\nСпочатку згенеруйте демо базу через AdminPage.", 0)
         return
@@ -928,7 +931,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        log_path = ROOT / "logs" / "tray_crash.log"
+        log_path = DATA_DIR / "logs" / "tray_crash.log"
         log_path.parent.mkdir(exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] CRASH:\n")
