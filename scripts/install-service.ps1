@@ -1,5 +1,7 @@
-$ROOT = Split-Path -Parent $PSScriptRoot
-$TASK = 'BakeryApp'
+$ROOT      = Split-Path -Parent $PSScriptRoot
+$TASK      = 'BakeryApp'
+$DATA_DIR  = 'C:\ProgramData\Bakery'
+$REG_PATH  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
 
 Write-Host '=== Bakery - Install Auto-Start ===' -ForegroundColor Cyan
 
@@ -35,18 +37,27 @@ Write-Host 'Frontend built OK.' -ForegroundColor Green
 # Remove old task if exists
 Unregister-ScheduledTask -TaskName $TASK -Confirm:$false -ErrorAction SilentlyContinue
 
-# Wrapper script that logs uvicorn output
-$runnerPath = Join-Path $ROOT 'scripts\run-server.ps1'
-$rootEsc = $ROOT.Replace('\','\\')
-$pythonEsc = $python.Replace('\','\\')
+# Генеруємо run-server.ps1 в ProgramData (не в папці коду — переживає перевстановлення)
+$dataScriptsDir = "$DATA_DIR\scripts"
+New-Item -ItemType Directory -Path $dataScriptsDir -Force | Out-Null
+$runnerPath = "$dataScriptsDir\run-server.ps1"
+
+$rootEsc   = $ROOT.Replace("'", "''")
+$pythonEsc = $python.Replace("'", "''")
 $runnerContent = @"
-`$log = Join-Path '$rootEsc' 'logs\bakery.log'
+`$log    = '$rootEsc\logs\bakery.log'
 `$python = '$pythonEsc'
 
-# Kill any orphaned python processes (taskkill — avoids WMI which hangs on some machines)
+# Перевірка: якщо порт 8000 вже зайнятий — вбиваємо той процес
+`$portBusy = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+if (`$portBusy) {
+    Add-Content `$log ("`n[" + (Get-Date -Format 'HH:mm:ss') + "]  ПОПЕРЕДЖЕННЯ: порт 8000 зайнятий (PID `$(`$portBusy.OwningProcess)), звільняємо...")
+    Stop-Process -Id `$portBusy.OwningProcess -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
 taskkill /F /IM python.exe /T 2>`$null
 Start-Sleep -Seconds 1
-
 Add-Content `$log ("`n[" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "] Server starting...")
 Set-Location '$rootEsc'
 & `$python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 2>&1 |
@@ -143,6 +154,20 @@ Get-CimInstance Win32_Process |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 500
 Start-ScheduledTask -TaskName $TRAY_TASK
+
+# Правило брандмауера (доступ з локальної мережі на порт 8000)
+$null = netsh advfirewall firewall show rule name="BakeryApp" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    netsh advfirewall firewall add rule name="BakeryApp" dir=in action=allow protocol=TCP localport=8000 profile=private 2>$null | Out-Null
+}
+Write-Host 'Firewall: port 8000 open for private network.' -ForegroundColor Green
+
+# Оновлюємо версію в реєстрі (якщо запис вже є)
+$version = if (Test-Path "$ROOT\VERSION") { (Get-Content "$ROOT\VERSION" -Encoding UTF8).Trim().TrimStart([char]0xFEFF) } else { '1.0' }
+if (Test-Path $REG_PATH) {
+    Set-ItemProperty $REG_PATH 'DisplayVersion' $version -ErrorAction SilentlyContinue
+    Write-Host "Registry version updated: $version" -ForegroundColor Green
+}
 
 Write-Host ''
 Write-Host '  Auto-start: ON (runs at every login)'

@@ -74,6 +74,12 @@ Get-Process -Name pythonw -ErrorAction SilentlyContinue | Stop-Process -Force -E
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
 
+# Оновлюємо версію в реєстрі (Програми та компоненти)
+$regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
+if (Test-Path $regPath) {
+    Set-ItemProperty $regPath 'DisplayVersion' $TargetTag -ErrorAction SilentlyContinue
+}
+
 Write-Host "Rollback complete: $TargetTag" -ForegroundColor Green
 Write-Host ''
 Start-Sleep -Seconds 2

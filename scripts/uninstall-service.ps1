@@ -21,6 +21,9 @@ Get-CimInstance Win32_Process |
     Where-Object { $_.Name -eq 'pythonw.exe' -and $_.CommandLine -like '*tray.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
+# Правило брандмауера
+netsh advfirewall firewall delete rule name="BakeryApp" 2>$null | Out-Null
+
 Write-Host "Tasks '$TASK' and '$TRAY_TASK' removed. Auto-start disabled." -ForegroundColor Green
 Write-Host 'Use start.bat to run the server manually.'
 Write-Host ''
