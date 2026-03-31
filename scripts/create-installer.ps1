@@ -68,6 +68,9 @@ if ($Exe) {
     # Перевіряємо/встановлюємо ps2exe
     if (-not (Get-Command Invoke-ps2exe -ErrorAction SilentlyContinue)) {
         Write-Host '  Встановлення модуля ps2exe...' -ForegroundColor Yellow
+        if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue | Where-Object { $_.Version -ge '2.8.5.201' })) {
+            Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null
+        }
         Install-Module -Name ps2exe -Scope CurrentUser -Force -ErrorAction Stop
         Import-Module ps2exe -Force
     }
@@ -156,4 +159,5 @@ Write-Host '  Клієнт запускає подвійним кліком — 
 Write-Host ''
 Write-Host '  Щоб заблокувати доступ — видаліть акаунт клієнта зі співробітників репо.' -ForegroundColor Gray
 Write-Host ''
+
 

@@ -40,8 +40,19 @@ Unregister-ScheduledTask -TaskName $TASK -Confirm:$false -ErrorAction SilentlyCo
 # Генеруємо run-server.ps1 в ProgramData (не в папці коду — переживає перевстановлення)
 $dataScriptsDir = "$DATA_DIR\scripts"
 New-Item -ItemType Directory -Path $dataScriptsDir -Force | Out-Null
-New-Item -ItemType Directory -Path "$DATA_DIR\logs" -Force | Out-Null
+New-Item -ItemType Directory -Path "$DATA_DIR\logs"   -Force | Out-Null
 $runnerPath = "$dataScriptsDir\run-server.ps1"
+
+# Міграція bakery.db: якщо в ProgramData ще немає — копіюємо з папки коду
+if (-not (Test-Path "$DATA_DIR\bakery.db") -and (Test-Path "$ROOT\bakery.db")) {
+    Copy-Item "$ROOT\bakery.db" "$DATA_DIR\bakery.db" -Force
+    foreach ($ext in @('-wal','-shm')) {
+        if (Test-Path "$ROOT\bakery.db$ext") {
+            Copy-Item "$ROOT\bakery.db$ext" "$DATA_DIR\bakery.db$ext" -Force
+        }
+    }
+    Write-Host "DB migrated: $ROOT\bakery.db -> $DATA_DIR\bakery.db" -ForegroundColor Green
+}
 
 $rootEsc    = $ROOT.Replace("'", "''")
 $pythonEsc  = $python.Replace("'", "''")
