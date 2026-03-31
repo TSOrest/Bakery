@@ -1,4 +1,4 @@
-$ROOT = Split-Path -Parent $PSScriptRoot
+﻿$ROOT = Split-Path -Parent $PSScriptRoot
 $TASK = 'BakeryApp'
 
 Write-Host '=== Bakery — Start ===' -ForegroundColor Cyan
@@ -60,3 +60,4 @@ Write-Host '  App:  http://localhost:8000'
 Write-Host '  API:  http://localhost:8000/api/docs'
 if ($task) { Write-Host '  Logs: logs\bakery.log' }
 Write-Host ''
+

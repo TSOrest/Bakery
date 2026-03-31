@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$TargetTag = ""
 )
 
@@ -83,3 +83,4 @@ if (Test-Path $regPath) {
 Write-Host "Rollback complete: $TargetTag" -ForegroundColor Green
 Write-Host ''
 Start-Sleep -Seconds 2
+

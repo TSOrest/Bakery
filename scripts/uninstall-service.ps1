@@ -1,4 +1,4 @@
-$TASK      = 'BakeryApp'
+﻿$TASK      = 'BakeryApp'
 $TRAY_TASK = 'BakeryTray'
 
 Write-Host '=== Bakery — Remove Auto-Start ===' -ForegroundColor Cyan
@@ -27,3 +27,4 @@ netsh advfirewall firewall delete rule name="BakeryApp" 2>$null | Out-Null
 Write-Host "Tasks '$TASK' and '$TRAY_TASK' removed. Auto-start disabled." -ForegroundColor Green
 Write-Host 'Use start.bat to run the server manually.'
 Write-Host ''
+

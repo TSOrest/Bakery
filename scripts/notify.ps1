@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Title   = 'Bakery',
     [string]$Message = ''
 )
@@ -15,3 +15,4 @@ try {
 } catch {
     # Silently ignore — notifications are best-effort
 }
+

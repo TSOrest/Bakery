@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory)][string]$Tag,
     [string]$Title = "",
     [string]$Notes = ""
@@ -67,3 +67,4 @@ if ($Notes) {
     Write-Host "  Notes:"
     $Notes -split "`n" | ForEach-Object { Write-Host "    $_" }
 }
+

@@ -1,4 +1,4 @@
-# run-tray.ps1 — watchdog for tray.py
+﻿# run-tray.ps1 — watchdog for tray.py
 # Keeps the tray running: restarts automatically 5 seconds after any exit
 # (user clicked "Exit", crash, update). Stopped only via Stop-ScheduledTask.
 $ROOT       = Split-Path -Parent $PSScriptRoot
@@ -13,3 +13,4 @@ while ($true) {
     }
     Start-Sleep -Seconds 5
 }
+

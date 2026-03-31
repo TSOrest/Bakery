@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$TargetTag = ""
 )
 
@@ -136,3 +136,4 @@ Write-Host "  Version: $TargetTag"
 Write-Host "  Rollback: run rollback.bat to revert to $currentVersion"
 Write-Host ''
 Start-Sleep -Seconds 2
+

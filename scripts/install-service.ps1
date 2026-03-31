@@ -1,4 +1,4 @@
-$ROOT      = Split-Path -Parent $PSScriptRoot
+﻿$ROOT      = Split-Path -Parent $PSScriptRoot
 $TASK      = 'BakeryApp'
 $DATA_DIR  = 'C:\ProgramData\Bakery'
 $REG_PATH  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
@@ -178,3 +178,4 @@ Write-Host '  Tray icon:  active in system tray'
 Write-Host '  Logs:       logs\bakery.log'
 Write-Host '  App:        http://localhost:8000'
 Write-Host ''
+
