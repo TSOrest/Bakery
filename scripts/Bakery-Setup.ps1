@@ -27,6 +27,28 @@ $ProgressPreference    = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding          = [Text.UTF8Encoding]::new($false)
 
+# TLS 1.2 — на старих Windows 10 / .NET 4.5 може бути TLS 1.0 за замовчуванням,
+# GitHub API вимагає TLS 1.2+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Лог-файл інсталятора — завжди пишемо сюди, незалежно від результату
+$INSTALL_LOG = "$env:TEMP\bakery-install.log"
+function Write-Log { param($T) $T | Out-File $INSTALL_LOG -Encoding UTF8 -Append }
+Write-Log "=== Bakery installer started $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ==="
+
+# Перехоплювач необроблених помилок — вікно не закриється, лог залишиться
+trap {
+    $errMsg = "FATAL: $_`n$($_.ScriptStackTrace)"
+    Write-Host "`n  ====================================================" -ForegroundColor Red
+    Write-Host "  ПОМИЛКА ВСТАНОВЛЕННЯ:" -ForegroundColor Red
+    Write-Host "    $_" -ForegroundColor Red
+    Write-Host "  ====================================================" -ForegroundColor Red
+    Write-Host "  Лог збережено: $INSTALL_LOG" -ForegroundColor Yellow
+    Write-Log $errMsg
+    Read-Host "`n  Натисніть Enter для виходу"
+    exit 1
+}
+
 # ── Конфігурація (заповнюється через create-installer.ps1) ────────────────────
 $GITHUB_CLIENT_ID = 'Ov23livInSt2afY13irB'  # OAuth App client_id (публічний, не секрет)
 $REPO_OWNER       = 'TSOrest'
@@ -41,10 +63,10 @@ $DATA_DIR         = 'C:\ProgramData\Bakery'     # дані: БД, логи, ск
 $REG_PATH         = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
 
 # ── Допоміжні функції ─────────────────────────────────────────────────────────
-function Write-Step { param($T) Write-Host "`n  ► $T" -ForegroundColor Cyan }
-function Write-OK   { param($T) Write-Host "    ✓ $T" -ForegroundColor Green }
-function Write-Warn { param($T) Write-Host "    ! $T" -ForegroundColor Yellow }
-function Write-Info { param($T) Write-Host "    $T" -ForegroundColor DarkGray }
+function Write-Step { param($T) Write-Host "`n  ► $T" -ForegroundColor Cyan;   Write-Log "STEP: $T" }
+function Write-OK   { param($T) Write-Host "    ✓ $T" -ForegroundColor Green;  Write-Log "OK:   $T" }
+function Write-Warn { param($T) Write-Host "    ! $T" -ForegroundColor Yellow; Write-Log "WARN: $T" }
+function Write-Info { param($T) Write-Host "    $T"   -ForegroundColor DarkGray }
 
 function Abort {
     param($T)
@@ -189,7 +211,16 @@ function Find-Python {
 }
 
 function Find-Npm {
-    $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source
+    # Шукаємо npm.cmd явно — Get-Command може повернути npm.ps1, який Windows
+    # відкриває в Блокноті замість виконання
+    $npm = $null
+    $npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+    if ($npmCmd) {
+        $npm = $npmCmd
+    } else {
+        $src = (Get-Command npm -ErrorAction SilentlyContinue).Source
+        if ($src -and $src -notmatch '\.ps1$') { $npm = $src }
+    }
     if (-not $npm) { return $null }
     try {
         $v = & node --version 2>&1
@@ -434,6 +465,28 @@ $cloneUrl = "https://x-access-token:$accessToken@github.com/$REPO_OWNER/$REPO_NA
 $gitExe   = (Get-Command git -ErrorAction SilentlyContinue).Source
 $useGit   = $false
 
+# Встановлюємо git якщо не знайдено
+if (-not $gitExe) {
+    Write-Warn 'Git не знайдено. Встановлюємо автоматично...'
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Info 'winget install Git.Git ...'
+        $out = Invoke-Native winget @('install','Git.Git','--silent','--accept-package-agreements','--accept-source-agreements')
+        $out | Where-Object { $_ -match 'Successfully|error' } | ForEach-Object { Write-Info $_ }
+    } else {
+        $gitUrl  = 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe'
+        $gitInst = "$env:TEMP\git-setup-$PID.exe"
+        Write-Info 'Завантаження Git (~60 MB)...'
+        Invoke-WebRequest $gitUrl -OutFile $gitInst -UseBasicParsing
+        $p = Start-Process $gitInst '/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"' -Wait -PassThru
+        Remove-Item $gitInst -Force -ErrorAction SilentlyContinue
+        if ($p.ExitCode -ne 0) { Write-Warn 'Помилка встановлення Git. Продовжуємо без нього (оновлення через ZIP).' }
+    }
+    Refresh-Path
+    $gitExe = (Get-Command git -ErrorAction SilentlyContinue).Source
+    if ($gitExe) { Write-OK "Git встановлено: $gitExe" }
+    else { Write-Warn 'Git не вдалося знайти після встановлення. Продовжуємо без нього.' }
+}
+
 # Зберігаємо git credentials для майбутніх оновлень
 if ($gitExe) {
     $credFile = "$env:USERPROFILE\.git-credentials"
@@ -484,7 +537,8 @@ if (-not $useGit) {
         Write-Info 'Завантаження ZIP архіву...'
         Invoke-WebRequest $zipUrl -OutFile $zipFile -UseBasicParsing `
             -Headers @{ Authorization = "Bearer $accessToken"; 'User-Agent' = 'BakeryApp-Installer/1.0' }
-        Expand-Archive $zipFile -DestinationPath $zipTemp -Force
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($zipFile, $zipTemp)
         $inner = (Get-ChildItem $zipTemp | Select-Object -First 1).FullName
         if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -678,8 +732,6 @@ if (`$portBusy) {
     Start-Sleep -Seconds 2
 }
 
-taskkill /F /IM python.exe /T 2>`$null
-Start-Sleep -Seconds 1
 Add-Content `$log ("`n[" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "] Server starting...")
 Set-Location '$rootQ'
 & `$python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 2>&1 |
@@ -688,7 +740,7 @@ Set-Location '$rootQ'
 Set-Content $runServerPath $serverScript -Encoding UTF8
 Write-OK "run-server.ps1 → $runServerPath"
 
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
 
 Unregister-ScheduledTask $APP_TASK -Confirm:$false -ErrorAction SilentlyContinue
 Register-ScheduledTask $APP_TASK `
@@ -715,15 +767,26 @@ Register-ScheduledTask $TRAY_TASK `
     -Principal $principal -Description 'Bakery — іконка в треї' -Force | Out-Null
 Write-OK "Завдання '$TRAY_TASK' зареєстровано"
 
-# ── Правило брандмауера (доступ з локальної мережі на порт 8000) ───────────────
+# ── Правило брандмауера ────────────────────────────────────────────────────────
+# Правило для порту (доступ з мережі) — profile=any щоб діяло і на публічних мережах
 $fwExists = netsh advfirewall firewall show rule name="BakeryApp" 2>$null
 if ($fwExists -notmatch 'Rule Name') {
     netsh advfirewall firewall add rule `
         name="BakeryApp" dir=in action=allow protocol=TCP localport=8000 `
-        profile=private `
-        description="Пекарня — доступ з локальної мережі" 2>$null | Out-Null
+        profile=any 2>$null | Out-Null
 }
-Write-OK 'Правило брандмауера: порт 8000 відкрито для приватної мережі'
+# Правило для програми Python — щоб Windows не блокував і не показував діалог
+# при запуску через Task Scheduler (де діалог не може з'явитись)
+$pythonFwExists = netsh advfirewall firewall show rule name="BakeryApp-Python" 2>$null
+if ($pythonFwExists -notmatch 'Rule Name') {
+    netsh advfirewall firewall add rule `
+        name="BakeryApp-Python" dir=in action=allow program="$venvPython" `
+        profile=any 2>$null | Out-Null
+    netsh advfirewall firewall add rule `
+        name="BakeryApp-Pythonw" dir=in action=allow program="$($venvPython -replace 'python\.exe$','pythonw.exe')" `
+        profile=any 2>$null | Out-Null
+}
+Write-OK 'Правило брандмауера: Python дозволено (порт 8000)'
 
 # ── Реєстрація в «Програми та компоненти» ─────────────────────────────────────
 $version = if (Test-Path "$InstallDir\VERSION") { (Get-Content "$InstallDir\VERSION" -Encoding UTF8).Trim().TrimStart([char]0xFEFF) } else { '1.0' }
