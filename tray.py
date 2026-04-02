@@ -24,7 +24,10 @@ _CRASH_LOG = _DATA_DIR_BOOT / "logs" / "tray_crash.log"
 _CRASH_LOG.parent.mkdir(parents=True, exist_ok=True)
 
 # ── Single-instance guard (lock file) ─────────────────────────────────────────
-_LOCK_FILE = _DATA_DIR_BOOT / "logs" / "tray.lock"
+# Завжди фіксований шлях — незалежно від BAKERY_DATA_DIR
+# Якщо шлях різний в різних процесах — захист не спрацьовує
+_LOCK_FILE = Path(os.environ.get("PROGRAMDATA", "C:\\ProgramData")) / "Bakery" / "logs" / "tray.lock"
+_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
 try:
     _lock_fd = open(_LOCK_FILE, "w")
     import msvcrt
