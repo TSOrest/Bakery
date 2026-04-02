@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import type { ClientBalance, Finance, FinanceSummary, InternalKpi } from '../types'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import type { ClientBalance, Finance, FinanceSummary, InternalKpi, FinanceArticle } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
   createFinance, deleteFinance, fetchFinances, fetchInternalKpi,
 } from '../api/finances'
+import { fetchFinanceArticles } from '../api/financeArticles'
 import { useWorkDate } from '../context/DateContext'
 import styles from './FinancesPage.module.css'
 
@@ -27,6 +28,7 @@ const TYPE_COLORS: Record<string, string> = {
   deposit:         '#2980b9',
   route_cash:      '#16a085',
   exchange_credit: '#d35400',
+  shop_revenue:    '#0097a7',
 }
 
 function fmt(n: number) {
@@ -270,6 +272,7 @@ export default function FinancesPage() {
   const [filterTo,    setFilterTo]    = useState('')
   const [filterType,  setFilterType]  = useState('')
 
+  const [articles,   setArticles]   = useState<FinanceArticle[]>([])
   const [loadingBal, setLoadingBal] = useState(false)
   const [loadingJrn, setLoadingJrn] = useState(false)
 
@@ -292,10 +295,12 @@ export default function FinancesPage() {
   const loadJournal = useCallback(async () => {
     setLoadingJrn(true)
     try {
+      const isArticle = filterType.startsWith('article:')
       setJournal(await fetchFinances({
         date_from:    filterFrom || undefined,
         date_to:      filterTo   || undefined,
-        finance_type: filterType || undefined,
+        finance_type: (!isArticle && filterType) ? filterType : undefined,
+        article_id:   isArticle ? parseInt(filterType.slice(8)) : undefined,
       }))
     } finally {
       setLoadingJrn(false)
@@ -304,6 +309,7 @@ export default function FinancesPage() {
 
   useEffect(() => { loadBalances() }, [loadBalances]) // eslint-disable-line
   useEffect(() => { if (tab === 'journal') loadJournal() }, [tab, loadJournal])
+  useEffect(() => { fetchFinanceArticles().then(setArticles) }, [])
 
   // Фільтровані баланси
   const filteredBalances = balances.filter(b => {
@@ -320,6 +326,23 @@ export default function FinancesPage() {
   const routes = [...new Map(
     balances.filter(b => b.route_id && b.client_kind === 'customer').map(b => [b.route_id, b.route_name])
   ).entries()]
+
+  // Групування балансів по маршрутах (лише для вкладки «Баланси»)
+  type RouteGroup = { key: string; name: string; clients: ClientBalance[]; total: number }
+  const groupedByRoute = useMemo<RouteGroup[]>(() => {
+    const map = new Map<string, RouteGroup>()
+    for (const b of regularBalances) {
+      const key  = String(b.route_id ?? 0)
+      const name = b.route_name ?? 'Без маршруту'
+      if (!map.has(key)) map.set(key, { key, name, clients: [], total: 0 })
+      const g = map.get(key)!
+      g.clients.push(b)
+      g.total = Math.round((g.total + b.balance) * 100) / 100
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.name === 'Без маршруту' ? 1 : b.name === 'Без маршруту' ? -1 : a.name.localeCompare(b.name, 'uk')
+    )
+  }, [regularBalances])
 
   async function handleSaveGlobal(data: Parameters<typeof createFinance>[0]) {
     await createFinance(data)
@@ -376,6 +399,18 @@ export default function FinancesPage() {
             <span className={styles.summaryLabel}>Чистий баланс</span>
             <span className={`${styles.summaryValue} ${summary.net_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
               {summary.net_balance >= 0 ? '+' : ''}{fmt(summary.net_balance)} грн
+            </span>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>Надходження 7 днів</span>
+            <span className={`${styles.summaryValue} ${styles.creditColor}`}>
+              +{fmt(summary.income_7d)} грн
+            </span>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>Надходження 30 днів</span>
+            <span className={`${styles.summaryValue} ${styles.creditColor}`}>
+              +{fmt(summary.income_30d)} грн
             </span>
           </div>
           {internalKpi && (<>
@@ -458,26 +493,36 @@ export default function FinancesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {regularBalances.map(b => {
-                    const isDebt   = b.balance < 0
-                    const isCredit = b.balance > 0
-                    const isActive = selected?.client_id === b.client_id
-                    return (
-                      <tr
-                        key={b.client_id}
-                        className={`${styles.balanceRow}${isActive ? ` ${styles.activeRow}` : ''}`}
-                        onClick={() => setSelected(isActive ? null : b)}
-                      >
-                        <td className={styles.clientName}>{b.short_name ?? b.client_name}</td>
-                        <td>{b.route_name ?? '—'}</td>
-                        <td>{b.last_payment_date ?? '—'}</td>
-                        <td>{b.last_invoice_date ?? '—'}</td>
-                        <td className={`${styles.right} ${isDebt ? styles.debtColor : isCredit ? styles.creditColor : ''}`}>
-                          {isDebt ? '−' : isCredit ? '+' : ''}{fmt(Math.abs(b.balance))}
+                  {groupedByRoute.map(group => (
+                    <React.Fragment key={group.key}>
+                      <tr className={styles.routeGroupHeader}>
+                        <td colSpan={4}>{group.name}</td>
+                        <td className={`${styles.right} ${group.total < 0 ? styles.debtColor : group.total > 0 ? styles.creditColor : ''}`}>
+                          {group.total < 0 ? '−' : group.total > 0 ? '+' : ''}{fmt(Math.abs(group.total))}
                         </td>
                       </tr>
-                    )
-                  })}
+                      {group.clients.map(b => {
+                        const isDebt   = b.balance < 0
+                        const isCredit = b.balance > 0
+                        const isActive = selected?.client_id === b.client_id
+                        return (
+                          <tr
+                            key={b.client_id}
+                            className={`${styles.balanceRow}${isActive ? ` ${styles.activeRow}` : ''}`}
+                            onClick={() => setSelected(isActive ? null : b)}
+                          >
+                            <td className={styles.clientName}>{b.short_name ?? b.client_name}</td>
+                            <td>{b.route_name ?? '—'}</td>
+                            <td>{b.last_payment_date ?? '—'}</td>
+                            <td>{b.last_invoice_date ?? '—'}</td>
+                            <td className={`${styles.right} ${isDebt ? styles.debtColor : isCredit ? styles.creditColor : ''}`}>
+                              {isDebt ? '−' : isCredit ? '+' : ''}{fmt(Math.abs(b.balance))}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </React.Fragment>
+                  ))}
                   {regularBalances.length === 0 && !loadingBal && (
                     <tr><td colSpan={5} className={styles.hint}>Клієнтів не знайдено</td></tr>
                   )}
@@ -549,12 +594,21 @@ export default function FinancesPage() {
             </label>
             <select value={filterType} onChange={e => setFilterType(e.target.value)}>
               <option value="">Всі типи</option>
-              <option value="invoice">Накладна</option>
-              <option value="payment">Оплата</option>
-              <option value="writeoff">Списання</option>
-              <option value="deposit">Внесення в касу</option>
-              <option value="route_cash">Готівка водія</option>
-              <option value="exchange_credit">Кредит обміну</option>
+              <optgroup label="Системні">
+                <option value="invoice">Накладна</option>
+                <option value="payment">Оплата</option>
+                <option value="writeoff">Списання</option>
+                <option value="deposit">Внесення в касу</option>
+                <option value="route_cash">Готівка водія</option>
+                <option value="exchange_credit">Кредит обміну</option>
+              </optgroup>
+              {articles.length > 0 && (
+                <optgroup label="Статті">
+                  {articles.map(a => (
+                    <option key={a.id} value={`article:${a.id}`}>{a.name}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
 

@@ -1,6 +1,6 @@
 """Бізнес-логіка фінансового модуля."""
 
-from datetime import datetime
+from datetime import datetime, date as _date, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -69,12 +69,34 @@ def get_summary(db: Session, as_of: Optional[str] = None) -> FinanceSummary:
     total_debt   = sum(b.balance for b in balances if b.balance < 0)
     total_credit = sum(b.balance for b in balances if b.balance > 0)
 
+    today_d   = _date.fromisoformat(as_of) if as_of else _date.today()
+    week_ago  = (today_d - timedelta(days=7)).isoformat()
+    month_ago = (today_d - timedelta(days=30)).isoformat()
+    today_s   = today_d.isoformat()
+
+    income_types = ("payment", "deposit", "route_cash", "shop_revenue")
+    income_7d = db.query(func.sum(Finance.amount)).filter(
+        Finance.finance_date >= week_ago,
+        Finance.finance_date <= today_s,
+        Finance.sign == 1,
+        Finance.finance_type.in_(income_types),
+    ).scalar() or 0.0
+
+    income_30d = db.query(func.sum(Finance.amount)).filter(
+        Finance.finance_date >= month_ago,
+        Finance.finance_date <= today_s,
+        Finance.sign == 1,
+        Finance.finance_type.in_(income_types),
+    ).scalar() or 0.0
+
     return FinanceSummary(
         total_debt          = round(abs(total_debt), 2),
         total_credit        = round(total_credit, 2),
         net_balance         = round(total_credit + total_debt, 2),
         clients_in_debt     = sum(1 for b in balances if b.balance < 0),
         clients_with_credit = sum(1 for b in balances if b.balance > 0),
+        income_7d           = round(income_7d, 2),
+        income_30d          = round(income_30d, 2),
     )
 
 

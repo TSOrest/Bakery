@@ -28,11 +28,9 @@ scripts/run-server.ps1
 test_import.py
 wal_check.py
 
-# Dev-only files
-start-dev.bat
-scripts/start-dev.ps1
+# Dev-only файли (запуск, тести, інструменти розробника) — не потрібні на продакшні
+dev/
 .claude/settings.json
-tests/
 backups/bakery_2026-03-29_16-11.meta.json
 logs/import_test.log
 logs/import_test2.log

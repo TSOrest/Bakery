@@ -95,3 +95,5 @@ class FinanceSummary(BaseModel):
     net_balance:   float   # total_credit - total_debt
     clients_in_debt:   int
     clients_with_credit: int
+    income_7d:  float = 0  # надходження за останні 7 днів
+    income_30d: float = 0  # надходження за останні 30 днів

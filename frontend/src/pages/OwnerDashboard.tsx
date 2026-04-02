@@ -5,6 +5,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../api/client'
+import { useWorkDate } from '../context/DateContext'
 import styles from './OwnerDashboard.module.css'
 
 interface DashboardData {
@@ -18,12 +19,18 @@ interface DashboardData {
     payments_week:       number
     payments_month:      number
   }
+  today: {
+    revenue:        number
+    payments_sum:   number
+    payments_count: number
+  }
   top_debtors: { client_id: number; client_name: string; balance: number }[]
   orders: {
     today_clients: number
     today_qty:     number
     week_count:    number
     week_qty:      number
+    top_products:  { name: string; qty: number }[]
   }
   baking: {
     products:         number
@@ -69,6 +76,9 @@ function StatRow({ label, value, sub, color }: { label: string; value: string; s
 }
 
 export default function OwnerDashboard() {
+  const { workDate } = useWorkDate()
+  const today = workDate ?? new Date().toISOString().slice(0, 10)
+
   const [data, setData]       = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -76,7 +86,7 @@ export default function OwnerDashboard() {
 
   const load = useCallback(async () => {
     try {
-      const d = await api.get<DashboardData>('/dashboard/')
+      const d = await api.get<DashboardData>(`/dashboard/?date_param=${today}`)
       setData(d)
       setLastUpdate(new Date().toLocaleTimeString('uk-UA'))
       setError('')
@@ -85,11 +95,10 @@ export default function OwnerDashboard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [today])
 
   useEffect(() => {
     load()
-    // Автооновлення кожні 5 хвилин
     const id = setInterval(load, 5 * 60 * 1000)
     return () => clearInterval(id)
   }, [load])
@@ -99,6 +108,7 @@ export default function OwnerDashboard() {
   if (!data)   return null
 
   const { finance, orders, baking, top_debtors, margin } = data
+  const todayStats = data.today
 
   const netColor = finance.net_balance >= 0 ? '#27ae60' : '#e74c3c'
   const bakingOk = baking.fulfillment_pct >= 95
@@ -106,18 +116,48 @@ export default function OwnerDashboard() {
   return (
     <div className={styles.embedded}>
       {/* Панель оновлення */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        {lastUpdate && <span style={{ fontSize: '0.78rem', color: '#aaa' }}>↻ {lastUpdate}</span>}
-        <button onClick={load} style={{
-          background: '#f1f5f9', border: '1px solid #d0d7de',
-          borderRadius: 5, padding: '3px 10px', fontSize: '0.8rem',
-          cursor: 'pointer', color: '#555',
-        }}>Оновити</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>
+          {today !== new Date().toISOString().slice(0, 10)
+            ? `Дані на ${today.split('-').reverse().join('.')}`
+            : 'Поточний стан'}
+        </span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {lastUpdate && <span style={{ fontSize: '0.78rem', color: '#aaa' }}>↻ {lastUpdate}</span>}
+          <button onClick={load} style={{
+            background: '#f1f5f9', border: '1px solid #d0d7de',
+            borderRadius: 5, padding: '3px 10px', fontSize: '0.8rem',
+            cursor: 'pointer', color: '#555',
+          }}>Оновити</button>
+        </div>
       </div>
 
       <div className={styles.grid}>
 
-        {/* Фінанси — головне */}
+        {/* Сьогодні — виручка і оплати */}
+        <Card
+          title={`Сьогодні — ${today.split('-').reverse().join('.')}`}
+          accent={todayStats.payments_sum > 0 ? 'success' : 'warning'}
+        >
+          <div className={styles.twoCol}>
+            <div>
+              <div className={styles.bigNumber} style={{ color: '#1a3a5c' }}>
+                {fmt(todayStats.revenue)}
+              </div>
+              <div className={styles.bigLabel}>виставлено грн</div>
+            </div>
+            <div>
+              <div className={styles.bigNumber} style={{ color: '#27ae60' }}>
+                {fmt(todayStats.payments_sum)}
+              </div>
+              <div className={styles.bigLabel}>надійшло грн</div>
+            </div>
+          </div>
+          <div className={styles.divider} />
+          <StatRow label="Оплат отримано" value={String(todayStats.payments_count)} sub="шт" />
+        </Card>
+
+        {/* Фінанси — загальний стан */}
         <Card
           title="Фінансовий стан"
           accent={finance.net_balance < 0 ? 'danger' : 'success'}
@@ -128,9 +168,9 @@ export default function OwnerDashboard() {
           <div className={styles.bigLabel}>нетто-баланс</div>
           <div className={styles.divider} />
           <StatRow label="Загальний борг клієнтів" value={`${fmt(finance.total_debt)} грн`}
-            sub={`(${finance.clients_in_debt} клієнтів)`} color="#e74c3c" />
+            sub={`(${finance.clients_in_debt} кл.)`} color="#e74c3c" />
           <StatRow label="Аванси / переплата" value={`${fmt(finance.total_credit)} грн`}
-            sub={`(${finance.clients_with_credit} клієнтів)`} color="#27ae60" />
+            sub={`(${finance.clients_with_credit} кл.)`} color="#27ae60" />
           <div className={styles.divider} />
           <StatRow label="Надійшло за 7 днів"  value={`${fmt(finance.payments_week)} грн`} />
           <StatRow label="Надійшло за 30 днів" value={`${fmt(finance.payments_month)} грн`} />
@@ -144,13 +184,29 @@ export default function OwnerDashboard() {
               <div className={styles.bigLabel}>клієнтів сьогодні</div>
             </div>
             <div>
-              <div className={styles.bigNumber} style={{ color: '#1a3a5c' }}>{orders.today_qty}</div>
+              <div className={styles.bigNumber} style={{ color: '#1a3a5c' }}>
+                {orders.today_qty % 1 === 0 ? orders.today_qty.toFixed(0) : orders.today_qty.toFixed(1)}
+              </div>
               <div className={styles.bigLabel}>одиниць сьогодні</div>
             </div>
           </div>
           <div className={styles.divider} />
           <StatRow label="Замовлень за 7 днів" value={String(orders.week_count)} />
           <StatRow label="Одиниць за 7 днів"  value={orders.week_qty.toFixed(0)} />
+          {orders.top_products.length > 0 && (
+            <>
+              <div className={styles.divider} />
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7a8899', marginBottom: 4 }}>Топ сьогодні</div>
+              {orders.top_products.map(p => (
+                <StatRow
+                  key={p.name}
+                  label={p.name}
+                  value={p.qty % 1 === 0 ? p.qty.toFixed(0) : p.qty.toFixed(1)}
+                  sub="шт"
+                />
+              ))}
+            </>
+          )}
         </Card>
 
         {/* Випічка */}
@@ -175,7 +231,6 @@ export default function OwnerDashboard() {
               <StatRow label="Виконання плану" value={`${baking.fulfillment_pct}%`}
                 color={bakingOk ? '#27ae60' : '#e67e22'} />
               <StatRow label="Найменувань" value={String(baking.products)} />
-              {/* Прогрес-бар */}
               <div className={styles.progressBar}>
                 <div
                   className={styles.progressFill}
@@ -198,7 +253,7 @@ export default function OwnerDashboard() {
               {top_debtors.map((d) => (
                 <div key={d.client_id} className={styles.debtorRow}>
                   <span className={styles.debtorName}>{d.client_name}</span>
-                  <span className={styles.debtorBalance}>{fmt(d.balance)} грн</span>
+                  <span className={styles.debtorBalance}>−{fmt(Math.abs(d.balance))} грн</span>
                 </div>
               ))}
             </div>
@@ -224,7 +279,7 @@ export default function OwnerDashboard() {
                   key={r.name}
                   label={r.name}
                   value={`${r.margin_pct.toFixed(1)}%`}
-                  sub={`(${fmt(r.margin_grn)} грн)`}
+                  sub={`(+${fmt(r.margin_grn)} грн)`}
                   color={r.margin_pct >= 20 ? '#27ae60' : '#e67e22'}
                 />
               ))}

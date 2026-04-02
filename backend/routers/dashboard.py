@@ -1,6 +1,7 @@
 """Дашборд для власника — агрегована read-only статистика."""
 
 from datetime import date, timedelta
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -17,11 +18,12 @@ router = APIRouter(prefix="/dashboard", tags=["Дашборд"])
 
 
 @router.get("/")
-def get_dashboard(db: Session = Depends(get_db)):
+def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db)):
     """Повна зведена статистика для дашборду власника."""
-    today     = date.today().isoformat()
-    week_ago  = (date.today() - timedelta(days=7)).isoformat()
-    month_ago = (date.today() - timedelta(days=30)).isoformat()
+    today_d   = date.fromisoformat(date_param) if date_param else date.today()
+    today     = today_d.isoformat()
+    week_ago  = (today_d - timedelta(days=7)).isoformat()
+    month_ago = (today_d - timedelta(days=30)).isoformat()
 
     # ── Фінанси ──────────────────────────────────────────────────────────────
     fin_summary = get_summary(db)
@@ -36,7 +38,7 @@ def get_dashboard(db: Session = Depends(get_db)):
     # ── Замовлення сьогодні ───────────────────────────────────────────────────
     orders_today = (
         db.query(Order)
-        .filter(Order.order_date == today)
+        .filter(Order.order_date == today, Order.qty > 0)
         .all()
     )
     orders_client_count = len(set(o.client_id for o in orders_today))
@@ -76,6 +78,41 @@ def get_dashboard(db: Session = Depends(get_db)):
         )
         .scalar() or 0.0
     )
+
+    # ── Виручка сьогодні (накладні) ──────────────────────────────────────────
+    revenue_today = (
+        db.query(func.sum(Finance.amount))
+        .filter(
+            Finance.finance_date == today,
+            Finance.finance_type == 'invoice',
+        )
+        .scalar() or 0.0
+    )
+
+    # ── Оплати сьогодні ───────────────────────────────────────────────────────
+    payments_today_rows = (
+        db.query(Finance)
+        .filter(
+            Finance.finance_date == today,
+            Finance.finance_type == 'payment',
+            Finance.sign == 1,
+        )
+        .all()
+    )
+    payments_today_sum   = sum(p.amount for p in payments_today_rows)
+    payments_today_count = len(payments_today_rows)
+
+    # ── Топ-5 продуктів за замовленнями сьогодні ──────────────────────────────
+    top_products_rows = (
+        db.query(Product.name, func.sum(Order.qty).label("total_qty"))
+        .join(Product, Order.product_id == Product.id)
+        .filter(Order.order_date == today, Order.qty > 0)
+        .group_by(Product.id)
+        .order_by(func.sum(Order.qty).desc())
+        .limit(5)
+        .all()
+    )
+    top_products = [{"name": r.name, "qty": float(r.total_qty)} for r in top_products_rows]
 
     # ── Середня маржа (по активних виробах з ціною і собівартістю) ───────────
     products = db.query(Product).filter(Product.is_active == 1).all()
@@ -136,12 +173,20 @@ def get_dashboard(db: Session = Depends(get_db)):
             for b in top_debtors
         ],
 
+        # Виручка і оплати сьогодні
+        "today": {
+            "revenue":        round(revenue_today, 2),
+            "payments_sum":   round(payments_today_sum, 2),
+            "payments_count": payments_today_count,
+        },
+
         # Замовлення
         "orders": {
             "today_clients": orders_client_count,
-            "today_qty":     orders_total_qty,
+            "today_qty":     round(orders_total_qty, 2),
             "week_count":    orders_week.cnt or 0,
             "week_qty":      float(orders_week.qty or 0),
+            "top_products":  top_products,
         },
 
         # Випічка

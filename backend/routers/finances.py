@@ -55,10 +55,11 @@ def _enrich(entry: Finance, db: Session) -> FinanceOut:
 
 @router.get("/", response_model=List[FinanceOut])
 def list_finances(
-    client_id:   Optional[int] = None,
-    date_from:   Optional[str] = None,
-    date_to:     Optional[str] = None,
+    client_id:    Optional[int] = None,
+    date_from:    Optional[str] = None,
+    date_to:      Optional[str] = None,
     finance_type: Optional[str] = None,
+    article_id:   Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Finance)
@@ -70,6 +71,8 @@ def list_finances(
         q = q.filter(Finance.finance_date <= date_to)
     if finance_type:
         q = q.filter(Finance.finance_type == finance_type)
+    if article_id:
+        q = q.filter(Finance.article_id == article_id)
     entries = q.order_by(Finance.finance_date.desc(), Finance.id.desc()).all()
     return [_enrich(e, db) for e in entries]
 

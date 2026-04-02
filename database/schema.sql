@@ -328,14 +328,19 @@ CREATE TABLE IF NOT EXISTS shop_receipts (
 -- ФІНАНСИ
 -- -------------------------------------------------------------
 
+CREATE TABLE IF NOT EXISTS finance_articles (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT    NOT NULL,
+    direction TEXT    NOT NULL CHECK(direction IN ('income','expense')),
+    is_system INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS finances (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     finance_date TEXT    NOT NULL,
     client_id    INTEGER REFERENCES clients(id),
-    finance_type TEXT    NOT NULL CHECK(finance_type IN (
-                     'invoice','payment','writeoff',
-                     'deposit','route_cash','exchange_credit'
-                 )),
+    finance_type TEXT    NOT NULL,
+    article_id   INTEGER REFERENCES finance_articles(id),
     amount       REAL    NOT NULL,
     sign         INTEGER NOT NULL CHECK(sign IN (1,-1)),
     notes        TEXT,

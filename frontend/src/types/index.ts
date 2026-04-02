@@ -185,6 +185,8 @@ export interface FinanceSummary {
   net_balance: number
   clients_in_debt: number
   clients_with_credit: number
+  income_7d: number
+  income_30d: number
 }
 
 export interface InternalKpi {

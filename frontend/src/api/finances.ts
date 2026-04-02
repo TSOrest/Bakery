@@ -7,12 +7,14 @@ export async function fetchFinances(params?: {
   date_from?: string
   date_to?: string
   finance_type?: string
+  article_id?: number
 }): Promise<Finance[]> {
   const q = new URLSearchParams()
   if (params?.client_id)    q.set('client_id',    String(params.client_id))
   if (params?.date_from)    q.set('date_from',    params.date_from)
   if (params?.date_to)      q.set('date_to',      params.date_to)
   if (params?.finance_type) q.set('finance_type', params.finance_type)
+  if (params?.article_id)   q.set('article_id',   String(params.article_id))
   const res = await fetch(`${BASE}/?${q}`)
   if (!res.ok) throw new Error('Помилка завантаження операцій')
   return res.json()
