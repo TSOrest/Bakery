@@ -70,22 +70,13 @@ function Refresh-Path {
 }
 
 function Find-ExistingInstall {
-    # Варіант 1 (пріоритетний): з реєстру Windows — найнадійніший після першої установки
+    # Тільки реєстр Windows — він заповнюється виключно повним інсталятором.
+    # Task Scheduler НЕ використовується як fallback: install-service.bat теж реєструє
+    # задачу BakeryApp, тому на машині розробника це давало б хибне спрацювання.
     try {
         $reg = Get-ItemProperty -Path $REG_PATH -ErrorAction SilentlyContinue
         if ($reg -and $reg.InstallLocation -and (Test-Path "$($reg.InstallLocation)\backend")) {
             return $reg.InstallLocation
-        }
-    } catch {}
-
-    # Варіант 2: з Task Scheduler WorkingDirectory
-    try {
-        $task = Get-ScheduledTask -TaskName $APP_TASK -ErrorAction SilentlyContinue
-        if ($task) {
-            $action = $task.Actions | Select-Object -First 1
-            if ($action.WorkingDirectory -and (Test-Path "$($action.WorkingDirectory)\backend")) {
-                return $action.WorkingDirectory
-            }
         }
     } catch {}
     return $null
@@ -213,8 +204,8 @@ Write-Host '  ╔═════════════════════
 Write-Host '  ║    Пекарня — Встановлення системи        ║' -ForegroundColor DarkYellow
 Write-Host '  ╚══════════════════════════════════════════╝' -ForegroundColor DarkYellow
 Write-Host ''
-Write-Host '  Для встановлення необхідний обліковий запис GitHub,' -ForegroundColor Gray
-Write-Host '  який надано розробником разом з цим файлом.' -ForegroundColor Gray
+Write-Host '  Для встановлення потрібен GitHub-акаунт із доступом до репозиторію.' -ForegroundColor Gray
+Write-Host '  Якщо ще немає — зверніться до розробника для отримання доступу.' -ForegroundColor Gray
 Write-Host ''
 
 # ── Виявлення існуючої установки ──────────────────────────────────────────────
