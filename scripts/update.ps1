@@ -107,6 +107,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Log "Checking out $TargetTag..."
+# Скидаємо локальні зміни — вони можуть блокувати checkout (напр. вручну замінені файли)
+& git -C $ROOT reset --hard HEAD 2>&1 | Out-Null
+& git -C $ROOT clean -fd 2>&1 | Out-Null
 $gitResult = & git -C $ROOT checkout $TargetTag 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Log "ERROR: git checkout failed: $gitResult" Red
