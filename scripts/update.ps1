@@ -17,20 +17,31 @@ function Write-Log($msg, $color = 'White') {
 
 Write-Host '=== Bakery - Update ===' -ForegroundColor Cyan
 
-# Зчитуємо OAuth токен з БД заздалегідь — потрібен для приватного репо
+# Зчитуємо OAuth токен — спочатку з БД, потім з .git-credentials
 $DATA_DIR   = 'C:\ProgramData\Bakery'
 $dbPath     = Join-Path $DATA_DIR 'bakery.db'
 $oauthToken = ''
+
+# Спроба 1: з БД через sqlite3
 if (Test-Path $dbPath) {
     try {
-        $oauthToken = & $python -c "
-import sqlite3
-db = sqlite3.connect(r'$($dbPath.Replace("'","''"))')
-row = db.execute(\"SELECT value FROM settings WHERE key='github_oauth_token'\").fetchone()
-print(row[0] if row and row[0] else '', end='')
-db.close()
-" 2>$null
+        $oauthToken = (& $python -c "import sqlite3; db=sqlite3.connect(r'$dbPath'); r=db.execute('SELECT value FROM settings WHERE key=?',('github_oauth_token',)).fetchone(); print(r[0] if r and r[0] else '',end=''); db.close()" 2>$null) -join '' | ForEach-Object { $_.Trim() }
     } catch {}
+}
+
+# Спроба 2: з .git-credentials (формат: https://x-access-token:TOKEN@github.com)
+if (-not $oauthToken) {
+    $credFile = Join-Path $env:USERPROFILE '.git-credentials'
+    if (Test-Path $credFile) {
+        $line = Get-Content $credFile | Where-Object { $_ -match 'github\.com' } | Select-Object -First 1
+        if ($line -match 'x-access-token:([^@]+)@') { $oauthToken = $Matches[1].Trim() }
+    }
+}
+
+if ($oauthToken) {
+    Write-Log 'GitHub token: OK'
+} else {
+    Write-Log 'WARNING: GitHub token not found — update may fail for private repo' Yellow
 }
 
 $ghHeaders = @{ 'User-Agent' = 'BakeryUpdate/1.0' }
