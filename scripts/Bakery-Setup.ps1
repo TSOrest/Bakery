@@ -36,7 +36,8 @@ $APP_TASK         = 'BakeryApp'
 $TRAY_TASK        = 'BakeryTray'
 $MIN_PYTHON       = [Version]'3.11'
 $MIN_NODE         = 18
-$DATA_DIR         = 'C:\ProgramData\Bakery'  # дані (скрипти із шляхами, майбутні: логи, БД)
+$INSTALL_DIR      = 'C:\Program Files\Bakery'   # код застосунку (фіксований)
+$DATA_DIR         = 'C:\ProgramData\Bakery'     # дані: БД, логи, скрипти з шляхами
 $REG_PATH         = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
 
 # ── Допоміжні функції ─────────────────────────────────────────────────────────
@@ -218,10 +219,9 @@ if ($existingDir) {
     Write-Host ''
     Write-Host '    [1]  Перевстановити  (файли оновляться, база даних збережеться)' -ForegroundColor White
     Write-Host '    [2]  Видалити програму' -ForegroundColor White
-    Write-Host '    [3]  Встановити в іншу папку' -ForegroundColor DarkGray
-    Write-Host '    [4]  Скасувати' -ForegroundColor DarkGray
+    Write-Host '    [3]  Скасувати' -ForegroundColor DarkGray
     Write-Host ''
-    $choice = Read-Host '  Ваш вибір (1-4)'
+    $choice = Read-Host '  Ваш вибір (1-3)'
 
     switch ($choice) {
         '1' {
@@ -230,32 +230,15 @@ if ($existingDir) {
             Write-OK "Перевстановлення: $InstallDir"
         }
         '2' { Invoke-Uninstall -Dir $existingDir }
-        '3' { <# продовжуємо до вибору папки нижче #> }
         default { Abort 'Встановлення скасовано.' }
     }
 }
 
-# ── КРОК 1: Вибір папки встановлення ─────────────────────────────────────────
-Write-Step 'Вибір папки встановлення'
+# ── КРОК 1: Папка встановлення (фіксована) ───────────────────────────────────
+Write-Step 'Папка встановлення'
 
 if (-not $isReinstall) {
-    if (-not $InstallDir) {
-        try {
-            Add-Type -AssemblyName System.Windows.Forms
-            $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-            $dlg.Description         = 'Оберіть папку для встановлення Пекарня'
-            $dlg.SelectedPath        = "$env:LOCALAPPDATA\Programs\Bakery"
-            $dlg.ShowNewFolderButton = $true
-            $null = $dlg.ShowDialog()
-            if ($dlg.SelectedPath) { $InstallDir = $dlg.SelectedPath }
-        } catch { }
-    }
-
-    if (-not $InstallDir) {
-        $default = "$env:LOCALAPPDATA\Programs\Bakery"
-        $ans = Read-Host "  Папка встановлення (Enter = $default)"
-        $InstallDir = if ($ans) { $ans.Trim('"').Trim("'") } else { $default }
-    }
+    $InstallDir = $INSTALL_DIR
 }
 
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
