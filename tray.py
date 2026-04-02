@@ -113,12 +113,21 @@ def _read_version(filename: str = "VERSION") -> str:
     return f.read_text(encoding="utf-8-sig").strip() if f.exists() else ""
 
 
+def _github_headers() -> dict:
+    """Заголовки для GitHub API з токеном з БД (потрібен для приватного репо)."""
+    headers = {"User-Agent": "BakeryTray/1.0"}
+    token = _read_setting("github_oauth_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
 def _fetch_latest_tag() -> str:
     """Returns latest tag from GitHub, or '' on error."""
     try:
         req = __import__("urllib.request", fromlist=["Request"]).Request(
             GITHUB_TAGS_URL,
-            headers={"User-Agent": "BakeryTray/1.0"},
+            headers=_github_headers(),
         )
         with urlopen(req, timeout=8) as r:
             tags = json.loads(r.read())
@@ -137,7 +146,7 @@ def _fetch_release_notes(tag: str) -> str:
     try:
         req = __import__("urllib.request", fromlist=["Request"]).Request(
             f"{GITHUB_REPO}/releases/tags/{tag}",
-            headers={"User-Agent": "BakeryTray/1.0"},
+            headers=_github_headers(),
         )
         with urlopen(req, timeout=5) as r:
             data = json.loads(r.read())
