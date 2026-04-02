@@ -6,7 +6,8 @@ $ROOT = Split-Path -Parent $PSScriptRoot
 $TASK = 'BakeryApp'
 $python = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
 $pip    = Join-Path $ROOT 'backend\venv\Scripts\pip.exe'
-$npm    = (Get-Command npm -ErrorAction SilentlyContinue).Source
+$npm    = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+if (-not $npm) { $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source }
 if (-not $npm) { $npm = 'C:\Program Files\nodejs\npm.cmd' }
 
 function Write-Log($msg, $color = 'White') {
@@ -16,11 +17,30 @@ function Write-Log($msg, $color = 'White') {
 
 Write-Host '=== Bakery - Update ===' -ForegroundColor Cyan
 
+# Зчитуємо OAuth токен з БД заздалегідь — потрібен для приватного репо
+$DATA_DIR   = 'C:\ProgramData\Bakery'
+$dbPath     = Join-Path $DATA_DIR 'bakery.db'
+$oauthToken = ''
+if (Test-Path $dbPath) {
+    try {
+        $oauthToken = & $python -c "
+import sqlite3
+db = sqlite3.connect(r'$($dbPath.Replace("'","''"))')
+row = db.execute(\"SELECT value FROM settings WHERE key='github_oauth_token'\").fetchone()
+print(row[0] if row and row[0] else '', end='')
+db.close()
+" 2>$null
+    } catch {}
+}
+
+$ghHeaders = @{ 'User-Agent' = 'BakeryUpdate/1.0' }
+if ($oauthToken) { $ghHeaders['Authorization'] = "Bearer $oauthToken" }
+
 # Resolve target tag
 if (-not $TargetTag) {
     Write-Log 'Fetching latest tag from GitHub...'
     try {
-        $tags = Invoke-RestMethod 'https://api.github.com/repos/TSOrest/Bakery/tags' -TimeoutSec 10
+        $tags = Invoke-RestMethod 'https://api.github.com/repos/TSOrest/Bakery/tags' -Headers $ghHeaders -TimeoutSec 10
         $TargetTag = $tags[0].name
     } catch {
         Write-Log "ERROR: Cannot reach GitHub: $_" Red
