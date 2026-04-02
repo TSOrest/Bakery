@@ -70,8 +70,6 @@ if (`$portBusy) {
     Start-Sleep -Seconds 2
 }
 
-taskkill /F /IM python.exe /T 2>`$null
-Start-Sleep -Seconds 1
 Add-Content `$log ("`n[" + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "] Server starting...")
 Set-Location '$rootEsc'
 & `$python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 2>&1 |
