@@ -210,12 +210,15 @@ if (Get-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue) {
         -WorkingDirectory $ROOT -WindowStyle Hidden
 }
 
-# Relaunch tray
-$pythonw = Join-Path $ROOT 'backend\venv\Scripts\pythonw.exe'
-$trayScript = Join-Path $ROOT 'tray.py'
-Get-Process -Name pythonw -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
-Start-Process -FilePath $pythonw -ArgumentList "`"$trayScript`"" -WorkingDirectory $ROOT -WindowStyle Hidden
+# Relaunch tray через Task Scheduler (watchdog сам підніме потрібний екземпляр)
+# НЕ запускаємо pythonw напряму — інакше watchdog теж запустить і буде два екземпляри
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -eq 'pythonw.exe' -and $_.CommandLine -like '*tray.py*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+Stop-ScheduledTask  -TaskName 'BakeryTray' -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-ScheduledTask -TaskName 'BakeryTray' -ErrorAction SilentlyContinue
 
 # Оновлюємо версію в реєстрі (Програми та компоненти)
 $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Bakery'
