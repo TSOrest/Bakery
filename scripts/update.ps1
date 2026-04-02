@@ -126,6 +126,35 @@ if ($LASTEXITCODE -ne 0) {
     Write-Log 'WARNING: pip install had errors (continuing)' Yellow
 }
 
+# Run DB migrations
+Write-Log 'Applying database migrations...'
+$env:BAKERY_DATA_DIR = 'C:\ProgramData\Bakery'
+$migResult = & $python -c "
+import sys, os
+os.environ['BAKERY_DATA_DIR'] = r'C:\ProgramData\Bakery'
+sys.path.insert(0, r'$($ROOT.Replace('\','\\'))')
+os.chdir(r'$($ROOT.Replace('\','\\'))')
+from backend.database import engine, Base
+import backend.models.references, backend.models.orders, backend.models.pricing
+import backend.models.baking, backend.models.invoices, backend.models.movements
+import backend.models.finances, backend.models.shop, backend.models.settings, backend.models.auth
+Base.metadata.create_all(engine)
+import sqlite3, pathlib
+db = sqlite3.connect(str(pathlib.Path(r'C:\ProgramData\Bakery') / 'bakery.db'))
+mig_dir = pathlib.Path(r'$($ROOT.Replace('\','\\'))') / 'database' / 'migrations'
+if mig_dir.exists():
+    for f in sorted(mig_dir.glob('*.sql')):
+        for stmt in f.read_text('utf-8').split(';'):
+            stmt = '\n'.join(l for l in stmt.splitlines() if not l.strip().startswith('--')).strip()
+            if stmt:
+                try: db.execute(stmt)
+                except: pass
+        db.commit()
+db.close()
+print('Migrations OK')
+" 2>&1
+Write-Log $migResult
+
 # Build frontend
 Write-Log 'Building frontend...' Yellow
 $build = Start-Process -FilePath $npm `
