@@ -95,7 +95,7 @@ $settings = New-ScheduledTaskSettingsSet `
 $principal = New-ScheduledTaskPrincipal `
     -UserId $env:USERNAME `
     -LogonType Interactive `
-    -RunLevel Limited
+    -RunLevel Highest   # потрібно для запису в C:\ProgramData\Bakery\
 
 Register-ScheduledTask `
     -TaskName $TASK `
