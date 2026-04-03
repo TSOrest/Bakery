@@ -62,6 +62,8 @@ export default function ImportPage() {
   const [orderDays, setOrderDays] = useState(14)
   const [uploading, setUploading] = useState(false)
   const [uploadErr, setUploadErr] = useState('')
+  const [driverErr, setDriverErr] = useState<string | null>(null)
+  const [driverChecked, setDriverChecked] = useState(false)
 
   const [preview, setPreview] = useState<AccdbPreview | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -74,6 +76,17 @@ export default function ImportPage() {
   const [status, setStatus]   = useState<ImportStatus | null>(null)
   const [report, setReport]   = useState<ImportReport | null>(null)
   const pollRef               = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Check Access driver on mount
+  useEffect(() => {
+    fetch('/api/v1/import/driver-check')
+      .then(r => r.json())
+      .then(data => {
+        setDriverErr(data.ok ? null : data.error)
+        setDriverChecked(true)
+      })
+      .catch(() => setDriverChecked(true))
+  }, [])
 
   // Load categories for mapping step
   useEffect(() => {
@@ -189,6 +202,16 @@ export default function ImportPage() {
         ))}
       </div>
 
+      {/* Driver warning */}
+      {driverChecked && driverErr && (
+        <div className={s.errorBox} style={{ marginBottom: 20 }}>
+          <strong>Відсутній Microsoft Access ODBC Driver</strong>
+          <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontSize: '0.82rem' }}>
+            {driverErr}
+          </pre>
+        </div>
+      )}
+
       {/* ── Step 1 ── */}
       {step === 1 && (
         <div className={s.configForm}>
@@ -239,7 +262,7 @@ export default function ImportPage() {
           <div className={s.actions}>
             <button
               className={`${s.btn} ${s.btnPrimary}`}
-              disabled={!file || uploading}
+              disabled={!file || uploading || !!driverErr}
               onClick={handleUpload}
             >
               {uploading ? 'Завантаження...' : 'Перевірити файл'}

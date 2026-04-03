@@ -66,10 +66,43 @@ _CONN_TMPL = (
 )
 
 
+def check_access_driver() -> str | None:
+    """Перевіряє наявність Access ODBC Driver. Повертає None якщо OK, або рядок помилки."""
+    try:
+        pyodbc = _require_pyodbc()
+        drivers = [d for d in pyodbc.drivers() if 'Access' in d]
+        if not drivers:
+            return _driver_missing_msg()
+        return None
+    except RuntimeError as e:
+        return str(e)
+    except Exception as e:
+        return str(e)
+
+
+def _driver_missing_msg() -> str:
+    import struct
+    bits = struct.calcsize('P') * 8
+    return (
+        f"Microsoft Access ODBC Driver не встановлено.\n\n"
+        f"Встановіть Microsoft Access Database Engine Redistributable:\n"
+        f"1. Знайдіть 'Microsoft Access Database Engine 2016 Redistributable' на сайті microsoft.com/download\n"
+        f"2. Завантажте версію для Python {bits}-bit:\n"
+        f"   {'AccessDatabaseEngine_X64.exe' if bits == 64 else 'AccessDatabaseEngine.exe'}\n"
+        f"3. Перезапустіть сервер після встановлення"
+    )
+
+
 def _get_access_connection(path: str):
     pyodbc = _require_pyodbc()
     conn_str = _CONN_TMPL.format(path=path)
-    conn = pyodbc.connect(conn_str, autocommit=True)
+    try:
+        conn = pyodbc.connect(conn_str, autocommit=True)
+    except Exception as e:
+        err_str = str(e)
+        if 'IM002' in err_str or 'Data source name not found' in err_str or 'driver' in err_str.lower():
+            raise RuntimeError(_driver_missing_msg()) from e
+        raise RuntimeError(f"Помилка підключення до Access: {e}") from e
     # Спробуємо налаштувати декодування (не всі версії pyodbc підтримують)
     try:
         conn.setdecoding(pyodbc.SQL_CHAR, encoding="cp1251")

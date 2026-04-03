@@ -38,6 +38,13 @@ def _cleanup_old_tmp() -> None:
             pass
 
 
+@router.get("/driver-check")
+def driver_check():
+    """Перевіряє наявність Microsoft Access ODBC Driver."""
+    err = svc.check_access_driver()
+    return {"ok": err is None, "error": err}
+
+
 @router.post("/upload", response_model=AccdbPreview)
 async def upload_accdb(file: UploadFile = File(...)):
     """
