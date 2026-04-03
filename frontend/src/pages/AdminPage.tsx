@@ -6,6 +6,7 @@ import Modal from '../components/Modal'
 import PriceGantt, { type GanttRow, type GanttPriceSegment } from '../components/PriceGantt'
 import formStyles from '../components/Form.module.css'
 import UsersTab from './UsersTab'
+import ImportPage from './ImportPage'
 import { useAuth } from '../context/AuthContext'
 import {
   fetchIngredients, createIngredient, updateIngredient, deleteIngredient,
@@ -27,6 +28,7 @@ type Tab =
   | 'system_clients'
   | 'finance_articles'
   | 'backup'
+  | 'import_access'
 
 interface TabGroup {
   label: string
@@ -77,9 +79,10 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
     label: 'Система',
     permKey: 'admin_system',
     tabs: [
-      { key: 'users',       label: 'Користувачі' },
-      { key: 'permissions', label: 'Права ролей' },
-      { key: 'backup',      label: 'Бекапи' },
+      { key: 'users',          label: 'Користувачі' },
+      { key: 'permissions',    label: 'Права ролей' },
+      { key: 'backup',         label: 'Бекапи' },
+      { key: 'import_access',  label: 'Імпорт з Access' },
     ],
   },
 ]
@@ -241,6 +244,7 @@ export default function AdminPage() {
         )}
         {activeTab === 'finance_articles' && <FinanceArticlesTab />}
         {activeTab === 'backup' && <BackupTab />}
+        {activeTab === 'import_access' && <ImportPage />}
       </div>
     </div>
   )

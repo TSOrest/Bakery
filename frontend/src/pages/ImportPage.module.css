@@ -1,0 +1,312 @@
+.wrap {
+  padding: 24px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.steps {
+  display: flex;
+  gap: 0;
+  margin-bottom: 32px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.stepBtn {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  cursor: default;
+  color: #9ca3af;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stepBtn.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.stepBtn.done {
+  color: #16a34a;
+}
+
+.stepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e5e7eb;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #6b7280;
+}
+
+.stepBtn.active .stepNum {
+  background: #2563eb;
+  color: #fff;
+}
+
+.stepBtn.done .stepNum {
+  background: #16a34a;
+  color: #fff;
+}
+
+/* Step 1 — config */
+.configForm {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 520px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldGroup label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.fieldGroup input[type='file'],
+.fieldGroup input[type='date'],
+.fieldGroup input[type='number'] {
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+/* Preview table */
+.previewTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.previewTable th,
+.previewTable td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.previewTable th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.warn {
+  color: #b45309;
+  font-size: 0.8rem;
+}
+
+.ok {
+  color: #16a34a;
+}
+
+/* Mapping */
+.mappingSection {
+  margin-bottom: 32px;
+}
+
+.mappingSection h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #1e293b;
+}
+
+.mappingTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.mappingTable th,
+.mappingTable td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.mappingTable th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.mappingTable select {
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  width: 100%;
+}
+
+/* Progress */
+.progressWrap {
+  margin: 24px 0;
+}
+
+.progressBar {
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.progressFill {
+  height: 100%;
+  background: #2563eb;
+  transition: width 0.4s ease;
+  border-radius: 6px;
+}
+
+.stepLabel {
+  font-size: 0.9rem;
+  color: #374151;
+}
+
+.errorBox {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  padding: 16px;
+  color: #991b1b;
+  margin: 16px 0;
+}
+
+/* Report */
+.reportTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 24px;
+}
+
+.reportTable th,
+.reportTable td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: right;
+}
+
+.reportTable th:first-child,
+.reportTable td:first-child {
+  text-align: left;
+}
+
+.reportTable th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.validSection {
+  margin-top: 20px;
+}
+
+.validSection h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.mismatchList {
+  font-size: 0.82rem;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.mismatchList th,
+.mismatchList td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: right;
+}
+
+.mismatchList th:first-child,
+.mismatchList td:first-child {
+  text-align: left;
+}
+
+.success {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: #15803d;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+.failure {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: #991b1b;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+/* Buttons */
+.actions {
+  margin-top: 24px;
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  padding: 9px 20px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.btnPrimary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.btnPrimary:hover {
+  background: #1d4ed8;
+}
+
+.btnPrimary:disabled {
+  background: #93c5fd;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btnSecondary:hover {
+  background: #e5e7eb;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
