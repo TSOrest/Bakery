@@ -31,8 +31,8 @@ export interface AccdbPreview {
 }
 
 export interface ProductTypeMapping {
-  access_type:     string   // значення 'Тип' в Access ('Хліб', 'Булка', …)
-  new_category_id: number
+  access_type:   string   // значення 'Тип' в Access ('Хліб', 'Булка', …)
+  category_name: string   // назва категорії нової системи (можна змінити)
 }
 
 export interface ClientKindMapping {

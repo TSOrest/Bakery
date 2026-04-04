@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Category } from '../types'
 import {
   uploadAccdb,
   runImport,
@@ -163,11 +162,10 @@ export default function ImportPage() {
   const [driverChecked, setDriverChecked] = useState(false)
 
   const [preview, setPreview]       = useState<AccdbPreview | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
   const [existingCount, setExistingCount] = useState<number | null>(null)
 
-  // Mapping: access 'Тип' string → new category_id
-  const [prodTypeMap, setProdTypeMap] = useState<Record<string, number>>({})
+  // Mapping: access 'Тип' string → category name (default = type name)
+  const [prodTypeMap, setProdTypeMap] = useState<Record<string, string>>({})
   // Mapping: access client id → client_kind
   const [clientKindMap, setClientKindMap] = useState<Record<number, string>>({})
 
@@ -196,14 +194,6 @@ export default function ImportPage() {
         setDriverChecked(true)
       })
       .catch(() => setDriverChecked(true))
-  }, [])
-
-  // Load categories for mapping step
-  useEffect(() => {
-    fetch('/api/v1/categories/')
-      .then(r => r.json())
-      .then((data: Category[]) => setCategories(data.filter(c => c.is_active)))
-      .catch(() => {})
   }, [])
 
   // Poll while on step 4
@@ -241,9 +231,9 @@ export default function ImportPage() {
       const prev = await uploadAccdb(file, dbPassword)
       setPreview(prev)
 
-      // Init product type map (all types → 0 = unmapped)
-      const ptmap: Record<string, number> = {}
-      prev.product_types.forEach(t => { ptmap[t] = 0 })
+      // Init product type map (all types → same name by default)
+      const ptmap: Record<string, string> = {}
+      prev.product_types.forEach(t => { ptmap[t] = t })
       setProdTypeMap(ptmap)
 
       setStep(2)
@@ -260,10 +250,10 @@ export default function ImportPage() {
     if (!preview) return
 
     const productTypeMappings: ProductTypeMapping[] = Object.entries(prodTypeMap)
-      .filter(([, catId]) => catId > 0)
-      .map(([accessType, catId]) => ({
-        access_type:     accessType,
-        new_category_id: catId,
+      .filter(([, name]) => name.trim() !== '')
+      .map(([accessType, catName]) => ({
+        access_type:   accessType,
+        category_name: catName.trim() || accessType,
       }))
 
     const clientMappings: ClientKindMapping[] = Object.entries(clientKindMap)
@@ -430,12 +420,13 @@ export default function ImportPage() {
       {/* ── Step 3 — Mapping ── */}
       {step === 3 && preview && (
         <div>
-          {/* Product types → Category */}
+          {/* Product types → Category name */}
           <div className={s.mappingSection}>
             <h3>Типи виробів → Категорія</h3>
             <p className={s.hint} style={{ marginBottom: 10 }}>
-              Оберіть категорію нової системи для кожного типу виробів з Access.
-              Якщо категорія не обрана — вироби цього типу імпортуються без категорії.
+              Категорії будуть створені автоматично під час імпорту.
+              За потреби змініть назву категорії (або залиште як є).
+              Однакова назва для кількох типів об'єднає їх в одну категорію.
             </p>
             {preview.product_types.length === 0 ? (
               <p className={s.warn}>Типи виробів не знайдено в Access</p>
@@ -445,7 +436,7 @@ export default function ImportPage() {
                   <thead>
                     <tr>
                       <th>Тип (Access)</th>
-                      <th style={{ width: 220 }}>Категорія нової системи</th>
+                      <th style={{ width: 260 }}>Назва категорії в новій системі</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -453,20 +444,21 @@ export default function ImportPage() {
                       <tr key={ptype}>
                         <td>{ptype}</td>
                         <td>
-                          <select
-                            value={prodTypeMap[ptype] ?? 0}
+                          <input
+                            type="text"
+                            value={prodTypeMap[ptype] ?? ptype}
                             onChange={e =>
                               setProdTypeMap(prev => ({
                                 ...prev,
-                                [ptype]: Number(e.target.value),
+                                [ptype]: e.target.value,
                               }))
                             }
-                          >
-                            <option value={0}>— без категорії —</option>
-                            {categories.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                          </select>
+                            style={{
+                              padding: '4px 8px', border: '1px solid #d1d5db',
+                              borderRadius: 4, fontSize: '0.85rem', width: '100%',
+                              boxSizing: 'border-box',
+                            }}
+                          />
                         </td>
                       </tr>
                     ))}
