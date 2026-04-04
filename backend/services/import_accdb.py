@@ -168,18 +168,22 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Data
 
-$cs = "Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=$DbPath;ExtendedAnsiSQL=1"
-if ($Password -ne "") { $cs += ";PWD=$Password" }
+# OleDb ACE — не потребує тимчасових DSN-записів у реєстрі (на відміну від ODBC)
+$cs = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source=$DbPath"
+if ($Password -ne "") { $cs += ";Jet OLEDB:Database Password=$Password" }
 
-$conn = New-Object System.Data.Odbc.OdbcConnection($cs)
+$conn = New-Object System.Data.OleDb.OleDbConnection($cs)
 $conn.Open()
 
-$schema = $conn.GetSchema("Tables")
+# Список таблиць через GetOleDbSchemaTable
+$schemaTbl = $conn.GetOleDbSchemaTable(
+    [System.Data.OleDb.OleDbSchemaGuid]::Tables,
+    @($null, $null, $null, "TABLE")
+)
 $tbls = [System.Collections.Generic.List[string]]::new()
-foreach ($r in $schema.Rows) {
-    if ($r["TABLE_TYPE"] -eq "TABLE" -and -not $r["TABLE_NAME"].ToString().StartsWith("MSys")) {
-        $tbls.Add($r["TABLE_NAME"].ToString())
-    }
+foreach ($r in $schemaTbl.Rows) {
+    $tname = $r["TABLE_NAME"].ToString()
+    if (-not $tname.StartsWith("MSys")) { $tbls.Add($tname) }
 }
 
 $dataObj = [ordered]@{}
@@ -248,11 +252,12 @@ def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
 
         if result.returncode != 0:
             stderr = result.stderr.decode("utf-8", errors="replace").strip()
-            if not stderr:
-                stderr = result.stdout.decode("utf-8", errors="replace").strip()
-            if "password" in stderr.lower() or "не дійсний пароль" in stderr:
+            stdout = result.stdout.decode("utf-8", errors="replace").strip()
+            msg = stderr or stdout
+            low = msg.lower()
+            if "password" in low or "пароль" in low or "not a valid password" in low:
                 raise RuntimeError("Невірний пароль до файлу Access")
-            raise RuntimeError(f"Помилка читання Access:\n{stderr[:800]}")
+            raise RuntimeError(f"Помилка читання Access:\n{msg[:800]}")
 
         raw = Path(out_path).read_text(encoding="utf-8-sig")
         parsed = json.loads(raw)
