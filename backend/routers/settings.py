@@ -101,9 +101,19 @@ def reset_database(db: Session = Depends(get_db)):
     налаштування, статті фінансів.
     """
     conn = db.connection()
+
+    # Таблиці що реально існують у цій БД
+    existing = {r[0] for r in conn.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table'")
+    )}
+
+    def _del(tbl: str) -> None:
+        if tbl in existing:
+            conn.execute(text(f"DELETE FROM {tbl}"))  # noqa: S608
+
     conn.execute(text("PRAGMA foreign_keys = OFF"))
     try:
-        # Залежні таблиці — спочатку
+        # Дочірні таблиці — спочатку
         for tbl in (
             "shop_disposal_lines",
             "shop_reconciliation_lines",
@@ -113,7 +123,6 @@ def reset_database(db: Session = Depends(get_db)):
             "shop_counts",
             "other_stock_in",
             "invoice_lines",
-            "invoices",
             "cancellation_lines",
             "route_cancellations",
             "surplus_allocations",
@@ -128,18 +137,25 @@ def reset_database(db: Session = Depends(get_db)):
             "other_products",
             "ingredients",
         ):
-            conn.execute(text(f"DELETE FROM {tbl}"))  # noqa: S608
+            _del(tbl)
 
-        # Замовлення — self-referential FK, спочатку обнулити
-        conn.execute(text("UPDATE orders SET parent_order_id = NULL"))
-        conn.execute(text("DELETE FROM orders"))
+        # Самопосилання у invoices
+        if "invoices" in existing:
+            conn.execute(text("UPDATE invoices SET corrective_for_id = NULL"))
+            conn.execute(text("DELETE FROM invoices"))
+
+        # Замовлення — self-referential FK
+        if "orders" in existing:
+            conn.execute(text("UPDATE orders SET parent_order_id = NULL"))
+            conn.execute(text("DELETE FROM orders"))
 
         # Лише регулярних клієнтів
-        conn.execute(text("DELETE FROM clients WHERE client_kind = 'customer'"))
+        if "clients" in existing:
+            conn.execute(text("DELETE FROM clients WHERE client_kind = 'customer'"))
 
-        # Довідники без залежностей
+        # Довідники
         for tbl in ("products", "categories", "units", "routes"):
-            conn.execute(text(f"DELETE FROM {tbl}"))  # noqa: S608
+            _del(tbl)
 
     finally:
         conn.execute(text("PRAGMA foreign_keys = ON"))

@@ -164,6 +164,7 @@ export default function ImportPage() {
 
   const [preview, setPreview]       = useState<AccdbPreview | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
+  const [existingCount, setExistingCount] = useState<number | null>(null)
 
   // Mapping: access 'Тип' string → new category_id
   const [prodTypeMap, setProdTypeMap] = useState<Record<string, number>>({})
@@ -174,6 +175,17 @@ export default function ImportPage() {
   const [status, setStatus] = useState<ImportStatus | null>(null)
   const [report, setReport] = useState<ImportReport | null>(null)
   const pollRef             = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Check if DB already has customer data
+  useEffect(() => {
+    fetch('/api/v1/clients/?active_only=false')
+      .then(r => r.json())
+      .then((data: { client_kind?: string }[]) => {
+        const count = data.filter(c => c.client_kind === 'customer').length
+        setExistingCount(count)
+      })
+      .catch(() => setExistingCount(0))
+  }, [])
 
   // Check Access driver on mount
   useEffect(() => {
@@ -300,6 +312,14 @@ export default function ImportPage() {
         ))}
       </div>
 
+      {/* Existing data warning */}
+      {existingCount !== null && existingCount > 0 && (
+        <div className={s.errorBox} style={{ marginBottom: 20, background: '#fff7ed', borderColor: '#fed7aa', color: '#92400e' }}>
+          <strong>База вже містить дані ({existingCount} клієнтів).</strong>
+          {' '}Перед імпортом необхідно скинути базу даних (секція «Скидання бази даних» вище).
+        </div>
+      )}
+
       {/* Driver warning */}
       {driverChecked && driverErr && (
         <div className={s.errorBox} style={{ marginBottom: 20 }}>
@@ -369,7 +389,7 @@ export default function ImportPage() {
           <div className={s.actions}>
             <button
               className={`${s.btn} ${s.btnPrimary}`}
-              disabled={!file || uploading || !!driverErr}
+              disabled={!file || uploading || !!driverErr || (existingCount !== null && existingCount > 0)}
               onClick={handleUpload}
             >
               {uploading ? 'Завантаження...' : 'Перевірити файл'}

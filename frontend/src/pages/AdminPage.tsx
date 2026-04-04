@@ -28,7 +28,6 @@ type Tab =
   | 'system_clients'
   | 'finance_articles'
   | 'backup'
-  | 'import_access'
 
 interface TabGroup {
   label: string
@@ -79,10 +78,9 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
     label: 'Система',
     permKey: 'admin_system',
     tabs: [
-      { key: 'users',          label: 'Користувачі' },
-      { key: 'permissions',    label: 'Права ролей' },
-      { key: 'backup',         label: 'Бекапи' },
-      { key: 'import_access',  label: 'Імпорт з Access' },
+      { key: 'users',       label: 'Користувачі' },
+      { key: 'permissions', label: 'Права ролей' },
+      { key: 'backup',      label: 'Бекапи та імпорт' },
     ],
   },
 ]
@@ -244,7 +242,6 @@ export default function AdminPage() {
         )}
         {activeTab === 'finance_articles' && <FinanceArticlesTab />}
         {activeTab === 'backup' && <BackupTab />}
-        {activeTab === 'import_access' && <ImportPage />}
       </div>
     </div>
   )
@@ -2584,23 +2581,6 @@ function SettingsTab({ section }: { section: SettingsSection }) {
   const [tgMsg,     setTgMsg]     = useState('')
   const [showToken, setShowToken] = useState(false)
 
-  // Скидання БД
-  const [resetModal,       setResetModal]       = useState(false)
-  const [resetConfirmText, setResetConfirmText] = useState('')
-  const [resetBusy,        setResetBusy]        = useState(false)
-  const [resetErr,         setResetErr]         = useState('')
-
-  const handleReset = async () => {
-    setResetBusy(true); setResetErr('')
-    try {
-      await api.post('/settings/reset-db', null)
-      setResetModal(false)
-      window.location.reload()
-    } catch (e) {
-      setResetErr(String(e))
-    } finally { setResetBusy(false) }
-  }
-
   const load = () =>
     api.get<SettingsMap>('/settings/').then((data) => {
       setSettings(data)
@@ -2734,76 +2714,6 @@ function SettingsTab({ section }: { section: SettingsSection }) {
           </label>
         </div>
 
-        {/* ── Зона небезпеки ── */}
-        <div style={{ marginTop: '2rem', borderTop: '2px solid #fde8e8', paddingTop: '1.25rem' }}>
-          <div style={{ fontWeight: 700, color: '#c0392b', marginBottom: '0.5rem', fontSize: '0.9rem', letterSpacing: '0.03em' }}>
-            Зона небезпеки
-          </div>
-          <p style={{ fontSize: '0.85rem', color: '#666', marginTop: 0, marginBottom: '0.75rem', maxWidth: 520 }}>
-            Повністю очищає базу даних. Видаляє всі вироби, клієнтів, замовлення, накладні,
-            ціни, фінанси та всі інші робочі дані. Системні клієнти, користувачі та
-            налаштування залишаться.
-          </p>
-          <button
-            type="button"
-            onClick={() => { setResetModal(true); setResetConfirmText(''); setResetErr('') }}
-            style={{ background: '#fff', border: '1.5px solid #e74c3c', color: '#e74c3c', padding: '0.45rem 1rem', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 }}
-          >
-            Скинути базу даних...
-          </button>
-        </div>
-
-        {/* ── Модаль підтвердження скидання ── */}
-        {resetModal && (
-          <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
-          }}>
-            <div style={{
-              background: '#fff', borderRadius: 10, padding: '1.75rem', maxWidth: 460, width: '90%',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-            }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: '0 0 1rem', color: '#c0392b', fontSize: '1.1rem' }}>Скидання бази даних</h3>
-              <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
-                Ця дія <strong>незворотна</strong>. Будуть видалені всі вироби, клієнти,
-                замовлення, накладні, ціни, фінанси та всі інші робочі дані.
-              </p>
-              <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
-                Системні клієнти (магазин, списання, пайок), користувачі та налаштування залишаться.
-              </p>
-              <p style={{ fontSize: '0.9rem', marginBottom: '0.4rem' }}>
-                Щоб підтвердити, введіть <strong>СКИНУТИ</strong>:
-              </p>
-              <input
-                autoFocus
-                value={resetConfirmText}
-                onChange={e => setResetConfirmText(e.target.value.toUpperCase())}
-                placeholder="СКИНУТИ"
-                style={{ padding: '0.4rem 0.7rem', border: '1.5px solid #ccc', borderRadius: 4, fontSize: '1rem', width: '100%', marginBottom: '0.85rem', boxSizing: 'border-box' }}
-              />
-              {resetErr && <div style={{ color: '#c0392b', fontSize: '0.85rem', marginBottom: '0.6rem' }}>{resetErr}</div>}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button type="button" onClick={() => setResetModal(false)} disabled={resetBusy}
-                  style={{ ...editBtnStyle, padding: '0.4rem 1rem' }}>
-                  Скасувати
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  disabled={resetConfirmText !== 'СКИНУТИ' || resetBusy}
-                  style={{
-                    background: resetConfirmText === 'СКИНУТИ' ? '#e74c3c' : '#ccc',
-                    color: '#fff', border: 'none', padding: '0.4rem 1.1rem', borderRadius: 4,
-                    cursor: resetConfirmText === 'СКИНУТИ' ? 'pointer' : 'not-allowed',
-                    fontWeight: 600, fontSize: '0.9rem',
-                  }}
-                >
-                  {resetBusy ? 'Очищення...' : 'Скинути'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </>}
 
       {/* ── Telegram Бот ── */}
@@ -3725,6 +3635,108 @@ type BackupMeta = { name: string; size_kb: number; created_at: string; app_versi
 type ArchivePreview = { cutoff_date: string; tables: Record<string, number>; total: number }
 type DemoStatus = { active: boolean; since: string | null; demo_db_exists: boolean }
 
+function ResetDbSection() {
+  const [modal,       setModal]       = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [busy,        setBusy]        = useState(false)
+  const [err,         setErr]         = useState('')
+
+  const sectionS: React.CSSProperties = {
+    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+    padding: '1.25rem 1.5rem', marginBottom: '1rem',
+  }
+  const s: React.CSSProperties = { fontSize: '0.85rem' }
+  const btnS: React.CSSProperties = {
+    background: '#2563eb', color: '#fff', border: 'none',
+    padding: '0.4rem 1rem', borderRadius: 5, cursor: 'pointer',
+    fontSize: '0.85rem', fontWeight: 600,
+  }
+
+  const handleReset = async () => {
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch('/api/v1/settings/reset-db', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(data.detail ?? res.statusText)
+      }
+      setModal(false)
+      window.location.reload()
+    } catch (e: any) {
+      setErr(String(e.message ?? e))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{ ...sectionS, borderColor: '#fde8e8' }}>
+      <h3 style={{ margin: '0 0 0.6rem', fontSize: '1rem', fontWeight: 700, color: '#c0392b' }}>
+        Скидання бази даних
+      </h3>
+      <p style={{ ...s, color: '#666', marginTop: 0, marginBottom: '0.75rem', maxWidth: 520, lineHeight: 1.5 }}>
+        Видаляє всі вироби, клієнтів, замовлення, накладні, ціни, фінанси та всі інші робочі дані.
+        Системні клієнти, користувачі та налаштування залишаться.
+      </p>
+      <button
+        style={{ ...btnS, background: '#fff', border: '1.5px solid #e74c3c', color: '#e74c3c' }}
+        onClick={() => { setModal(true); setConfirmText(''); setErr('') }}
+      >
+        Скинути базу даних...
+      </button>
+
+      {modal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#fff', borderRadius: 10, padding: '1.75rem',
+            maxWidth: 460, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 1rem', color: '#c0392b', fontSize: '1.1rem' }}>Скидання бази даних</h3>
+            <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+              Ця дія <strong>незворотна</strong>. Будуть видалені всі вироби, клієнти,
+              замовлення, накладні, ціни, фінанси та всі інші робочі дані.
+            </p>
+            <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+              Системні клієнти (магазин, списання, пайок), користувачі та налаштування залишаться.
+            </p>
+            <p style={{ fontSize: '0.9rem', marginBottom: '0.4rem' }}>
+              Щоб підтвердити, введіть <strong>СКИНУТИ</strong>:
+            </p>
+            <input
+              autoFocus
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value.toUpperCase())}
+              placeholder="СКИНУТИ"
+              style={{ padding: '0.4rem 0.7rem', border: '1.5px solid #ccc', borderRadius: 4,
+                fontSize: '1rem', width: '100%', marginBottom: '0.85rem', boxSizing: 'border-box' }}
+            />
+            {err && <div style={{ color: '#c0392b', fontSize: '0.85rem', marginBottom: '0.6rem' }}>
+              {err}
+            </div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button onClick={() => setModal(false)} disabled={busy}
+                style={{ background: '#f3f4f6', border: '1px solid #d1d5db', color: '#374151',
+                  padding: '0.4rem 1rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.9rem' }}>
+                Скасувати
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={confirmText !== 'СКИНУТИ' || busy}
+                style={{
+                  background: confirmText === 'СКИНУТИ' ? '#e74c3c' : '#ccc',
+                  color: '#fff', border: 'none', padding: '0.4rem 1.1rem', borderRadius: 4,
+                  cursor: confirmText === 'СКИНУТИ' ? 'pointer' : 'not-allowed',
+                  fontWeight: 600, fontSize: '0.9rem',
+                }}
+              >
+                {busy ? 'Очищення...' : 'Скинути'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BackupTab() {
   const [form, setForm]                   = useState<Record<string, string>>({})
   const [savingSettings, setSavingSettings] = useState(false)
@@ -4133,6 +4145,19 @@ function BackupTab() {
             {archiveResult.freed_mb > 0 && `, звільнено ${archiveResult.freed_mb} MB`}
           </div>
         )}
+      </div>
+
+      {/* ── 5. Скидання бази даних ── */}
+      <ResetDbSection />
+
+      {/* ── 6. Імпорт з Access ── */}
+      <div style={sectionS}>
+        <h3 style={h3S}>Імпорт з Microsoft Access</h3>
+        <p style={{ ...s, color: '#666', marginBottom: '1rem', lineHeight: 1.5 }}>
+          Одноразове перенесення даних зі старої системи (.accdb) у нову.
+          Перед імпортом рекомендується скинути базу даних (секція вище).
+        </p>
+        <ImportPage />
       </div>
 
       {/* ── Модальне вікно відновлення ── */}
