@@ -89,13 +89,15 @@ def check_access_driver() -> str | None:
 def _driver_missing_msg() -> str:
     import struct
     bits = struct.calcsize('P') * 8
+    exe = 'AccessDatabaseEngine_X64.exe' if bits == 64 else 'AccessDatabaseEngine.exe'
     return (
-        f"Microsoft Access ODBC Driver не встановлено.\n\n"
-        f"Встановіть Microsoft Access Database Engine Redistributable:\n"
-        f"1. Знайдіть 'Microsoft Access Database Engine 2016 Redistributable' на сайті microsoft.com/download\n"
-        f"2. Завантажте версію для Python {bits}-bit:\n"
-        f"   {'AccessDatabaseEngine_X64.exe' if bits == 64 else 'AccessDatabaseEngine.exe'}\n"
-        f"3. Перезапустіть сервер після встановлення"
+        f"Microsoft Access ODBC Driver ({bits}-bit) не знайдено.\n\n"
+        f"Якщо на комп'ютері вже встановлений Office 32-bit, запустіть інсталятор з ключем /passive:\n"
+        f"  1. Завантажте '{exe}' (Microsoft Access Database Engine 2016 Redistributable)\n"
+        f"     з microsoft.com/download → пошук 'Access Database Engine 2016'\n"
+        f"  2. Відкрийте командний рядок від імені Адміністратора і виконайте:\n"
+        f"     {exe} /passive\n"
+        f"  3. Перезапустіть сервер пекарні (трей → Перезапустити)"
     )
 
 
