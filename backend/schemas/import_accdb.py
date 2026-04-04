@@ -34,6 +34,7 @@ class ClientKindMapping(BaseModel):
 
 class ImportMapping(BaseModel):
     temp_file_token: str
+    db_password: str = ''                         # пароль до .accdb (порожньо = без пароля)
     transition_date: str                          # YYYY-MM-DD
     finance_months: int = Field(2, ge=1, le=24)
     order_days: int = Field(14, ge=1, le=60)

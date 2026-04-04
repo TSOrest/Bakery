@@ -33,6 +33,7 @@ export interface ClientKindMapping {
 
 export interface ImportMapping {
   temp_file_token: string
+  db_password: string
   transition_date: string         // YYYY-MM-DD
   finance_months: number
   order_days: number
@@ -87,9 +88,10 @@ export interface UploadConfig {
   order_days: number
 }
 
-export async function uploadAccdb(file: File): Promise<AccdbPreview> {
+export async function uploadAccdb(file: File, password = ''): Promise<AccdbPreview> {
   const form = new FormData()
   form.append('file', file)
+  if (password) form.append('password', password)
   const res = await fetch(`${BASE}/upload`, { method: 'POST', body: form })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))

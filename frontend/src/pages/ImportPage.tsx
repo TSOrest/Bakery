@@ -60,6 +60,7 @@ export default function ImportPage() {
   const [transDate, setTransDate] = useState(today())
   const [finMonths, setFinMonths] = useState(2)
   const [orderDays, setOrderDays] = useState(14)
+  const [dbPassword, setDbPassword] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadErr, setUploadErr] = useState('')
   const [driverErr, setDriverErr] = useState<string | null>(null)
@@ -128,7 +129,7 @@ export default function ImportPage() {
     setUploading(true)
     setUploadErr('')
     try {
-      const prev = await uploadAccdb(file)
+      const prev = await uploadAccdb(file, dbPassword)
       setPreview(prev)
 
       // Init product category map: all → 0 (unmapped)
@@ -167,6 +168,7 @@ export default function ImportPage() {
     try {
       await runImport({
         temp_file_token: preview.temp_file_token,
+        db_password: dbPassword,
         transition_date: transDate,
         finance_months: finMonths,
         order_days: orderDays,
@@ -221,6 +223,15 @@ export default function ImportPage() {
               type="file"
               accept=".accdb"
               onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+          <div className={s.fieldGroup}>
+            <label>Пароль до файлу (якщо є)</label>
+            <input
+              type="password"
+              value={dbPassword}
+              placeholder="залиште порожнім якщо без пароля"
+              onChange={e => setDbPassword(e.target.value)}
             />
           </div>
           <div className={s.fieldGroup}>

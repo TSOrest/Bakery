@@ -59,9 +59,15 @@ def _require_pyodbc():
         )
 
 
-_CONN_TMPL = (
+_CONN_TMPL_NO_PWD = (
     "Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};"
     "DBQ={path};"
+    "ExtendedAnsiSQL=1;"
+)
+_CONN_TMPL_PWD = (
+    "Driver={{Microsoft Access Driver (*.mdb, *.accdb)}};"
+    "DBQ={path};"
+    "PWD={password};"
     "ExtendedAnsiSQL=1;"
 )
 
@@ -93,15 +99,20 @@ def _driver_missing_msg() -> str:
     )
 
 
-def _get_access_connection(path: str):
+def _get_access_connection(path: str, password: str = ""):
     pyodbc = _require_pyodbc()
-    conn_str = _CONN_TMPL.format(path=path)
+    if password:
+        conn_str = _CONN_TMPL_PWD.format(path=path, password=password)
+    else:
+        conn_str = _CONN_TMPL_NO_PWD.format(path=path)
     try:
         conn = pyodbc.connect(conn_str, autocommit=True)
     except Exception as e:
         err_str = str(e)
         if 'IM002' in err_str or 'Data source name not found' in err_str or 'driver' in err_str.lower():
             raise RuntimeError(_driver_missing_msg()) from e
+        if '28000' in err_str or 'password' in err_str.lower() or 'не дійсний пароль' in err_str:
+            raise RuntimeError("Невірний пароль до файлу Access") from e
         raise RuntimeError(f"Помилка підключення до Access: {e}") from e
     # Спробуємо налаштувати декодування (не всі версії pyodbc підтримують)
     try:
@@ -226,9 +237,9 @@ def _serialize_sample(rows: list[dict]) -> list[dict]:
 
 # ─── Preview (read-only) ──────────────────────────────────────────────────────
 
-def read_accdb_preview(path: str) -> AccdbPreview:
+def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
     """Читає .accdb і повертає попередній перегляд без запису в SQLite."""
-    conn = _get_access_connection(path)
+    conn = _get_access_connection(path, password)
     try:
         tables = _list_access_tables(conn)
         cursor = conn.cursor()
@@ -289,7 +300,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
         _update_state(running=True, step="Підключення до Access", progress=2,
                       error=None, result=None)
 
-        conn = _get_access_connection(accdb_path)
+        conn = _get_access_connection(accdb_path, mapping.db_password)
         tables = _list_access_tables(conn)
         cursor = conn.cursor()
 

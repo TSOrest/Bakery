@@ -8,8 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Form, HTTPException, UploadFile, File
 
 from backend.schemas.import_accdb import AccdbPreview, ImportMapping, ImportReport
 from backend.services import import_accdb as svc
@@ -46,9 +45,13 @@ def driver_check():
 
 
 @router.post("/upload", response_model=AccdbPreview)
-async def upload_accdb(file: UploadFile = File(...)):
+async def upload_accdb(
+    file: UploadFile = File(...),
+    password: str = Form(""),
+):
     """
     Завантажує .accdb файл, зберігає у тимчасову папку і повертає попередній перегляд.
+    Якщо файл захищений паролем — передати поле 'password'.
     """
     if not file.filename or not file.filename.lower().endswith(".accdb"):
         raise HTTPException(400, "Файл повинен мати розширення .accdb")
@@ -63,7 +66,7 @@ async def upload_accdb(file: UploadFile = File(...)):
     tmp_file.write_bytes(content)
 
     try:
-        preview = svc.read_accdb_preview(str(tmp_file))
+        preview = svc.read_accdb_preview(str(tmp_file), password)
     except RuntimeError as exc:
         tmp_file.unlink(missing_ok=True)
         raise HTTPException(503, str(exc))
