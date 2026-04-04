@@ -11,7 +11,8 @@ import type {
   ClientKindMapping,
   ImportReport,
   ImportStatus,
-  ProductCategoryMapping,
+  ProductTypeMapping,
+  TableDetail,
 } from '../api/importAccdb'
 import s from './ImportPage.module.css'
 
@@ -28,22 +29,32 @@ const STEP_LABELS: Record<Step, string> = {
 }
 
 const ENTITY_LABELS: Record<string, string> = {
-  units:     'Одиниці',
-  routes:    'Маршрути',
-  products:  'Вироби',
-  clients:   'Клієнти',
-  prices:    'Базові ціни',
-  overrides: 'Ціни клієнтів',
-  orders:    'Замовлення',
-  finances:  'Фінанси',
-  stock:     'Залишки магазину',
+  routes:   'Маршрути',
+  clients:  'Клієнти',
+  products: 'Вироби',
+  prices:   'Ціни',
+  orders:   'Замовлення',
+  finances: 'Фінанси',
+  stock:    'Залишки магазину',
 }
 
+type PreviewKey = keyof Pick<AccdbPreview, 'routes'|'clients'|'products'|'prices'|'orders'|'finances'|'stock'>
+
+const PREVIEW_ENTITIES: [PreviewKey, string][] = [
+  ['routes',   'Маршрути'],
+  ['clients',  'Клієнти'],
+  ['products', 'Вироби'],
+  ['prices',   'Ціни'],
+  ['orders',   'Замовлення'],
+  ['finances', 'Фінанси'],
+  ['stock',    'Залишки магазину'],
+]
+
 const CLIENT_KINDS = [
-  { value: 'customer',  label: 'Клієнт' },
-  { value: 'shop',      label: 'Магазин' },
-  { value: 'writeoff',  label: 'Списання' },
-  { value: 'ration',    label: 'Пайок' },
+  { value: 'customer', label: 'Клієнт' },
+  { value: 'shop',     label: 'Магазин' },
+  { value: 'writeoff', label: 'Списання' },
+  { value: 'ration',   label: 'Пайок' },
 ]
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -52,31 +63,117 @@ function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+// ─── EntityPreviewCard ────────────────────────────────────────────────────────
+
+function EntityPreviewCard({ label, detail }: { label: string; detail: TableDetail }) {
+  const notFound = !detail.access_table
+  const sampleKeys = detail.sample.length > 0 ? Object.keys(detail.sample[0]) : []
+
+  return (
+    <div className={s.previewEntity}>
+      <div className={s.previewEntityHead}>
+        <strong>{label}</strong>
+        <span className={s.previewEntityMeta}>
+          {notFound ? (
+            <span className={s.warn}>таблицю не знайдено</span>
+          ) : (
+            <>
+              <span className={s.ok}>{detail.count} рядків</span>
+              {' · '}
+              <code style={{ fontSize: '0.82rem', background: '#f3f4f6', padding: '1px 5px', borderRadius: 3 }}>
+                {detail.access_table}
+              </code>
+            </>
+          )}
+        </span>
+      </div>
+
+      {detail.warnings.map((w, i) => (
+        <div key={i} className={s.warn} style={{ fontSize: '0.8rem', marginTop: 4 }}>{w}</div>
+      ))}
+
+      {!notFound && detail.column_map.length > 0 && (
+        <div className={s.tableWrap} style={{ marginTop: 8 }}>
+          <table className={s.mappingTable}>
+            <thead>
+              <tr>
+                <th>Колонка Access</th>
+                <th>Поле системи</th>
+                <th>Опис</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.column_map.map((cm, i) => (
+                <tr key={i}>
+                  <td>
+                    <code style={{ fontSize: '0.82rem', background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>
+                      {cm.access_col}
+                    </code>
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{cm.target_field}</td>
+                  <td style={{ color: '#6b7280', fontSize: '0.82rem' }}>{cm.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!notFound && detail.sample.length > 0 && (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ fontSize: '0.82rem', cursor: 'pointer', color: '#6b7280' }}>
+            Зразкові рядки ({detail.sample.length})
+          </summary>
+          <div className={s.tableWrap} style={{ marginTop: 6 }}>
+            <table className={s.previewTable} style={{ fontSize: '0.78rem' }}>
+              <thead>
+                <tr>
+                  {sampleKeys.map(k => <th key={k}>{k}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {detail.sample.map((row, ri) => (
+                  <tr key={ri}>
+                    {sampleKeys.map(k => (
+                      <td key={k}>{String(row[k] ?? '')}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ImportPage() {
-  const [step, setStep]           = useState<Step>(1)
-  const [file, setFile]           = useState<File | null>(null)
-  const [transDate, setTransDate] = useState(today())
-  const [finMonths, setFinMonths] = useState(2)
-  const [orderDays, setOrderDays] = useState(14)
+  const [step, setStep]             = useState<Step>(1)
+  const [file, setFile]             = useState<File | null>(null)
+  const [transDate, setTransDate]   = useState(today())
+  const [finMonths, setFinMonths]   = useState(2)
+  const [orderDays, setOrderDays]   = useState(14)
   const [dbPassword, setDbPassword] = useState('')
-  const [uploading, setUploading] = useState(false)
-  const [uploadErr, setUploadErr] = useState('')
-  const [driverErr, setDriverErr] = useState<string | null>(null)
+  const [uploading, setUploading]   = useState(false)
+  const [uploadErr, setUploadErr]   = useState('')
+  const [driverErr, setDriverErr]   = useState<string | null>(null)
   const [driverChecked, setDriverChecked] = useState(false)
 
-  const [preview, setPreview] = useState<AccdbPreview | null>(null)
+  const [preview, setPreview]       = useState<AccdbPreview | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
 
-  // Mapping state
-  const [prodCatMap, setProdCatMap] = useState<Record<number, number>>({})   // access_product_id → category_id
+  // Mapping: access 'Тип' string → new category_id
+  const [prodTypeMap, setProdTypeMap] = useState<Record<string, number>>({})
+  // Mapping: access client id → client_kind
   const [clientKindMap, setClientKindMap] = useState<Record<number, string>>({})
 
   // Execution
-  const [status, setStatus]   = useState<ImportStatus | null>(null)
-  const [report, setReport]   = useState<ImportReport | null>(null)
-  const pollRef               = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [status, setStatus] = useState<ImportStatus | null>(null)
+  const [report, setReport] = useState<ImportReport | null>(null)
+  const pollRef             = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Check Access driver on mount
   useEffect(() => {
@@ -132,13 +229,11 @@ export default function ImportPage() {
       const prev = await uploadAccdb(file, dbPassword)
       setPreview(prev)
 
-      // Init product category map: all → 0 (unmapped)
-      const pmap: Record<number, number> = {}
-      prev.products.sample.forEach((row, i) => {
-        const id = Number(row['id'] ?? row['Код'] ?? i)
-        pmap[id] = 0
-      })
-      setProdCatMap(pmap)
+      // Init product type map (all types → 0 = unmapped)
+      const ptmap: Record<string, number> = {}
+      prev.product_types.forEach(t => { ptmap[t] = 0 })
+      setProdTypeMap(ptmap)
+
       setStep(2)
     } catch (e: any) {
       setUploadErr(e.message ?? 'Помилка')
@@ -151,10 +246,11 @@ export default function ImportPage() {
 
   async function handleRunImport() {
     if (!preview) return
-    const productMappings: ProductCategoryMapping[] = Object.entries(prodCatMap)
+
+    const productTypeMappings: ProductTypeMapping[] = Object.entries(prodTypeMap)
       .filter(([, catId]) => catId > 0)
-      .map(([aid, catId]) => ({
-        access_product_id: Number(aid),
+      .map(([accessType, catId]) => ({
+        access_type:     accessType,
         new_category_id: catId,
       }))
 
@@ -162,19 +258,19 @@ export default function ImportPage() {
       .filter(([, kind]) => kind !== 'customer')
       .map(([aid, kind]) => ({
         access_client_id: Number(aid),
-        client_kind: kind as ClientKindMapping['client_kind'],
+        client_kind:      kind as ClientKindMapping['client_kind'],
       }))
 
     try {
       await runImport({
-        temp_file_token: preview.temp_file_token,
-        db_password: dbPassword,
-        transition_date: transDate,
-        finance_months: finMonths,
-        order_days: orderDays,
-        product_categories: productMappings,
-        client_kinds: clientMappings,
-        default_client_kind: 'customer',
+        temp_file_token:         preview.temp_file_token,
+        db_password:             dbPassword,
+        transition_date:         transDate,
+        finance_months:          finMonths,
+        order_days:              orderDays,
+        product_type_categories: productTypeMappings,
+        client_kinds:            clientMappings,
+        default_client_kind:     'customer',
       })
       setStep(4)
     } catch (e: any) {
@@ -282,45 +378,16 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* ── Step 2 — Preview ── */}
+      {/* ── Step 2 — Detailed preview ── */}
       {step === 2 && preview && (
         <div>
-          <div className={s.tableWrap}>
-            <table className={s.previewTable}>
-              <thead>
-                <tr>
-                  <th>Сутність</th>
-                  <th>Знайдено в Access</th>
-                  <th>Попередження</th>
-                </tr>
-              </thead>
-              <tbody>
-                {([
-                  ['routes',    'Маршрути'],
-                  ['clients',   'Клієнти'],
-                  ['products',  'Вироби'],
-                  ['prices',    'Базові ціни'],
-                  ['overrides', 'Ціни клієнтів'],
-                  ['orders',    'Замовлення'],
-                  ['finances',  'Фінансові операції'],
-                  ['stock',     'Залишки магазину'],
-                ] as [keyof typeof preview, string][]).map(([key, label]) => {
-                  const ep = preview[key] as { count: number; warnings: string[] }
-                  return (
-                    <tr key={key}>
-                      <td>{label}</td>
-                      <td>{ep.count}</td>
-                      <td>
-                        {ep.warnings?.map((w, i) => (
-                          <div key={i} className={s.warn}>{w}</div>
-                        ))}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          {PREVIEW_ENTITIES.map(([key, label]) => (
+            <EntityPreviewCard
+              key={key}
+              label={label}
+              detail={preview[key]}
+            />
+          ))}
 
           {preview.access_tables.length > 0 && (
             <details style={{ marginTop: 16, fontSize: '0.82rem', color: '#6b7280' }}>
@@ -343,60 +410,46 @@ export default function ImportPage() {
       {/* ── Step 3 — Mapping ── */}
       {step === 3 && preview && (
         <div>
-          {/* Products → Category */}
+          {/* Product types → Category */}
           <div className={s.mappingSection}>
-            <h3>Вироби → Категорія</h3>
+            <h3>Типи виробів → Категорія</h3>
             <p className={s.hint} style={{ marginBottom: 10 }}>
-              Оберіть категорію нової системи для кожного виробу з Access.
-              Якщо категорія не обрана — виріб імпортується без категорії.
+              Оберіть категорію нової системи для кожного типу виробів з Access.
+              Якщо категорія не обрана — вироби цього типу імпортуються без категорії.
             </p>
-            {preview.products.count === 0 ? (
-              <p className={s.warn}>Вироби не знайдено в Access</p>
+            {preview.product_types.length === 0 ? (
+              <p className={s.warn}>Типи виробів не знайдено в Access</p>
             ) : (
               <div className={s.tableWrap}>
                 <table className={s.mappingTable}>
                   <thead>
                     <tr>
-                      <th>Виріб (Access)</th>
-                      <th style={{ width: 220 }}>Категорія</th>
+                      <th>Тип (Access)</th>
+                      <th style={{ width: 220 }}>Категорія нової системи</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.products.sample.map((row, i) => {
-                      const rawId = row['id'] ?? row['Код'] ?? String(i + 1)
-                      const aid = Number(rawId)
-                      const name = row['назва'] ?? row['назв'] ?? row['name'] ??
-                                   Object.values(row).find(v => v && String(v).length > 1) ?? `#${aid}`
-                      return (
-                        <tr key={aid}>
-                          <td>{String(name)}</td>
-                          <td>
-                            <select
-                              value={prodCatMap[aid] ?? 0}
-                              onChange={e =>
-                                setProdCatMap(prev => ({
-                                  ...prev,
-                                  [aid]: Number(e.target.value),
-                                }))
-                              }
-                            >
-                              <option value={0}>— без категорії —</option>
-                              {categories.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {preview.products.count > preview.products.sample.length && (
-                      <tr>
-                        <td colSpan={2} style={{ color: '#6b7280', fontStyle: 'italic' }}>
-                          ... та ще {preview.products.count - preview.products.sample.length} виробів
-                          (категорії можна призначити пізніше у Довідниках)
+                    {preview.product_types.map(ptype => (
+                      <tr key={ptype}>
+                        <td>{ptype}</td>
+                        <td>
+                          <select
+                            value={prodTypeMap[ptype] ?? 0}
+                            onChange={e =>
+                              setProdTypeMap(prev => ({
+                                ...prev,
+                                [ptype]: Number(e.target.value),
+                              }))
+                            }
+                          >
+                            <option value={0}>— без категорії —</option>
+                            {categories.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
                         </td>
                       </tr>
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -409,6 +462,7 @@ export default function ImportPage() {
             <p className={s.hint} style={{ marginBottom: 10 }}>
               За замовчуванням всі клієнти матимуть тип "Клієнт".
               Змініть тип для особливих записів (магазин, пайок, списання).
+              Решту можна змінити пізніше у Довідниках.
             </p>
             {preview.clients.count === 0 ? (
               <p className={s.warn}>Клієнтів не знайдено в Access</p>
@@ -423,13 +477,11 @@ export default function ImportPage() {
                   </thead>
                   <tbody>
                     {preview.clients.sample.map((row, i) => {
-                      const rawId = row['id'] ?? row['Код'] ?? String(i + 1)
-                      const aid = Number(rawId)
-                      const name = row['клієнт'] ?? row['назва'] ?? row['name'] ??
-                                   Object.values(row).find(v => v && String(v).length > 1) ?? `#${aid}`
+                      const aid  = Number(row['id'] ?? i + 1)
+                      const name = String(row['Клієнт'] ?? row['id'] ?? `#${aid}`)
                       return (
                         <tr key={aid}>
-                          <td>{String(name)}</td>
+                          <td>{name}</td>
                           <td>
                             <select
                               value={clientKindMap[aid] ?? 'customer'}
@@ -451,8 +503,7 @@ export default function ImportPage() {
                     {preview.clients.count > preview.clients.sample.length && (
                       <tr>
                         <td colSpan={2} style={{ color: '#6b7280', fontStyle: 'italic' }}>
-                          ... та ще {preview.clients.count - preview.clients.sample.length} клієнтів
-                          (тип можна змінити пізніше у Довідниках)
+                          … та ще {preview.clients.count - preview.clients.sample.length} клієнтів
                         </td>
                       </tr>
                     )}
@@ -572,9 +623,7 @@ export default function ImportPage() {
             <h3>Валідація</h3>
 
             {report.validation.balance_mismatches.length === 0 ? (
-              <p className={s.ok}>
-                Баланси клієнтів: всі співпадають
-              </p>
+              <p className={s.ok}>Баланси клієнтів: всі співпадають</p>
             ) : (
               <>
                 <p className={s.warn}>

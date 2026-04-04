@@ -2,27 +2,36 @@ const BASE = '/api/v1/import'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface EntityPreview {
-  count: number
-  sample: Record<string, string | null>[]
-  warnings: string[]
+export interface ColumnMap {
+  access_col:   string
+  target_field: string
+  description:  string
+}
+
+export interface TableDetail {
+  access_table: string | null
+  target_table: string
+  count:        number
+  column_map:   ColumnMap[]
+  sample:       Record<string, string | null>[]
+  warnings:     string[]
 }
 
 export interface AccdbPreview {
   temp_file_token: string
-  access_tables: string[]
-  routes: EntityPreview
-  clients: EntityPreview
-  products: EntityPreview
-  prices: EntityPreview
-  overrides: EntityPreview
-  orders: EntityPreview
-  finances: EntityPreview
-  stock: EntityPreview
+  access_tables:   string[]
+  product_types:   string[]   // unique values of 'Тип' from _Вироби
+  routes:    TableDetail
+  clients:   TableDetail
+  products:  TableDetail
+  prices:    TableDetail
+  orders:    TableDetail
+  finances:  TableDetail
+  stock:     TableDetail
 }
 
-export interface ProductCategoryMapping {
-  access_product_id: number
+export interface ProductTypeMapping {
+  access_type:     string   // значення 'Тип' в Access ('Хліб', 'Булка', …)
   new_category_id: number
 }
 
@@ -32,61 +41,55 @@ export interface ClientKindMapping {
 }
 
 export interface ImportMapping {
-  temp_file_token: string
-  db_password: string
-  transition_date: string         // YYYY-MM-DD
-  finance_months: number
-  order_days: number
-  product_categories: ProductCategoryMapping[]
-  client_kinds: ClientKindMapping[]
-  default_client_kind: string
+  temp_file_token:         string
+  db_password:             string
+  transition_date:         string          // YYYY-MM-DD
+  finance_months:          number
+  order_days:              number
+  product_type_categories: ProductTypeMapping[]
+  client_kinds:            ClientKindMapping[]
+  default_client_kind:     string
 }
 
 export interface EntityReport {
-  found: number
+  found:    number
   imported: number
-  skipped: number
+  skipped:  number
   warnings: string[]
-  errors: string[]
+  errors:   string[]
 }
 
 export interface BalanceMismatch {
-  client_name: string
-  access_balance: number
+  client_name:      string
+  access_balance:   number
   computed_balance: number
-  diff: number
+  diff:             number
 }
 
 export interface ValidationReport {
-  balance_mismatches: BalanceMismatch[]
+  balance_mismatches:  BalanceMismatch[]
   zero_price_products: string[]
-  order_count_ok: boolean
-  overall_ok: boolean
+  order_count_ok:      boolean
+  overall_ok:          boolean
 }
 
 export interface ImportReport {
-  success: boolean
-  started_at: string
-  finished_at: string
+  success:         boolean
+  started_at:      string
+  finished_at:     string
   transition_date: string
-  entities: Record<string, EntityReport>
-  validation: ValidationReport
+  entities:        Record<string, EntityReport>
+  validation:      ValidationReport
 }
 
 export interface ImportStatus {
-  running: boolean
-  step: string
+  running:  boolean
+  step:     string
   progress: number
-  error: string | null
+  error:    string | null
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
-
-export interface UploadConfig {
-  transition_date: string
-  finance_months: number
-  order_days: number
-}
 
 export async function uploadAccdb(file: File, password = ''): Promise<AccdbPreview> {
   const form = new FormData()

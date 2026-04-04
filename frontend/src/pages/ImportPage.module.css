@@ -311,3 +311,25 @@
 .tableWrap {
   overflow-x: auto;
 }
+
+/* Per-entity preview cards (Step 2) */
+.previewEntity {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: #fff;
+}
+
+.previewEntityHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 0.95rem;
+}
+
+.previewEntityMeta {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
