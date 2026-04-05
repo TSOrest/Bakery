@@ -17,10 +17,19 @@ export interface TableDetail {
   warnings:     string[]
 }
 
+export interface PriceCategory {
+  access_id:    string
+  name:         string
+  price_count:  number
+  client_count: number
+}
+
 export interface AccdbPreview {
-  temp_file_token: string
-  access_tables:   string[]
-  product_types:   string[]   // unique values of 'Тип' from _Вироби
+  temp_file_token:      string
+  access_tables:        string[]
+  product_types:        string[]   // unique values of 'Тип' from _Вироби
+  price_categories:     PriceCategory[]
+  base_price_category:  string     // auto-detected base category id
   routes:    TableDetail
   clients:   TableDetail
   products:  TableDetail
@@ -49,6 +58,7 @@ export interface ImportMapping {
   product_type_categories: ProductTypeMapping[]
   client_kinds:            ClientKindMapping[]
   default_client_kind:     string
+  base_price_category:     string          // Access КодКатегорії for base prices
 }
 
 export interface EntityReport {

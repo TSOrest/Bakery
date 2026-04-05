@@ -10,6 +10,7 @@ import type {
   ClientKindMapping,
   ImportReport,
   ImportStatus,
+  PriceCategory,
   ProductTypeMapping,
   TableDetail,
 } from '../api/importAccdb'
@@ -168,6 +169,8 @@ export default function ImportPage() {
   const [prodTypeMap, setProdTypeMap] = useState<Record<string, string>>({})
   // Mapping: access client id → client_kind
   const [clientKindMap, setClientKindMap] = useState<Record<number, string>>({})
+  // Base price category (Access КодКатегорії)
+  const [basePriceCat, setBasePriceCat] = useState('')
 
   // Execution
   const [status, setStatus] = useState<ImportStatus | null>(null)
@@ -236,6 +239,9 @@ export default function ImportPage() {
       prev.product_types.forEach(t => { ptmap[t] = t })
       setProdTypeMap(ptmap)
 
+      // Init base price category from auto-detection
+      setBasePriceCat(prev.base_price_category ?? '')
+
       setStep(2)
     } catch (e: any) {
       setUploadErr(e.message ?? 'Помилка')
@@ -273,6 +279,7 @@ export default function ImportPage() {
         product_type_categories: productTypeMappings,
         client_kinds:            clientMappings,
         default_client_kind:     'customer',
+        base_price_category:     basePriceCat,
       })
       setStep(4)
     } catch (e: any) {
@@ -467,6 +474,56 @@ export default function ImportPage() {
               </div>
             )}
           </div>
+
+          {/* Price categories */}
+          {preview.price_categories && preview.price_categories.length > 0 && (
+            <div className={s.mappingSection}>
+              <h3>Цінові категорії Access</h3>
+              <p className={s.hint} style={{ marginBottom: 10 }}>
+                Виберіть яка категорія є базовою (встановлюється у таблицю цін).
+                Решта категорій стануть індивідуальними цінами клієнтів.
+                Ціни імпортуються як повна історія на основі поля TS.
+              </p>
+              <div className={s.tableWrap}>
+                <table className={s.mappingTable}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }}>Базова</th>
+                      <th>Категорія</th>
+                      <th style={{ width: 100, textAlign: 'right' }}>Записів цін</th>
+                      <th style={{ width: 100, textAlign: 'right' }}>Клієнтів</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(preview.price_categories as PriceCategory[]).map(pc => (
+                      <tr key={pc.access_id} style={basePriceCat === pc.access_id ? { background: '#f0fdf4' } : {}}>
+                        <td style={{ textAlign: 'center' }}>
+                          <input
+                            type="radio"
+                            name="base_price_cat"
+                            checked={basePriceCat === pc.access_id}
+                            onChange={() => setBasePriceCat(pc.access_id)}
+                          />
+                        </td>
+                        <td>
+                          <strong>{pc.name}</strong>
+                          <span style={{ color: '#9ca3af', fontSize: '0.8rem', marginLeft: 6 }}>
+                            (id: {pc.access_id})
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {pc.price_count}
+                        </td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {pc.client_count}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Clients → Kind */}
           <div className={s.mappingSection}>

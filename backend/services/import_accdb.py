@@ -33,6 +33,7 @@ from backend.schemas.import_accdb import (
     EntityReport,
     ImportMapping,
     ImportReport,
+    PriceCategory,
     TableDetail,
     ValidationReport,
 )
@@ -112,6 +113,12 @@ _EXACT_COLS: dict[str, dict[str, str]] = {
         "product_id":   "КодВиробу",
         "price":        "Ціна",
         "active":       "Діє",
+        "ts":           "TS",    # timestamp — дата встановлення ціни
+    },
+    "price_cats": {
+        "id":     "Код",
+        "name":   "Категорія",
+        "active": "Діє",
     },
     "orders": {
         "client_id":  "Код Клієнта",
@@ -510,10 +517,55 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
                 seen.add(t)
                 product_types.append(t)
 
+    # Цінові категорії з _Категорії + статистика
+    price_cats: list[PriceCategory] = []
+    base_cat_id = ""
+    pc_tname = _find_table_for("price_cats", tables)
+    price_tname = _find_table_for("prices", tables)
+    c_tname     = _find_table_for("clients", tables)
+
+    if pc_tname:
+        pc_cm = _cols_for("price_cats", reader.columns(pc_tname))
+        # Рахуємо ціни і клієнтів по категоріях
+        price_cnt: dict[str, int] = {}
+        client_cnt: dict[str, int] = {}
+        if price_tname:
+            pr_cm = _cols_for("prices", reader.columns(price_tname))
+            for row in reader.rows(price_tname):
+                cid = str(row.get(pr_cm.get("price_cat_id", ""), "") or "").strip()
+                if cid:
+                    price_cnt[cid] = price_cnt.get(cid, 0) + 1
+        if c_tname:
+            cl_cm = _cols_for("clients", reader.columns(c_tname))
+            for row in reader.rows(c_tname):
+                cid = str(row.get(cl_cm.get("price_category_id", ""), "") or "").strip()
+                if cid:
+                    client_cnt[cid] = client_cnt.get(cid, 0) + 1
+
+        for row in reader.rows(pc_tname):
+            aid  = str(row.get(pc_cm.get("id", ""), "") or "").strip()
+            name = _safe_str(row.get(pc_cm.get("name", ""), ""), 100) or aid
+            if not aid:
+                continue
+            active = _safe_bool(row.get(pc_cm.get("active", ""), True)) if pc_cm.get("active") else True
+            if not active:
+                continue
+            price_cats.append(PriceCategory(
+                access_id=aid, name=name,
+                price_count=price_cnt.get(aid, 0),
+                client_count=client_cnt.get(aid, 0),
+            ))
+
+        # Auto-detect: базова категорія = та що має найбільше цінових записів
+        if price_cats:
+            base_cat_id = max(price_cats, key=lambda c: c.price_count).access_id
+
     return AccdbPreview(
         temp_file_token="",
         access_tables=tables,
         product_types=sorted(product_types),
+        price_categories=sorted(price_cats, key=lambda c: -c.price_count),
+        base_price_category=base_cat_id,
         routes=_build_table_detail("routes", reader),
         clients=_build_table_detail("clients", reader),
         products=products_detail,
@@ -787,64 +839,120 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             db.add(import_art); db.flush()
             import_art_id = import_art.id
 
-            # ── 6. Ціни (^Ціни) — категорія→клієнти ─────────────────────────
+            # ── 6. Ціни (^Ціни) — повна історія через TS ────────────────────
             _update_state(step="Ціни", progress=42)
             ep_prices = EntityReport()
             ep_ovr    = EntityReport()
             price_tname = _find_table_for("prices", tables)
+
+            # Базова категорія з маппінгу (fallback → авто-вибір)
+            base_cat = str(mapping.base_price_category or "").strip()
+
             if price_tname:
                 cm = _cols_for("prices", reader.columns(price_tname))
-
-                # Визначаємо домінуючу цінову категорію (найбільше клієнтів)
-                cat_counts = Counter(client_price_cat.values())
-                dominant_cat = cat_counts.most_common(1)[0][0] if cat_counts else None
 
                 # price_cat → [sqlite_client_id]
                 cat_to_clients: dict[str, list[int]] = {}
                 for cid, cat in client_price_cat.items():
                     cat_to_clients.setdefault(cat, []).append(cid)
 
-                for row in reader.rows(price_tname):
-                    # Тільки активні ціни
-                    if cm.get("active") and not _safe_bool(row.get(cm["active"], True)):
-                        continue
+                # Якщо base_cat не вказано — обираємо категорію з найбільшою кількістю записів
+                if not base_cat:
+                    cat_counts: Counter = Counter()
+                    for row in reader.rows(price_tname):
+                        pc = str(row.get(cm.get("price_cat_id", ""), "") or "").strip()
+                        if pc:
+                            cat_counts[pc] += 1
+                    base_cat = cat_counts.most_common(1)[0][0] if cat_counts else ""
 
+                # Читаємо всі записи і групуємо за (ціновою_категорією, виробом)
+                # Ключ: (price_cat_str, access_product_id_int) → list[(ts_datetime, price_float)]
+                price_history: dict[tuple[str, int], list[tuple[datetime, float]]] = {}
+                for row in reader.rows(price_tname):
                     price_val = _safe_float(row.get(cm.get("price", "")) if cm.get("price") else None)
                     if not price_val or price_val <= 0:
                         continue
-
                     pid_raw = row.get(cm.get("product_id", "")) if cm.get("product_id") else None
-                    prod_id: int | None = None
-                    if pid_raw is not None:
-                        try: prod_id = product_map.get(int(float(pid_raw)))
-                        except (ValueError, TypeError): pass
-                    if not prod_id:
+                    if pid_raw is None:
+                        continue
+                    try:
+                        access_pid = int(float(pid_raw))
+                    except (ValueError, TypeError):
+                        continue
+                    if access_pid not in product_map:
+                        continue
+                    price_cat = str(row.get(cm.get("price_cat_id", ""), "") or "").strip()
+                    if not price_cat:
                         continue
 
-                    price_cat = str(row.get(cm.get("price_cat_id", ""), "") or "").strip()
-
-                    if price_cat == dominant_cat:
-                        # Базова ціна (найпоширеніша категорія)
-                        ep_prices.found += 1
-                        db.add(Price(
-                            product_id=prod_id, price=price_val,
-                            valid_from=tr_date, is_active=1, created_at=now_str,
-                        ))
-                        ep_prices.imported += 1
-                    else:
-                        # Ціна іншої категорії → override для кожного клієнта цієї категорії
-                        for sqlite_cid in cat_to_clients.get(price_cat, []):
-                            ep_ovr.found += 1
+                    # TS — дата встановлення ціни; якщо відсутній — використовуємо tr_date
+                    ts_raw = row.get(cm.get("ts", "")) if cm.get("ts") else None
+                    ts_dt: datetime | None = None
+                    if ts_raw is not None:
+                        if isinstance(ts_raw, datetime):
+                            ts_dt = ts_raw
+                        else:
                             try:
-                                db.add(ClientPriceOverride(
-                                    client_id=sqlite_cid, product_id=prod_id,
-                                    price=price_val, valid_from=tr_date,
-                                ))
-                                db.flush()
-                                ep_ovr.imported += 1
-                            except Exception:
-                                db.rollback()
-                                ep_ovr.skipped += 1
+                                ts_dt = datetime.fromisoformat(str(ts_raw).strip())
+                            except ValueError:
+                                pass
+                    if ts_dt is None:
+                        ts_dt = datetime.fromisoformat(tr_date)
+
+                    key = (price_cat, access_pid)
+                    price_history.setdefault(key, []).append((ts_dt, price_val))
+
+                # Для кожної групи: сортуємо за TS, обчислюємо valid_from / valid_to
+                for (price_cat, access_pid), entries in price_history.items():
+                    sqlite_pid = product_map.get(access_pid)
+                    if not sqlite_pid:
+                        continue
+
+                    entries.sort(key=lambda x: x[0])  # сортуємо за часом
+
+                    for i, (ts_dt, price_val) in enumerate(entries):
+                        valid_from = ts_dt.strftime("%Y-%m-%d")
+                        valid_to: str | None = None
+                        if i + 1 < len(entries):
+                            # дата кінця = дата початку наступного запису (exclusive)
+                            next_ts = entries[i + 1][0]
+                            # valid_to = день перед наступним записом
+                            valid_to = (next_ts - timedelta(days=1)).strftime("%Y-%m-%d")
+                            # якщо valid_from == valid_to — пропускаємо нульовий діапазон
+                            if valid_to < valid_from:
+                                valid_to = valid_from
+
+                        if price_cat == base_cat:
+                            # Базова ціна → таблиця prices
+                            ep_prices.found += 1
+                            is_last = (i + 1 == len(entries))
+                            db.add(Price(
+                                product_id=sqlite_pid,
+                                price=price_val,
+                                valid_from=valid_from,
+                                valid_to=valid_to,
+                                is_active=1 if is_last else 0,
+                                created_at=now_str,
+                            ))
+                            ep_prices.imported += 1
+                        else:
+                            # Не-базова категорія → override для кожного клієнта цієї категорії
+                            client_list = cat_to_clients.get(price_cat, [])
+                            for sqlite_cid in client_list:
+                                ep_ovr.found += 1
+                                try:
+                                    db.add(ClientPriceOverride(
+                                        client_id=sqlite_cid,
+                                        product_id=sqlite_pid,
+                                        price=price_val,
+                                        valid_from=valid_from,
+                                        valid_to=valid_to,
+                                    ))
+                                    db.flush()
+                                    ep_ovr.imported += 1
+                                except Exception:
+                                    db.rollback()
+                                    ep_ovr.skipped += 1
 
             entities["prices"]    = ep_prices
             entities["overrides"] = ep_ovr

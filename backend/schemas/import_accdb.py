@@ -22,8 +22,10 @@ class TableDetail(BaseModel):
 
 class AccdbPreview(BaseModel):
     temp_file_token: str
-    access_tables:   list[str] = []
-    product_types:   list[str] = []   # унікальні значення поля 'Тип' з _Вироби
+    access_tables:       list[str] = []
+    product_types:       list[str] = []          # унікальні значення поля 'Тип' з _Вироби
+    price_categories:    list[PriceCategory] = [] # цінові категорії з _Категорії
+    base_price_category: str = ""                # auto-detected Access id базової категорії
 
     routes:    TableDetail = Field(default_factory=lambda: TableDetail(target_table="routes"))
     clients:   TableDetail = Field(default_factory=lambda: TableDetail(target_table="clients"))
@@ -32,6 +34,14 @@ class AccdbPreview(BaseModel):
     orders:    TableDetail = Field(default_factory=lambda: TableDetail(target_table="orders"))
     finances:  TableDetail = Field(default_factory=lambda: TableDetail(target_table="finances"))
     stock:     TableDetail = Field(default_factory=lambda: TableDetail(target_table="shop_reconciliation_lines"))
+
+
+class PriceCategory(BaseModel):
+    """Цінова категорія з Access (_Категорії)."""
+    access_id:    str   # значення КодКатегорії ("1", "9", "10", …)
+    name:         str   # назва категорії
+    price_count:  int = 0
+    client_count: int = 0
 
 
 class ProductTypeMapping(BaseModel):
@@ -47,14 +57,15 @@ class ClientKindMapping(BaseModel):
 
 
 class ImportMapping(BaseModel):
-    temp_file_token:        str
-    db_password:            str = ''
-    transition_date:        str                          # YYYY-MM-DD
-    finance_months:         int = Field(2, ge=1, le=24)
-    order_days:             int = Field(14, ge=1, le=60)
+    temp_file_token:         str
+    db_password:             str = ''
+    transition_date:         str                          # YYYY-MM-DD
+    finance_months:          int = Field(2, ge=1, le=24)
+    order_days:              int = Field(14, ge=1, le=60)
     product_type_categories: list[ProductTypeMapping] = []
-    client_kinds:           list[ClientKindMapping] = []
-    default_client_kind:    str = 'customer'
+    client_kinds:            list[ClientKindMapping] = []
+    default_client_kind:     str = 'customer'
+    base_price_category:     str = ''   # Access КодКатегорії для базових цін ("9")
 
 
 class EntityReport(BaseModel):
