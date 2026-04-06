@@ -941,6 +941,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                             for sqlite_cid in client_list:
                                 ep_ovr.found += 1
                                 try:
+                                    sp = db.begin_nested()  # savepoint
                                     db.add(ClientPriceOverride(
                                         client_id=sqlite_cid,
                                         product_id=sqlite_pid,
@@ -948,10 +949,10 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                                         valid_from=valid_from,
                                         valid_to=valid_to,
                                     ))
-                                    db.flush()
+                                    sp.commit()
                                     ep_ovr.imported += 1
                                 except Exception:
-                                    db.rollback()
+                                    sp.rollback()  # відкочуємо лише цей один запис
                                     ep_ovr.skipped += 1
 
             entities["prices"]    = ep_prices

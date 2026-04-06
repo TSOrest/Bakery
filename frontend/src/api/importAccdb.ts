@@ -121,7 +121,11 @@ export async function runImport(mapping: ImportMapping): Promise<{ status: strin
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail ?? 'Помилка запуску імпорту')
+    const detail = err.detail
+    const msg = Array.isArray(detail)
+      ? detail.map((d: any) => d.msg ?? JSON.stringify(d)).join('; ')
+      : (detail ?? 'Помилка запуску імпорту')
+    throw new Error(msg)
   }
   return res.json()
 }

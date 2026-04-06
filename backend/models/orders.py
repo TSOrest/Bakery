@@ -21,6 +21,7 @@ class Order(Base):
     price_override   = Column(Float)
     notes            = Column(Text)
     created_at       = Column(Text)
+    created_by       = Column(Text)
     # Split-замовлення: дочірній рядок посилається на батьківський
     parent_order_id      = Column(Integer, ForeignKey("orders.id"), nullable=True)
     delivered_qty        = Column(Float, nullable=True)
