@@ -12,8 +12,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.references import Category, Route
-from backend.models.clients import Client
+from backend.models.references import Category, Client, Route
 from backend.schemas.import_accdb import (
     AccdbPreview, ImportContext, ImportMapping, ImportReport,
     ExistingClient, ExistingRoute, ExistingCategory,
