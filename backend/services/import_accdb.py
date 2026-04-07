@@ -894,12 +894,16 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     price_cat_raw = row.get(cm.get("price_category_id", "")) if cm.get("price_category_id") else None
                     price_cat_str = str(price_cat_raw).strip() if price_cat_raw is not None else ""
 
-                    # Перевіряємо client_mappings: merge_with?
+                    # ── client_mappings: skip / merge / kind ─────────────────
                     cm_entry = client_mapping_by_id.get(access_id) if access_id is not None else None
+
+                    # 1. Skip: взагалі не створювати, не включати у жоден map
+                    if cm_entry and cm_entry.skip:
+                        ep.skipped += 1
+                        continue
+
+                    # 2. Merge: прив'язати до існуючого клієнта замість створення нового
                     if cm_entry and cm_entry.merge_with is not None:
-                        # Не створюємо нового клієнта — прив'язуємо до існуючого.
-                        # Якщо kind != customer — оновлюємо існуючого клієнта щоб
-                        # запити (наприклад shop-клієнт для залишків) знаходили його.
                         target = db.get(Client, cm_entry.merge_with)
                         if target and cm_entry.client_kind != "customer":
                             target.client_kind = cm_entry.client_kind
@@ -911,13 +915,17 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         ep.skipped += 1
                         continue
 
-                    # Тип клієнта: явний override → Свій=True → default
+                    # 3. Якщо is_own_shop=True і немає явного маппінгу → skip за замовчуванням.
+                    # Внутрішні клієнти Access не повинні дублювати системних.
+                    if is_own_shop and cm_entry is None:
+                        ep.skipped += 1
+                        continue
+
+                    # 4. Тип клієнта: явний override у mapping → default
                     if cm_entry:
                         kind = cm_entry.client_kind
                     elif access_id is not None and access_id in kind_map:
                         kind = kind_map[access_id]
-                    elif is_own_shop:
-                        kind = "shop"
                     else:
                         kind = mapping.default_client_kind
 

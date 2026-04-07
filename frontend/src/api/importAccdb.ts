@@ -81,6 +81,7 @@ export interface ClientMapping {
   access_id:   number
   client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
   merge_with:  number | null  // if set → use existing SQLite client_id
+  skip:        boolean        // if true → don't create, exclude from all mappings
 }
 
 export interface ImportMapping {

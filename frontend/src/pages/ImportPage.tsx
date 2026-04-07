@@ -512,7 +512,7 @@ function StepClients({
 
   const getMappingFor = (aid: number): ClientMapping =>
     clientMappings.find(m => m.access_id === aid) ?? {
-      access_id: aid, client_kind: 'customer', merge_with: null,
+      access_id: aid, client_kind: 'customer', merge_with: null, skip: false,
     }
 
   const updateMapping = (aid: number, patch: Partial<ClientMapping>) => {
@@ -520,7 +520,7 @@ function StepClients({
     if (existing) {
       setClientMappings(clientMappings.map(m => m.access_id === aid ? { ...m, ...patch } : m))
     } else {
-      setClientMappings([...clientMappings, { access_id: aid, client_kind: 'customer', merge_with: null, ...patch }])
+      setClientMappings([...clientMappings, { access_id: aid, client_kind: 'customer', merge_with: null, skip: false, ...patch }])
     }
   }
 
@@ -534,31 +534,38 @@ function StepClients({
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 5 — Клієнти</h2>
       <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 4 }}>
         Клієнти ({preview.clients.count}) переносяться як <strong>Клієнт</strong> за замовчуванням.
-        Тут відображаються лише ті що потребують уваги (системні, магазин, пайок).
+        Тут відображаються лише внутрішні (<strong>Свій = ✓</strong> в Access) — вони потребують уваги.
       </p>
       <p style={{ ...HINT, marginBottom: 16 }}>
-        Для "Об'єднати з…" — виберіть існуючий запис у системі (замість створення дубля).
+        <strong>Об'єднати з…</strong> — перепризначити всі замовлення/фінанси на існуючий запис.
+        <strong> Пропустити</strong> — не створювати взагалі (рекомендовано для -Надлишки- тощо).
+        Клієнти без маппінгу тут теж не будуть створені (лише зовнішні клієнти де Свій = ✗ імпортуються автоматично).
       </p>
 
       {visibleList.length === 0 && !showAll && (
-        <div style={INFO_BOX}>Особливих клієнтів не виявлено. Всі будуть імпортовані як «Клієнт».</div>
+        <div style={INFO_BOX}>Внутрішніх клієнтів (Свій=True) не виявлено. Всі будуть імпортовані як «Клієнт».</div>
       )}
 
       {visibleList.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
-          <table style={tbl({ minWidth: 600 })}>
+          <table style={tbl({ minWidth: 680 })}>
             <thead>
               <tr>
                 <th style={TH}>Клієнт (Access)</th>
-                <th style={{ ...TH, width: 140 }}>Тип</th>
+                <th style={{ ...TH, width: 80, textAlign: 'center' }}>Пропустити</th>
+                <th style={{ ...TH, width: 130 }}>Тип</th>
                 <th style={{ ...TH, width: 240 }}>Об'єднати з існуючим</th>
               </tr>
             </thead>
             <tbody>
               {visibleList.map(aid => {
                 const cm = getMappingFor(aid)
+                const isSkipped = cm.skip
                 return (
-                  <tr key={aid} style={{ background: suggestedIds.has(aid) ? '#fefce8' : '#fff' }}>
+                  <tr key={aid} style={{
+                    background: isSkipped ? '#f9fafb' : suggestedIds.has(aid) ? '#fefce8' : '#fff',
+                    opacity: isSkipped ? 0.55 : 1,
+                  }}>
                     <td style={TD}>
                       {nameOf(aid)}
                       {suggestedIds.has(aid) && (
@@ -567,11 +574,16 @@ function StepClients({
                         </span>
                       )}
                     </td>
+                    <td style={{ ...TD, textAlign: 'center' }}>
+                      <input type="checkbox" checked={isSkipped}
+                        onChange={e => updateMapping(aid, { skip: e.target.checked, merge_with: null })} />
+                    </td>
                     <td style={TD}>
                       <select
+                        disabled={isSkipped}
                         value={cm.client_kind}
                         onChange={e => updateMapping(aid, { client_kind: e.target.value as ClientMapping['client_kind'], merge_with: null })}
-                        style={{ ...INPUT, width: 130 }}
+                        style={{ ...INPUT, width: 120, opacity: isSkipped ? 0.4 : 1 }}
                       >
                         {Object.entries(KIND_LABELS).map(([v, l]) => (
                           <option key={v} value={v}>{l}</option>
@@ -580,9 +592,10 @@ function StepClients({
                     </td>
                     <td style={TD}>
                       <select
+                        disabled={isSkipped}
                         value={cm.merge_with ?? ''}
                         onChange={e => updateMapping(aid, { merge_with: e.target.value ? Number(e.target.value) : null })}
-                        style={{ ...INPUT, width: 230 }}
+                        style={{ ...INPUT, width: 230, opacity: isSkipped ? 0.4 : 1 }}
                       >
                         <option value="">— створити новий —</option>
                         {(context?.existing_clients ?? []).map(ec => (
@@ -603,12 +616,14 @@ function StepClients({
       <div style={{ marginTop: 12 }}>
         <button style={{ ...BTN_SECONDARY, fontSize: '0.82rem' }} onClick={() => setShowAll(v => !v)}>
           {showAll
-            ? `Показати лише важливих (${suggestedIds.size})`
+            ? `Показати лише внутрішніх (${suggestedIds.size})`
             : `Показати всіх клієнтів (${preview.clients.count})`}
         </button>
-        <span style={{ ...HINT, marginLeft: 12 }}>
-          Решта {preview.clients.count - visibleList.length} клієнтів — будуть імпортовані як «Клієнт».
-        </span>
+        {!showAll && (
+          <span style={{ ...HINT, marginLeft: 12 }}>
+            Решта {preview.clients.count - visibleList.length} клієнтів (Свій=✗) — імпортуються автоматично як «Клієнт».
+          </span>
+        )}
       </div>
     </div>
   )
@@ -1182,6 +1197,7 @@ export default function ImportPage({ onClose }: Props) {
             access_id:   s.access_id!,
             client_kind: s.suggested_kind as ClientMapping['client_kind'],
             merge_with:  s.suggested_merge_id,
+            skip:        false,
           }))
       )
 

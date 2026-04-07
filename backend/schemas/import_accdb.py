@@ -86,6 +86,7 @@ class ClientMapping(BaseModel):
     access_id:   int
     client_kind: str = 'customer'  # customer|shop|writeoff|ration
     merge_with:  int | None = None # якщо задано — не створювати, використати існуючий SQLite client_id
+    skip:        bool = False      # якщо True — не створювати і не включати в жоден маппінг
 
 
 class ImportMapping(BaseModel):
