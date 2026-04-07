@@ -915,9 +915,11 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         ep.skipped += 1
                         continue
 
-                    # 3. Якщо is_own_shop=True і немає явного маппінгу → skip за замовчуванням.
-                    # Внутрішні клієнти Access не повинні дублювати системних.
-                    if is_own_shop and cm_entry is None:
+                    # 3. Якщо is_own_shop=True — завжди skip на цьому етапі.
+                    # skip і merge_with вже оброблені вище і мають continue.
+                    # Будь-який is_own_shop клієнт що дійшов сюди = немає merge_with
+                    # → не створювати дублів системних/магазину.
+                    if is_own_shop:
                         ep.skipped += 1
                         continue
 

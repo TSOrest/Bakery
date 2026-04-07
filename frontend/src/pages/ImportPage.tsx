@@ -531,30 +531,29 @@ function StepClients({
 
   return (
     <div>
-      <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 5 — Клієнти</h2>
+      <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 5 — Внутрішні клієнти (Свій = ✓)</h2>
       <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 4 }}>
-        Клієнти ({preview.clients.count}) переносяться як <strong>Клієнт</strong> за замовчуванням.
-        Тут відображаються лише внутрішні (<strong>Свій = ✓</strong> в Access) — вони потребують уваги.
+        Це внутрішні записи Access (<strong>Свій = ✓</strong>). Вони <strong>не будуть створені</strong> як нові клієнти.
+        Вкажіть на який існуючий запис системи перепризначити їхні замовлення та фінанси.
       </p>
       <p style={{ ...HINT, marginBottom: 16 }}>
-        <strong>Об'єднати з…</strong> — перепризначити всі замовлення/фінанси на існуючий запис.
-        <strong> Пропустити</strong> — не створювати взагалі (рекомендовано для -Надлишки- тощо).
-        Клієнти без маппінгу тут теж не будуть створені (лише зовнішні клієнти де Свій = ✗ імпортуються автоматично).
+        <strong>Об'єднати з…</strong> — всі закази/фінанси цього Access-клієнта перепишуться на обраний запис.
+        <strong> Пропустити</strong> — виключити і його закази/фінанси з імпорту.
+        Решта клієнтів (Свій = ✗) імпортуються автоматично як «Клієнт».
       </p>
 
       {visibleList.length === 0 && !showAll && (
-        <div style={INFO_BOX}>Внутрішніх клієнтів (Свій=True) не виявлено. Всі будуть імпортовані як «Клієнт».</div>
+        <div style={INFO_BOX}>Внутрішніх клієнтів не виявлено. Всі клієнти імпортуються як «Клієнт».</div>
       )}
 
       {visibleList.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
-          <table style={tbl({ minWidth: 680 })}>
+          <table style={tbl({ minWidth: 560 })}>
             <thead>
               <tr>
                 <th style={TH}>Клієнт (Access)</th>
                 <th style={{ ...TH, width: 80, textAlign: 'center' }}>Пропустити</th>
-                <th style={{ ...TH, width: 130 }}>Тип</th>
-                <th style={{ ...TH, width: 240 }}>Об'єднати з існуючим</th>
+                <th style={{ ...TH }}>Об'єднати з існуючим записом системи</th>
               </tr>
             </thead>
             <tbody>
@@ -563,47 +562,40 @@ function StepClients({
                 const isSkipped = cm.skip
                 return (
                   <tr key={aid} style={{
-                    background: isSkipped ? '#f9fafb' : suggestedIds.has(aid) ? '#fefce8' : '#fff',
+                    background: isSkipped ? '#f9fafb' : '#fefce8',
                     opacity: isSkipped ? 0.55 : 1,
                   }}>
                     <td style={TD}>
-                      {nameOf(aid)}
-                      {suggestedIds.has(aid) && (
-                        <span style={{ color: '#ca8a04', fontSize: '0.72rem', marginLeft: 6 }}>
-                          авто-пропозиція
-                        </span>
-                      )}
+                      <strong>{nameOf(aid)}</strong>
+                      <span style={{ color: '#ca8a04', fontSize: '0.72rem', marginLeft: 6 }}>
+                        {KIND_LABELS[cm.client_kind] ?? cm.client_kind}
+                      </span>
                     </td>
                     <td style={{ ...TD, textAlign: 'center' }}>
                       <input type="checkbox" checked={isSkipped}
                         onChange={e => updateMapping(aid, { skip: e.target.checked, merge_with: null })} />
                     </td>
                     <td style={TD}>
-                      <select
-                        disabled={isSkipped}
-                        value={cm.client_kind}
-                        onChange={e => updateMapping(aid, { client_kind: e.target.value as ClientMapping['client_kind'], merge_with: null })}
-                        style={{ ...INPUT, width: 120, opacity: isSkipped ? 0.4 : 1 }}
-                      >
-                        {Object.entries(KIND_LABELS).map(([v, l]) => (
-                          <option key={v} value={v}>{l}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={TD}>
-                      <select
-                        disabled={isSkipped}
-                        value={cm.merge_with ?? ''}
-                        onChange={e => updateMapping(aid, { merge_with: e.target.value ? Number(e.target.value) : null })}
-                        style={{ ...INPUT, width: 230, opacity: isSkipped ? 0.4 : 1 }}
-                      >
-                        <option value="">— створити новий —</option>
-                        {(context?.existing_clients ?? []).map(ec => (
-                          <option key={ec.id} value={ec.id}>
-                            {ec.full_name || ec.short_name} ({KIND_LABELS[ec.client_kind] ?? ec.client_kind})
-                          </option>
-                        ))}
-                      </select>
+                      {isSkipped ? (
+                        <span style={{ color: '#9ca3af', fontSize: '0.82rem' }}>— виключено з імпорту —</span>
+                      ) : (
+                        <select
+                          value={cm.merge_with ?? ''}
+                          onChange={e => updateMapping(aid, { merge_with: e.target.value ? Number(e.target.value) : null })}
+                          style={{
+                            ...INPUT,
+                            borderColor: !cm.merge_with ? '#f59e0b' : '#d1d5db',
+                            background: !cm.merge_with ? '#fffbeb' : '#fff',
+                          }}
+                        >
+                          <option value="">⚠ не вибрано — буде пропущено</option>
+                          {(context?.existing_clients ?? []).map(ec => (
+                            <option key={ec.id} value={ec.id}>
+                              {ec.full_name || ec.short_name} [{KIND_LABELS[ec.client_kind] ?? ec.client_kind}]
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                   </tr>
                 )
@@ -1188,16 +1180,23 @@ export default function ImportPage({ onClose }: Props) {
         }))
       )
 
-      // Initialize client mappings from suggested_non_customers
+      // Initialize client mappings — авто-підставляємо merge_with з існуючих системних клієнтів
+      const ctx = context // context може бути вже завантажений
       setClientMappings(
         prev.suggested_non_customers
           .filter(s => s.access_id !== null)
-          .map(s => ({
-            access_id:   s.access_id!,
-            client_kind: s.suggested_kind as ClientMapping['client_kind'],
-            merge_with:  s.suggested_merge_id,
-            skip:        false,
-          }))
+          .map(s => {
+            // Шукаємо існуючого клієнта з відповідним kind (Списання, Пайок, Магазин…)
+            const autoMatch = ctx?.existing_clients.find(
+              ec => ec.client_kind === s.suggested_kind
+            ) ?? null
+            return {
+              access_id:   s.access_id!,
+              client_kind: s.suggested_kind as ClientMapping['client_kind'],
+              merge_with:  s.suggested_merge_id ?? autoMatch?.id ?? null,
+              skip:        false,
+            }
+          })
       )
 
       setBasePriceCat(prev.base_price_category ?? '')
