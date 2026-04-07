@@ -583,19 +583,22 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
                     suggested_route_skips.append(rname)
 
     # ── Всі клієнти + авто-пропозиції не-customer ─────────────────────────
-    SKIP_CLIENT_KEYWORDS = {"надлишк", "списан", "пайок", "склад"}
-    SHOP_CLIENT_KEYWORDS = {"магазин", "shop"}
+    # Критерій: лише Свій = True (колонка is_own_shop).
+    # Всередині — розрізняємо за назвою: надлишки/списання → writeoff,
+    # пайок → ration, решта → shop.
+    INTERNAL_WRITEOFF_KW = {"надлишк", "списан"}
+    INTERNAL_RATION_KW   = {"пайок"}
     suggested_non_customers: list[dict] = []
     all_clients_preview: list[ClientPreview] = []
     if c_tname:
-        cl_cm = _cols_for("clients", reader.columns(c_tname))
-        id_col    = cl_cm.get("id")
-        name_col  = cl_cm.get("short_name") or cl_cm.get("full_name")
-        shop_col  = cl_cm.get("is_own_shop")
+        cl_cm    = _cols_for("clients", reader.columns(c_tname))
+        id_col   = cl_cm.get("id")
+        name_col = cl_cm.get("short_name") or cl_cm.get("full_name")
+        shop_col = cl_cm.get("is_own_shop")
         for row in reader.rows(c_tname):
             rname   = _safe_str(row.get(name_col) if name_col else None, 100) or ""
             raw_id  = row.get(id_col) if id_col else None
-            is_shop = _safe_bool(row.get(shop_col, False)) if shop_col else False
+            is_own  = _safe_bool(row.get(shop_col, False)) if shop_col else False
             rname_l = rname.lower()
             try:   aid = int(float(raw_id)) if raw_id is not None else None
             except (ValueError, TypeError): aid = None
@@ -603,17 +606,17 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
             if aid is not None and rname:
                 all_clients_preview.append(ClientPreview(access_id=aid, name=rname))
 
-            if any(kw in rname_l for kw in SKIP_CLIENT_KEYWORDS):
-                kw_match = next((kw for kw in SKIP_CLIENT_KEYWORDS if kw in rname_l), "")
-                suggested_kind = "writeoff" if "надлишк" in kw_match or "списан" in kw_match else "ration"
+            # Лише внутрішні (Свій=True) потрапляють у suggested_non_customers
+            if is_own and aid is not None:
+                if any(kw in rname_l for kw in INTERNAL_WRITEOFF_KW):
+                    suggested_kind = "writeoff"
+                elif any(kw in rname_l for kw in INTERNAL_RATION_KW):
+                    suggested_kind = "ration"
+                else:
+                    suggested_kind = "shop"
                 suggested_non_customers.append({
                     "access_id": aid, "name": rname,
                     "suggested_kind": suggested_kind, "suggested_merge_id": None,
-                })
-            elif is_shop or any(kw in rname_l for kw in SHOP_CLIENT_KEYWORDS):
-                suggested_non_customers.append({
-                    "access_id": aid, "name": rname,
-                    "suggested_kind": "shop", "suggested_merge_id": None,
                 })
 
     return AccdbPreview(
