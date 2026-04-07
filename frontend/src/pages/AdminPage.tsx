@@ -3759,6 +3759,8 @@ function BackupTab() {
     compatible: boolean; rollback_available: boolean
   } | null>(null)
 
+  const [showImportWizard, setShowImportWizard] = useState(false)
+
   const BACKUP_SETTINGS = [
     { key: 'backup_enabled',      label: 'Автобекап (0=вимк, 1=увімк)',         type: 'text' },
     { key: 'backup_time',         label: 'Час бекапу (HH:MM)',                   type: 'text' },
@@ -4018,6 +4020,12 @@ function BackupTab() {
             <button style={btnS} onClick={handleBackupNow} disabled={backingUp}>
               {backingUp ? 'Зберігання...' : '+ Зробити бекап зараз'}
             </button>
+            <button
+              style={{ ...btnS, background: '#7c3aed' }}
+              onClick={() => setShowImportWizard(true)}
+            >
+              📥 Імпорт з Access
+            </button>
           </div>
         </div>
         {backups.length === 0 && (
@@ -4150,15 +4158,10 @@ function BackupTab() {
       {/* ── 5. Скидання бази даних ── */}
       <ResetDbSection />
 
-      {/* ── 6. Імпорт з Access ── */}
-      <div style={sectionS}>
-        <h3 style={h3S}>Імпорт з Microsoft Access</h3>
-        <p style={{ ...s, color: '#666', marginBottom: '1rem', lineHeight: 1.5 }}>
-          Одноразове перенесення даних зі старої системи (.accdb) у нову.
-          Перед імпортом рекомендується скинути базу даних (секція вище).
-        </p>
-        <ImportPage />
-      </div>
+      {/* ── Майстер імпорту з Access (full-screen modal) ── */}
+      {showImportWizard && (
+        <ImportPage onClose={() => setShowImportWizard(false)} />
+      )}
 
       {/* ── Модальне вікно відновлення ── */}
       {restoreModal && (

@@ -25,11 +25,11 @@ export interface PriceCategory {
 }
 
 export interface AccdbPreview {
-  temp_file_token:      string
-  access_tables:        string[]
-  product_types:        string[]   // unique values of 'Тип' from _Вироби
-  price_categories:     PriceCategory[]
-  base_price_category:  string     // auto-detected base category id
+  temp_file_token:       string
+  access_tables:         string[]
+  product_types:         string[]       // unique values of 'Тип' from _Вироби
+  price_categories:      PriceCategory[]
+  base_price_category:   string         // auto-detected base category id
   routes:    TableDetail
   clients:   TableDetail
   products:  TableDetail
@@ -37,29 +37,94 @@ export interface AccdbPreview {
   orders:    TableDetail
   finances:  TableDetail
   stock:     TableDetail
+  all_routes:               RoutePreview[]
+  all_clients_preview:      ClientPreview[]
+  suggested_route_skips:    string[]    // route names to auto-skip
+  suggested_non_customers:  SuggestedNonCustomer[]
 }
 
-export interface ProductTypeMapping {
-  access_type:   string   // значення 'Тип' в Access ('Хліб', 'Булка', …)
-  category_name: string   // назва категорії нової системи (можна змінити)
+export interface SuggestedNonCustomer {
+  access_id:          number
+  name:               string
+  suggested_kind:     string
+  suggested_merge_id: number | null
 }
 
-export interface ClientKindMapping {
-  access_client_id: number
+export interface RoutePreview {
+  access_id: number
+  name:      string
+}
+
+export interface ClientPreview {
+  access_id: number
+  name:      string
+}
+
+// ─── Mapping types ────────────────────────────────────────────────────────────
+
+export interface RouteMapping {
+  access_id:     number
+  import_it:     boolean    // false = skip this route
+  name_override: string
+  sort_order:    number
+}
+
+export interface CategoryMapping {
+  access_type:   string    // value of 'Тип' in Access ('Хліб', 'Булка', …)
+  category_name: string
+  is_baked:      number    // 1 = baked, 0 = shop only
+  sort_order:    number
+  reserve_pct:   number
+}
+
+export interface ClientMapping {
+  access_id:   number
   client_kind: 'customer' | 'shop' | 'writeoff' | 'ration'
+  merge_with:  number | null  // if set → use existing SQLite client_id
 }
 
 export interface ImportMapping {
-  temp_file_token:         string
-  db_password:             string
-  transition_date:         string          // YYYY-MM-DD
-  finance_months:          number
-  order_days:              number
-  product_type_categories: ProductTypeMapping[]
-  client_kinds:            ClientKindMapping[]
-  default_client_kind:     string
-  base_price_category:     string          // Access КодКатегорії for base prices
+  temp_file_token:      string
+  db_password:          string
+  transition_date:      string          // YYYY-MM-DD
+  finance_months:       number
+  order_days:           number
+  route_mappings:       RouteMapping[]
+  category_mappings:    CategoryMapping[]
+  client_mappings:      ClientMapping[]
+  default_client_kind:  string
+  base_price_category:  string          // Access КодКатегорії for base prices
 }
+
+// ─── Context types ────────────────────────────────────────────────────────────
+
+export interface ExistingClient {
+  id:          number
+  full_name:   string
+  short_name:  string | null
+  client_kind: string
+}
+
+export interface ExistingRoute {
+  id:         number
+  name:       string
+  sort_order: number
+}
+
+export interface ExistingCategory {
+  id:         number
+  name:       string
+  is_baked:   number
+  sort_order: number
+}
+
+export interface ImportContext {
+  existing_clients:    ExistingClient[]
+  existing_routes:     ExistingRoute[]
+  existing_categories: ExistingCategory[]
+}
+
+// ─── Report types ─────────────────────────────────────────────────────────────
 
 export interface EntityReport {
   found:    number
@@ -70,6 +135,7 @@ export interface EntityReport {
 }
 
 export interface BalanceMismatch {
+  client_id:        number
   client_name:      string
   access_balance:   number
   computed_balance: number
@@ -110,6 +176,12 @@ export async function uploadAccdb(file: File, password = ''): Promise<AccdbPrevi
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail ?? 'Помилка завантаження файлу')
   }
+  return res.json()
+}
+
+export async function getImportContext(): Promise<ImportContext> {
+  const res = await fetch(`${BASE}/context`)
+  if (!res.ok) throw new Error('Помилка отримання контексту імпорту')
   return res.json()
 }
 

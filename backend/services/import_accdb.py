@@ -29,11 +29,13 @@ from backend.models.shop import ShopReconciliation, ShopReconciliationLine
 from backend.schemas.import_accdb import (
     AccdbPreview,
     BalanceMismatch,
+    ClientPreview,
     ColumnMap,
     EntityReport,
     ImportMapping,
     ImportReport,
     PriceCategory,
+    RoutePreview,
     TableDetail,
     ValidationReport,
 )
@@ -560,6 +562,60 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
         if price_cats:
             base_cat_id = max(price_cats, key=lambda c: c.price_count).access_id
 
+    # ── Всі маршрути + авто-пропозиції skip ──────────────────────────────────
+    SKIP_ROUTE_KEYWORDS = {"system", "пекарня", "склад", "офіс"}
+    suggested_route_skips: list[str] = []
+    all_routes: list[RoutePreview] = []
+    r_tname = _find_table_for("routes", tables)
+    if r_tname:
+        r_cm = _cols_for("routes", reader.columns(r_tname))
+        id_col   = r_cm.get("id")
+        name_col = r_cm.get("name")
+        if name_col:
+            for row in reader.rows(r_tname):
+                rname  = _safe_str(row.get(name_col), 200) or ""
+                raw_id = row.get(id_col) if id_col else None
+                try:   rid = int(float(raw_id)) if raw_id is not None else None
+                except (ValueError, TypeError): rid = None
+                if rid is not None and rname:
+                    all_routes.append(RoutePreview(access_id=rid, name=rname))
+                if rname and any(kw in rname.lower() for kw in SKIP_ROUTE_KEYWORDS):
+                    suggested_route_skips.append(rname)
+
+    # ── Всі клієнти + авто-пропозиції не-customer ─────────────────────────
+    SKIP_CLIENT_KEYWORDS = {"надлишк", "списан", "пайок", "склад"}
+    SHOP_CLIENT_KEYWORDS = {"магазин", "shop"}
+    suggested_non_customers: list[dict] = []
+    all_clients_preview: list[ClientPreview] = []
+    if c_tname:
+        cl_cm = _cols_for("clients", reader.columns(c_tname))
+        id_col    = cl_cm.get("id")
+        name_col  = cl_cm.get("short_name") or cl_cm.get("full_name")
+        shop_col  = cl_cm.get("is_own_shop")
+        for row in reader.rows(c_tname):
+            rname   = _safe_str(row.get(name_col) if name_col else None, 100) or ""
+            raw_id  = row.get(id_col) if id_col else None
+            is_shop = _safe_bool(row.get(shop_col, False)) if shop_col else False
+            rname_l = rname.lower()
+            try:   aid = int(float(raw_id)) if raw_id is not None else None
+            except (ValueError, TypeError): aid = None
+
+            if aid is not None and rname:
+                all_clients_preview.append(ClientPreview(access_id=aid, name=rname))
+
+            if any(kw in rname_l for kw in SKIP_CLIENT_KEYWORDS):
+                kw_match = next((kw for kw in SKIP_CLIENT_KEYWORDS if kw in rname_l), "")
+                suggested_kind = "writeoff" if "надлишк" in kw_match or "списан" in kw_match else "ration"
+                suggested_non_customers.append({
+                    "access_id": aid, "name": rname,
+                    "suggested_kind": suggested_kind, "suggested_merge_id": None,
+                })
+            elif is_shop or any(kw in rname_l for kw in SHOP_CLIENT_KEYWORDS):
+                suggested_non_customers.append({
+                    "access_id": aid, "name": rname,
+                    "suggested_kind": "shop", "suggested_merge_id": None,
+                })
+
     return AccdbPreview(
         temp_file_token="",
         access_tables=tables,
@@ -573,6 +629,10 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
         orders=_build_table_detail("orders", reader),
         finances=_build_table_detail("finances", reader),
         stock=_build_table_detail("stock", reader),
+        all_routes=all_routes,
+        all_clients_preview=all_clients_preview,
+        suggested_route_skips=suggested_route_skips,
+        suggested_non_customers=suggested_non_customers,
     )
 
 
@@ -596,18 +656,54 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
         order_cutoff    = (datetime.strptime(tr_date, "%Y-%m-%d")
                            - timedelta(days=mapping.order_days)).strftime("%Y-%m-%d")
 
-        # Маппінг Тип Access → назва категорії в новій системі
-        # (за замовчуванням назва = access_type, якщо маппінг не задано)
-        type_cat_name: dict[str, str] = {
-            m.access_type: m.category_name or m.access_type
-            for m in mapping.product_type_categories
-        }
-        # Кеш: category_name → id (заповнюється при першому використанні)
+        # ── CategoryMapping: Тип Access → атрибути категорії ────────────────
+        # Підтримуємо обидва формати: нові category_mappings і старі product_type_categories
+        _cat_mapping: dict[str, any] = {}
+        for m in mapping.category_mappings:
+            _cat_mapping[m.access_type] = m
+        # backward compat: якщо є старі product_type_categories і немає нових
+        if not _cat_mapping and hasattr(mapping, 'product_type_categories'):
+            for m in (mapping.product_type_categories or []):
+                from backend.schemas.import_accdb import CategoryMapping as _CM
+                _cat_mapping[m.access_type] = _CM(
+                    access_type=m.access_type, category_name=m.category_name or m.access_type
+                )
+        def _resolve_cat_name(ptype: str) -> str:
+            m = _cat_mapping.get(ptype)
+            return (m.category_name or ptype) if m else ptype
+
+        # Кеш: category_name → id
         _cat_id_cache: dict[str, int] = {}
-        # Маппінг client_id → kind (явні override)
+
+        # ── RouteMapping: access_id → {import_it, name_override, sort_order} ─
+        route_mapping_by_id: dict[int, any] = {
+            rm.access_id: rm for rm in mapping.route_mappings
+        }
+        # Назви маршрутів що треба пропустити (авто-пропозиції або явні)
+        route_skip_names: set[str] = {
+            rm.name_override or ""  # ігноруємо override для skip
+            for rm in mapping.route_mappings if not rm.import_it
+        }
+        # Для skip по id зберігаємо окремо
+        route_skip_ids: set[int] = {
+            rm.access_id for rm in mapping.route_mappings if not rm.import_it
+        }
+
+        # ── ClientMapping: access_id → {kind, merge_with} ───────────────────
+        client_mapping_by_id: dict[int, any] = {
+            cm.access_id: cm for cm in mapping.client_mappings
+        }
+        # backward compat для client_kinds
+        if not client_mapping_by_id and hasattr(mapping, 'client_kinds'):
+            for ck in (mapping.client_kinds or []):
+                from backend.schemas.import_accdb import ClientMapping as _CKM
+                client_mapping_by_id[ck.access_client_id] = _CKM(
+                    access_id=ck.access_client_id, client_kind=ck.client_kind
+                )
+        # старий kind_map для сумісності (використовується нижче)
         kind_map: dict[int, str] = {
-            m.access_client_id: m.client_kind
-            for m in mapping.client_kinds
+            aid: cm.client_kind
+            for aid, cm in client_mapping_by_id.items()
         }
 
         db_engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -653,7 +749,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
 
             # ── 2. Routes (_Маршрути) ─────────────────────────────────────────
             _update_state(step="Маршрути", progress=10)
-            route_map: dict[int, int] = {}
+            route_map: dict[int, int | None] = {}   # None = пропущений маршрут
             ep = EntityReport()
             tname = _find_table_for("routes", tables)
             if tname:
@@ -663,20 +759,37 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     rname  = _safe_str(row.get(cm.get("name", ""), ""), 200) if cm.get("name") else None
                     rid    = row.get(cm.get("id", "")) if cm.get("id") else None
                     active = _safe_bool(row.get(cm.get("active", ""), True)) if cm.get("active") else True
+
+                    try: access_rid = int(float(rid)) if rid is not None else None
+                    except (ValueError, TypeError): access_rid = None
+
                     if not rname:
                         ep.skipped += 1; continue
-                    ex = db.query(Route).filter(Route.name == rname).first()
+
+                    # Перевіряємо route_mappings: пропустити?
+                    rm = route_mapping_by_id.get(access_rid) if access_rid is not None else None
+                    if rm and not rm.import_it:
+                        # Маршрут пропущено — клієнти цього маршруту отримають route_id=None
+                        if access_rid is not None:
+                            route_map[access_rid] = None
+                        ep.skipped += 1
+                        continue
+
+                    # Назва та sort_order з override якщо є
+                    display_name = (rm.name_override or rname) if rm else rname
+                    sort_ord     = rm.sort_order if rm else i
+
+                    ex = db.query(Route).filter(Route.name == display_name).first()
                     if ex:
-                        if rid is not None:
-                            try: route_map[int(float(rid))] = ex.id
-                            except (ValueError, TypeError): pass
+                        if access_rid is not None:
+                            route_map[access_rid] = ex.id
                         ep.skipped += 1
                     else:
-                        r = Route(name=rname, sort_order=i, is_active=1 if active else 0)
+                        r = Route(name=display_name, sort_order=sort_ord,
+                                  is_active=1 if active else 0)
                         db.add(r); db.flush()
-                        if rid is not None:
-                            try: route_map[int(float(rid))] = r.id
-                            except (ValueError, TypeError): pass
+                        if access_rid is not None:
+                            route_map[access_rid] = r.id
                         ep.imported += 1
             entities["routes"] = ep
 
@@ -700,16 +813,23 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     ptype  = _safe_str(row.get(cm.get("type", "")) if cm.get("type") else None, 50)
                     init_s = _safe_float(row.get(cm.get("initial_stock", "")) if cm.get("initial_stock") else None) or 0.0
 
-                    # Визначаємо/створюємо категорію за типом
+                    # Визначаємо/створюємо категорію за типом + атрибути з CategoryMapping
                     cat_id: int | None = None
                     if ptype:
-                        cat_name = type_cat_name.get(ptype, ptype)  # fallback = назва типу
+                        cat_name = _resolve_cat_name(ptype)
                         if cat_name not in _cat_id_cache:
                             ex_cat = db.query(Category).filter(Category.name == cat_name).first()
                             if ex_cat:
                                 _cat_id_cache[cat_name] = ex_cat.id
                             else:
-                                new_cat = Category(name=cat_name, is_active=1)
+                                ma = _cat_mapping.get(ptype)
+                                new_cat = Category(
+                                    name=cat_name,
+                                    is_active=1,
+                                    is_baked=ma.is_baked if ma else 1,
+                                    sort_order=ma.sort_order if ma else 0,
+                                    reserve_pct=ma.reserve_pct if ma else 5.0,
+                                )
                                 db.add(new_cat); db.flush()
                                 _cat_id_cache[cat_name] = new_cat.id
                         cat_id = _cat_id_cache[cat_name]
@@ -768,16 +888,28 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     try: access_id = int(float(raw_id)) if raw_id is not None else None
                     except (ValueError, TypeError): access_id = None
 
+                    price_cat_raw = row.get(cm.get("price_category_id", "")) if cm.get("price_category_id") else None
+                    price_cat_str = str(price_cat_raw).strip() if price_cat_raw is not None else ""
+
+                    # Перевіряємо client_mappings: merge_with?
+                    cm_entry = client_mapping_by_id.get(access_id) if access_id is not None else None
+                    if cm_entry and cm_entry.merge_with is not None:
+                        # Не створюємо нового клієнта — прив'язуємо до існуючого
+                        client_map[access_id] = cm_entry.merge_with
+                        client_price_cat[cm_entry.merge_with] = price_cat_str
+                        client_bal_map[cm_entry.merge_with]   = 0.0
+                        ep.skipped += 1
+                        continue
+
                     # Тип клієнта: явний override → Свій=True → default
-                    if access_id is not None and access_id in kind_map:
+                    if cm_entry:
+                        kind = cm_entry.client_kind
+                    elif access_id is not None and access_id in kind_map:
                         kind = kind_map[access_id]
                     elif is_own_shop:
                         kind = "shop"
                     else:
                         kind = mapping.default_client_kind
-
-                    price_cat_raw = row.get(cm.get("price_category_id", "")) if cm.get("price_category_id") else None
-                    price_cat_str = str(price_cat_raw).strip() if price_cat_raw is not None else ""
 
                     c = Client(
                         full_name=full_nm or short_nm, short_name=short_nm,
@@ -794,7 +926,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     if access_id is not None:
                         client_map[access_id] = c.id
                     client_price_cat[c.id] = price_cat_str
-                    client_bal_map[c.id]   = 0.0   # баланс заповнимо з фінансів
+                    client_bal_map[c.id]   = 0.0
                     ep.imported += 1
             entities["clients"] = ep
 

@@ -8,9 +8,16 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from sqlalchemy.orm import Session
 
-from backend.schemas.import_accdb import AccdbPreview, ImportMapping, ImportReport
+from backend.database import get_db
+from backend.models.references import Category, Route
+from backend.models.clients import Client
+from backend.schemas.import_accdb import (
+    AccdbPreview, ImportContext, ImportMapping, ImportReport,
+    ExistingClient, ExistingRoute, ExistingCategory,
+)
 from backend.services import import_accdb as svc
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -111,6 +118,37 @@ def import_status():
         "progress": state.get("progress", 0),
         "error":    state.get("error"),
     }
+
+
+@router.get("/context", response_model=ImportContext)
+def import_context(db: Session = Depends(get_db)):
+    """Повертає існуючі сутності БД для merge-маппінгу в wizard."""
+    clients = (
+        db.query(Client)
+        .filter(Client.is_active == 1)
+        .order_by(Client.full_name)
+        .all()
+    )
+    routes = db.query(Route).order_by(Route.sort_order, Route.name).all()
+    cats   = db.query(Category).order_by(Category.sort_order, Category.name).all()
+
+    return ImportContext(
+        existing_clients=[
+            ExistingClient(
+                id=c.id, full_name=c.full_name,
+                short_name=c.short_name, client_kind=c.client_kind or "customer",
+            )
+            for c in clients
+        ],
+        existing_routes=[
+            ExistingRoute(id=r.id, name=r.name, sort_order=r.sort_order or 0)
+            for r in routes
+        ],
+        existing_categories=[
+            ExistingCategory(id=c.id, name=c.name, is_baked=c.is_baked or 1, sort_order=c.sort_order or 0)
+            for c in cats
+        ],
+    )
 
 
 @router.get("/result", response_model=ImportReport)
