@@ -149,9 +149,26 @@ def reset_database(db: Session = Depends(get_db)):
             conn.execute(text("UPDATE orders SET parent_order_id = NULL"))
             conn.execute(text("DELETE FROM orders"))
 
-        # Лише регулярних клієнтів
+        # Клієнтів: видаляємо customer + всіх не-системних що виникли під час імпорту.
+        # Системні визначаємо за client_kind: writeoff, ration, underbaked, shop.
+        # При цьому дозволяємо лише ОДИН запис кожного системного kind —
+        # дублі від попередніх імпортів (is_active=0) також видаляємо.
+        # Алгоритм: зберегти MIN(id) для кожного системного kind, решту видалити.
         if "clients" in existing:
+            # 1. Видалити всіх customer
             conn.execute(text("DELETE FROM clients WHERE client_kind = 'customer'"))
+            # 2. Для кожного системного kind зберегти лише перший (найменший id)
+            for kind in ("writeoff", "ration", "underbaked", "shop"):
+                conn.execute(text(
+                    "DELETE FROM clients WHERE client_kind = :kind "
+                    "AND id NOT IN (SELECT MIN(id) FROM clients WHERE client_kind = :kind)"
+                ), {"kind": kind})
+            # 3. Видалити будь-яких інших не-системних (наприклад kind='customer' вже видалено,
+            #    але на випадок невідомих kind від імпорту)
+            conn.execute(text(
+                "DELETE FROM clients WHERE client_kind NOT IN "
+                "('writeoff','ration','underbaked','shop')"
+            ))
 
         # Довідники
         for tbl in ("products", "categories", "units", "routes"):
