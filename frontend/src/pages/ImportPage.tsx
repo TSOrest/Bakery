@@ -837,11 +837,10 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 // ─── Step 10: Execution + Report + Reconciliation ─────────────────────────────
 
 function StepExecution({
-  status, report, onClose,
+  status, report,
 }: {
   status: ImportStatus | null
   report: ImportReport | null
-  onClose: () => void
 }) {
   const [correcting, setCorrecting] = useState<Set<number>>(new Set())
   const [corrected, setCorrected]   = useState<Set<number>>(new Set())
@@ -1072,7 +1071,7 @@ function StepExecution({
       )}
 
       <div style={{ marginTop: 8 }}>
-        <button style={BTN_PRIMARY} onClick={onClose}>
+        <button style={BTN_PRIMARY} onClick={() => window.location.reload()}>
           Готово — перейти до системи
         </button>
       </div>
@@ -1353,7 +1352,6 @@ export default function ImportPage({ onClose }: Props) {
                 <StepExecution
                   status={importStatus}
                   report={report}
-                  onClose={onClose}
                 />
               )}
             </div>
