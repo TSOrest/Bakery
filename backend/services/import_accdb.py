@@ -897,7 +897,14 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     # Перевіряємо client_mappings: merge_with?
                     cm_entry = client_mapping_by_id.get(access_id) if access_id is not None else None
                     if cm_entry and cm_entry.merge_with is not None:
-                        # Не створюємо нового клієнта — прив'язуємо до існуючого
+                        # Не створюємо нового клієнта — прив'язуємо до існуючого.
+                        # Якщо kind != customer — оновлюємо існуючого клієнта щоб
+                        # запити (наприклад shop-клієнт для залишків) знаходили його.
+                        target = db.get(Client, cm_entry.merge_with)
+                        if target and cm_entry.client_kind != "customer":
+                            target.client_kind = cm_entry.client_kind
+                            if cm_entry.client_kind == "shop":
+                                target.is_own_shop = 1
                         client_map[access_id] = cm_entry.merge_with
                         client_price_cat[cm_entry.merge_with] = price_cat_str
                         client_bal_map[cm_entry.merge_with]   = 0.0
