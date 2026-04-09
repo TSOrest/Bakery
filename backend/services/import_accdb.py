@@ -38,6 +38,7 @@ from backend.schemas.import_accdb import (
     RoutePreview,
     TableDetail,
     ValidationReport,
+    ZeroPriceProduct,
 )
 
 # ─── Глобальний стан прогресу ─────────────────────────────────────────────────
@@ -91,6 +92,7 @@ _EXACT_COLS: dict[str, dict[str, str]] = {
         "weight":        "Вага",
         "active":        "Діє",
         "type":          "Тип",
+        "unit_id":       "Одиниця",   # посилання на _Одиниці (може бути Код або Назва)
         "initial_stock": "Залишок",
     },
     "clients": {
@@ -248,7 +250,9 @@ foreach ($tbl in $tbls) {
             $row = [ordered]@{}
             for ($i = 0; $i -lt $dr.FieldCount; $i++) {
                 $v = $dr.GetValue($i)
-                $row[$colList[$i]] = if ($v -is [System.DBNull]) { $null } else { $v.ToString() }
+                $row[$colList[$i]] = if ($v -is [System.DBNull]) { $null }
+                                     elseif ($v -is [System.DateTime]) { $v.ToString("yyyy-MM-ddTHH:mm:ss") }
+                                     else { $v.ToString() }
             }
             $rowList.Add($row)
         }
@@ -653,11 +657,9 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
         reader = _open_reader(accdb_path, mapping.db_password, top_n=0)
         tables = reader.tables()
 
-        tr_date         = mapping.transition_date
-        finance_cutoff  = (datetime.strptime(tr_date, "%Y-%m-%d")
-                           - timedelta(days=mapping.finance_months * 30)).strftime("%Y-%m-%d")
-        order_cutoff    = (datetime.strptime(tr_date, "%Y-%m-%d")
-                           - timedelta(days=mapping.order_days)).strftime("%Y-%m-%d")
+        tr_date        = mapping.transition_date
+        finance_cutoff = None   # вся фінансова історія
+        order_cutoff   = None   # всі замовлення
 
         # ── CategoryMapping: Тип Access → атрибути категорії ────────────────
         # Підтримуємо обидва формати: нові category_mappings і старі product_type_categories
@@ -727,7 +729,8 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
 
             # ── 1. Units (_Одиниці) ───────────────────────────────────────────
             _update_state(step="Одиниці виміру", progress=5)
-            unit_map: dict[str, int] = {}
+            unit_map:    dict[str, int] = {}   # name → sqlite_id
+            unit_id_map: dict[int, int] = {}   # access_code → sqlite_id
             ep = EntityReport()
             tname = _find_table_for("units", tables)
             if tname:
@@ -741,13 +744,22 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     ep.found += 1
                     ex = db.query(Unit).filter(Unit.name == uname).first()
                     if ex:
-                        unit_map[uname] = ex.id
+                        sqlite_uid = ex.id
+                        unit_map[uname] = sqlite_uid
                         ep.skipped += 1
                     else:
                         u = Unit(name=uname, is_active=1)
                         db.add(u); db.flush()
-                        unit_map[uname] = u.id
+                        sqlite_uid = u.id
+                        unit_map[uname] = sqlite_uid
                         ep.imported += 1
+                    # Map access numeric code → sqlite id
+                    raw_code = row.get(cm.get("id", "")) if cm.get("id") else None
+                    if raw_code is not None:
+                        try:
+                            unit_id_map[int(float(raw_code))] = sqlite_uid
+                        except (ValueError, TypeError):
+                            pass
             entities["units"] = ep
 
             # ── 2. Routes (_Маршрути) ─────────────────────────────────────────
@@ -816,6 +828,18 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     ptype  = _safe_str(row.get(cm.get("type", "")) if cm.get("type") else None, 50)
                     init_s = _safe_float(row.get(cm.get("initial_stock", "")) if cm.get("initial_stock") else None) or 0.0
 
+                    # Resolve unit_id: спочатку як числовий код (_Одиниці.Код),
+                    # потім як текстова назва (_Одиниці.Назва)
+                    resolved_uid: int | None = None
+                    raw_unit = row.get(cm.get("unit_id", "")) if cm.get("unit_id") else None
+                    if raw_unit is not None:
+                        try:
+                            resolved_uid = unit_id_map.get(int(float(raw_unit)))
+                        except (ValueError, TypeError):
+                            pass
+                        if resolved_uid is None:
+                            resolved_uid = unit_map.get(str(raw_unit).strip())
+
                     # Визначаємо/створюємо категорію за типом + атрибути з CategoryMapping
                     cat_id: int | None = None
                     if ptype:
@@ -842,7 +866,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
 
                     p = Product(
                         name=name, short_name=name[:30],
-                        weight=weight, unit_id=None,
+                        weight=weight, unit_id=resolved_uid,
                         category_id=cat_id,
                         cost_per_unit=0, is_active=1 if active else 0,
                         created_at=now_str, initial_stock=init_s,
@@ -1044,10 +1068,18 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         if isinstance(ts_raw, datetime):
                             ts_dt = ts_raw
                         else:
-                            try:
-                                ts_dt = datetime.fromisoformat(str(ts_raw).strip())
-                            except ValueError:
-                                pass
+                            s = str(ts_raw).strip()
+                            for _fmt in (
+                                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+                                "%d.%m.%Y %H:%M:%S", "%m/%d/%Y %I:%M:%S %p",
+                                "%m/%d/%Y %H:%M:%S", "%Y-%m-%d",
+                                "%d.%m.%Y", "%m/%d/%Y",
+                            ):
+                                try:
+                                    ts_dt = datetime.strptime(s, _fmt)
+                                    break
+                                except ValueError:
+                                    continue
                     if ts_dt is None:
                         ts_dt = datetime.fromisoformat(tr_date)
 
@@ -1061,6 +1093,15 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         continue
 
                     entries.sort(key=lambda x: x[0])  # сортуємо за часом
+
+                    # Дедублікуємо: якщо кілька записів на одну дату — залишаємо останній
+                    deduped: list[tuple[datetime, float]] = []
+                    for _ts, _pv in entries:
+                        if deduped and deduped[-1][0].date() == _ts.date():
+                            deduped[-1] = (_ts, _pv)
+                        else:
+                            deduped.append((_ts, _pv))
+                    entries = deduped
 
                     for i, (ts_dt, price_val) in enumerate(entries):
                         valid_from = ts_dt.strftime("%Y-%m-%d")
@@ -1119,8 +1160,10 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 for row in reader.rows(order_tname):
                     ep.found += 1
                     date_val = _safe_date(row.get(cm.get("date", "")) if cm.get("date") else None)
-                    if not date_val or date_val < order_cutoff:
-                        ep.skipped += 1; continue
+                    if not date_val or (order_cutoff and date_val < order_cutoff):
+                        ep.skipped += 1
+                        ep.skip_reasons["Невалідна або відсутня дата"] = ep.skip_reasons.get("Невалідна або відсутня дата", 0) + 1
+                        continue
 
                     cid_raw = row.get(cm.get("client_id", "")) if cm.get("client_id") else None
                     client_id: int | None = None
@@ -1128,7 +1171,9 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         try: client_id = client_map.get(int(float(cid_raw)))
                         except (ValueError, TypeError): pass
                     if not client_id:
-                        ep.skipped += 1; continue
+                        ep.skipped += 1
+                        ep.skip_reasons["Клієнт пропущений або не знайдений"] = ep.skip_reasons.get("Клієнт пропущений або не знайдений", 0) + 1
+                        continue
 
                     pid_raw = row.get(cm.get("product_id", "")) if cm.get("product_id") else None
                     prod_id = None
@@ -1137,13 +1182,16 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         except (ValueError, TypeError): pass
                     if not prod_id:
                         ep.skipped += 1
+                        ep.skip_reasons["Виріб не знайдений"] = ep.skip_reasons.get("Виріб не знайдений", 0) + 1
                         ep.warnings.append(f"Невідомий виріб {pid_raw!r} в замовленні")
                         continue
 
                     qty_raw = row.get(cm.get("qty", "")) if cm.get("qty") else None
                     qty = _safe_float(qty_raw) or 0
                     if qty <= 0:
-                        ep.skipped += 1; continue
+                        ep.skipped += 1
+                        ep.skip_reasons["Кількість = 0"] = ep.skip_reasons.get("Кількість = 0", 0) + 1
+                        continue
 
                     db.add(Order(
                         client_id=client_id, product_id=prod_id,
@@ -1163,12 +1211,16 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 for row in reader.rows(fin_tname):
                     ep.found += 1
                     date_val = _safe_date(row.get(cm.get("date", "")) if cm.get("date") else None)
-                    if not date_val or date_val < finance_cutoff:
-                        ep.skipped += 1; continue
+                    if not date_val or (finance_cutoff and date_val < finance_cutoff):
+                        ep.skipped += 1
+                        ep.skip_reasons["Невалідна або відсутня дата"] = ep.skip_reasons.get("Невалідна або відсутня дата", 0) + 1
+                        continue
 
                     amount = _safe_float(row.get(cm.get("amount", "")) if cm.get("amount") else None)
                     if amount is None or amount == 0:
-                        ep.skipped += 1; continue
+                        ep.skipped += 1
+                        ep.skip_reasons["Сума = 0"] = ep.skip_reasons.get("Сума = 0", 0) + 1
+                        continue
                     amount = abs(amount)
 
                     cid_raw = row.get(cm.get("client_id", "")) if cm.get("client_id") else None
@@ -1198,14 +1250,48 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     ep.imported += 1
             entities["finances"] = ep
 
-            # ── 9. Корекція балансів ──────────────────────────────────────────
-            _update_state(step="Корекція балансів", progress=82)
+            # ── 9. Звірка балансів ───────────────────────────────────────────
+            # Перераховуємо баланс по ВСІХ записах Access ^Баланс (включно з пропущеними)
+            # щоб порівняти очікуваний результат з реально імпортованим.
+            _update_state(step="Звірка балансів", progress=82)
+            access_expected_bal: dict[int, float] = {}   # access_client_id → balance
+            if fin_tname:
+                cm_f = _cols_for("finances", reader.columns(fin_tname))
+                for row in reader.rows(fin_tname):
+                    amt = _safe_float(row.get(cm_f.get("amount", "")) if cm_f.get("amount") else None)
+                    if not amt or amt == 0:
+                        continue
+                    amt = abs(amt)
+                    cid_raw = row.get(cm_f.get("client_id", "")) if cm_f.get("client_id") else None
+                    if cid_raw is None:
+                        continue
+                    try:
+                        acc_cid = int(float(cid_raw))
+                    except (ValueError, TypeError):
+                        continue
+                    art_raw = str(row.get(cm_f.get("article_id", ""), "") or "").strip()
+                    direction = access_article_dir.get(art_raw, "income")
+                    sign = 1 if direction == "income" else -1
+                    access_expected_bal[acc_cid] = access_expected_bal.get(acc_cid, 0.0) + sign * amt
+
             mismatches: list[BalanceMismatch] = []
-            # Access не зберігає "поточний баланс" явно — він обчислюється з операцій.
-            # computed_bal[cid] = sum(sign*amount) для цього клієнта за весь імпортований період.
-            # Якщо в Access є операції за межами finance_cutoff, баланс може відрізнятись.
-            # Для справки виводимо розбіжності але автоматичної корекції не робимо
-            # (неможливо знати точний баланс Access без читання всієї історії).
+            for acc_cid, expected in sorted(access_expected_bal.items()):
+                if abs(expected) < 0.01:
+                    continue   # нульовий баланс — не цікавить
+                sqlite_cid = client_map.get(acc_cid)
+                if sqlite_cid is None:
+                    continue   # клієнт пропущений / не знайдений у маппінгу
+                actual = computed_bal.get(sqlite_cid, 0.0)
+                diff   = round(expected - actual, 2)
+                client_obj  = db.get(Client, sqlite_cid)
+                client_name = client_obj.full_name if client_obj else f"Client #{sqlite_cid}"
+                mismatches.append(BalanceMismatch(
+                    client_id=sqlite_cid,
+                    client_name=client_name,
+                    access_balance=round(expected, 2),
+                    computed_balance=round(actual, 2),
+                    diff=diff,
+                ))
 
             # ── 10. Залишки (tblDailyBalances) ───────────────────────────────
             _update_state(step="Залишки магазину", progress=90)
@@ -1268,18 +1354,19 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             db.commit()
 
             # ── Validation ────────────────────────────────────────────────────
-            zero_price: list[str] = []
+            imported_product_ids = set(product_map.values())
+            zero_price: list[ZeroPriceProduct] = []
             for p in db.query(Product).filter(Product.is_active == 1).all():
-                if p.id not in set(product_map.values()):
+                if p.id not in imported_product_ids:
                     continue
                 if not db.query(Price).filter(Price.product_id == p.id, Price.is_active == 1).first():
-                    zero_price.append(p.name)
+                    zero_price.append(ZeroPriceProduct(id=p.id, name=p.name))
 
             validation = ValidationReport(
                 balance_mismatches=mismatches,
                 zero_price_products=zero_price,
                 order_count_ok=entities.get("orders", EntityReport()).imported > 0,
-                overall_ok=(len(mismatches) == 0 and len(zero_price) == 0),
+                overall_ok=(not any(abs(m.diff) > 0.01 for m in mismatches) and len(zero_price) == 0),
             )
             report = ImportReport(
                 success=True,

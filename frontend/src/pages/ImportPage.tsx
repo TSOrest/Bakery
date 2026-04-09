@@ -239,12 +239,12 @@ function StepParams({
   file, setFile,
   password, setPassword,
   transDate, setTransDate,
-  finMonths, setFinMonths,
-  orderDays, setOrderDays,
   driverErr,
   existingCount,
+  existingDetail,
   uploading, uploadErr,
   onUpload,
+  onResetClick,
 }: any) {
   const disabled = !file || uploading || !!driverErr || (existingCount !== null && existingCount > 0)
   return (
@@ -262,8 +262,22 @@ function StepParams({
       )}
       {existingCount !== null && existingCount > 0 && (
         <div style={{ ...WARN_BOX, background: '#fff7ed', borderColor: '#fed7aa', color: '#92400e' }}>
-          <strong>База вже містить дані ({existingCount} клієнтів).</strong>
-          {' '}Перед імпортом необхідно скинути базу даних (секція «Скидання бази даних»).
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <strong>База вже містить дані ({existingDetail || `${existingCount} записів`}).</strong>
+              {' '}Перед імпортом необхідно очистити базу даних.
+            </div>
+            <button
+              onClick={onResetClick}
+              style={{
+                flexShrink: 0, background: '#e74c3c', color: '#fff', border: 'none',
+                padding: '5px 14px', borderRadius: 5, cursor: 'pointer',
+                fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap',
+              }}
+            >
+              Очистити базу...
+            </button>
+          </div>
         </div>
       )}
 
@@ -284,20 +298,6 @@ function StepParams({
           <input type="date" value={transDate} style={INPUT}
             onChange={e => setTransDate(e.target.value)} />
           <div style={HINT}>Базові ціни будуть встановлені з цієї дати.</div>
-        </div>
-        <div style={{ display: 'flex', gap: 16 }}>
-          <div style={{ flex: 1 }}>
-            <label style={LABEL}>Місяців фінансової історії</label>
-            <input type="number" min={1} max={24} value={finMonths} style={INPUT}
-              onChange={e => setFinMonths(Number(e.target.value))} />
-            <div style={HINT}>Фінансові операції до дати переходу.</div>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={LABEL}>Днів замовлень</label>
-            <input type="number" min={1} max={365} value={orderDays} style={INPUT}
-              onChange={e => setOrderDays(Number(e.target.value))} />
-            <div style={HINT}>Замовлення до дати переходу.</div>
-          </div>
         </div>
         {uploadErr && <div style={WARN_BOX}>{uploadErr}</div>}
         <div>
@@ -682,39 +682,15 @@ function StepPrices({
 
 // ─── Step 7: Orders ───────────────────────────────────────────────────────────
 
-function StepOrders({
-  preview, orderDays, setOrderDays, transDate,
-}: {
-  preview: AccdbPreview
-  orderDays: number
-  setOrderDays: (n: number) => void
-  transDate: string
-}) {
-  const cutoff = transDate
-    ? new Date(new Date(transDate).getTime() - orderDays * 86400000).toISOString().slice(0, 10)
-    : '—'
-
+function StepOrders({ preview }: { preview: AccdbPreview }) {
   return (
     <div>
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 7 — Замовлення</h2>
       <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 20 }}>
-        Замовлення з Access будуть перенесені за вказаний період до дати переходу.
+        Вся історія замовлень з Access буде перенесена повністю.
       </p>
-
-      <div style={{ ...INFO_BOX }}>
-        <div style={{ fontSize: '0.95rem', marginBottom: 8 }}>
-          <strong>Знайдено замовлень в Access: {preview.orders.count}</strong>
-        </div>
-        <div style={{ fontSize: '0.82rem' }}>
-          Будуть перенесені замовлення з <strong>{cutoff}</strong> по <strong>{transDate || '…'}</strong>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 300 }}>
-        <label style={LABEL}>Кількість днів замовлень</label>
-        <input type="number" min={1} max={365} value={orderDays} style={INPUT}
-          onChange={e => setOrderDays(Number(e.target.value))} />
-        <div style={HINT}>Замовлення за {orderDays} днів до дати переходу ({cutoff})</div>
+      <div style={INFO_BOX}>
+        <strong>Знайдено замовлень в Access: {preview.orders.count}</strong>
       </div>
     </div>
   )
@@ -722,41 +698,15 @@ function StepOrders({
 
 // ─── Step 8: Finances ─────────────────────────────────────────────────────────
 
-function StepFinances({
-  preview, finMonths, setFinMonths, transDate,
-}: {
-  preview: AccdbPreview
-  finMonths: number
-  setFinMonths: (n: number) => void
-  transDate: string
-}) {
-  const cutoff = transDate
-    ? new Date(
-        new Date(new Date(transDate).getFullYear(), new Date(transDate).getMonth() - finMonths, 1)
-      ).toISOString().slice(0, 7)
-    : '—'
-
+function StepFinances({ preview }: { preview: AccdbPreview }) {
   return (
     <div>
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 8 — Фінансова історія</h2>
       <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 20 }}>
-        Фінансові операції з Access будуть перенесені за вказаний період.
+        Вся фінансова історія з Access буде перенесена повністю.
       </p>
-
       <div style={INFO_BOX}>
-        <div style={{ fontSize: '0.95rem', marginBottom: 8 }}>
-          <strong>Знайдено фінансових операцій: {preview.finances.count}</strong>
-        </div>
-        <div style={{ fontSize: '0.82rem' }}>
-          Будуть перенесені операції з <strong>{cutoff}</strong> по <strong>{transDate || '…'}</strong>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 300 }}>
-        <label style={LABEL}>Місяців фінансової історії</label>
-        <input type="number" min={1} max={24} value={finMonths} style={INPUT}
-          onChange={e => setFinMonths(Number(e.target.value))} />
-        <div style={HINT}>Операції за {finMonths} міс. до дати переходу ({cutoff}+)</div>
+        <strong>Знайдено фінансових операцій: {preview.finances.count}</strong>
       </div>
     </div>
   )
@@ -765,13 +715,11 @@ function StepFinances({
 // ─── Step 9: Confirmation ─────────────────────────────────────────────────────
 
 function StepConfirm({
-  preview, transDate, finMonths, orderDays,
+  preview, transDate,
   routeMappings, catMappings, clientMappings, basePriceCat,
 }: {
   preview: AccdbPreview
   transDate: string
-  finMonths: number
-  orderDays: number
   routeMappings: RouteMapping[]
   catMappings: CategoryMapping[]
   clientMappings: ClientMapping[]
@@ -793,8 +741,8 @@ function StepConfirm({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <SummaryRow label="Файл Access" value={preview.access_tables.length + ' таблиць'} />
         <SummaryRow label="Дата переходу" value={transDate} />
-        <SummaryRow label="Фінансова історія" value={`${finMonths} міс.`} />
-        <SummaryRow label="Замовлення" value={`${orderDays} днів`} />
+        <SummaryRow label="Фінансова історія" value="вся" />
+        <SummaryRow label="Замовлення" value="всі" />
         <SummaryRow label="Маршрути" value={
           `${importedRoutes} переноситься${skippedRoutes > 0 ? `, ${skippedRoutes} пропущено` : ''}`
         } />
@@ -834,9 +782,13 @@ function StepExecution({
   status: ImportStatus | null
   report: ImportReport | null
 }) {
-  const [correcting, setCorrecting] = useState<Set<number>>(new Set())
-  const [corrected, setCorrected]   = useState<Set<number>>(new Set())
-  const [corrErr, setCorrErr]       = useState<Record<number, string>>({})
+  const [correcting, setCorrecting]   = useState<Set<number>>(new Set())
+  const [corrected, setCorrected]     = useState<Set<number>>(new Set())
+  const [corrErr, setCorrErr]         = useState<Record<number, string>>({})
+  const [priceInputs, setPriceInputs] = useState<Record<number, string>>({})
+  const [priceSaving, setPriceSaving] = useState<Set<number>>(new Set())
+  const [priceSaved, setPriceSaved]   = useState<Set<number>>(new Set())
+  const [priceErr, setPriceErr]       = useState<Record<number, string>>({})
 
   async function applyCorrection(clientId: number, diff: number) {
     setCorrecting(s => new Set(s).add(clientId))
@@ -867,6 +819,33 @@ function StepExecution({
       setCorrErr(prev => ({ ...prev, [clientId]: e.message }))
     } finally {
       setCorrecting(s => { const n = new Set(s); n.delete(clientId); return n })
+    }
+  }
+
+  async function savePrice(productId: number) {
+    const val = parseFloat((priceInputs[productId] || '').replace(',', '.'))
+    if (!val || val <= 0) {
+      setPriceErr(prev => ({ ...prev, [productId]: 'Введіть ціну > 0' }))
+      return
+    }
+    setPriceSaving(s => new Set(s).add(productId))
+    setPriceErr(prev => { const n = { ...prev }; delete n[productId]; return n })
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const res = await fetch('/api/v1/prices/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: productId, price: val, valid_from: today, is_active: 1 }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e.detail ?? 'Помилка збереження ціни')
+      }
+      setPriceSaved(s => new Set(s).add(productId))
+    } catch (e: any) {
+      setPriceErr(prev => ({ ...prev, [productId]: e.message }))
+    } finally {
+      setPriceSaving(s => { const n = new Set(s); n.delete(productId); return n })
     }
   }
 
@@ -936,7 +915,7 @@ function StepExecution({
             <th style={{ ...TH, textAlign: 'right' }}>Знайдено</th>
             <th style={{ ...TH, textAlign: 'right' }}>Імпортовано</th>
             <th style={{ ...TH, textAlign: 'right' }}>Пропущено</th>
-            <th style={TH}>Попередження</th>
+            <th style={TH}>Деталі</th>
           </tr>
         </thead>
         <tbody>
@@ -945,11 +924,25 @@ function StepExecution({
               <td style={TD}>{ENTITY_LABELS[key] ?? key}</td>
               <td style={{ ...TD, textAlign: 'right' }}>{ep.found}</td>
               <td style={{ ...TD, textAlign: 'right', color: '#16a34a' }}>{ep.imported}</td>
-              <td style={{ ...TD, textAlign: 'right' }}>{ep.skipped > 0 ? ep.skipped : '—'}</td>
+              <td style={{ ...TD, textAlign: 'right', color: ep.skipped > 0 ? '#b45309' : undefined }}>
+                {ep.skipped > 0 ? ep.skipped : '—'}
+              </td>
               <td style={TD}>
+                {ep.skipped > 0 && Object.keys(ep.skip_reasons ?? {}).length > 0 && (
+                  <details>
+                    <summary style={{ color: '#b45309', cursor: 'pointer', fontSize: '0.82rem' }}>
+                      Причини пропуску
+                    </summary>
+                    <ul style={{ margin: '4px 0 4px 14px', padding: 0, fontSize: '0.78rem', color: '#92400e' }}>
+                      {Object.entries(ep.skip_reasons).map(([reason, cnt]) => (
+                        <li key={reason}>{reason}: <strong>{cnt}</strong></li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
                 {ep.warnings.length > 0 && (
                   <details>
-                    <summary style={{ color: '#b45309', cursor: 'pointer' }}>
+                    <summary style={{ color: '#b45309', cursor: 'pointer', fontSize: '0.82rem' }}>
                       {ep.warnings.length} попередж.
                     </summary>
                     {ep.warnings.slice(0, 15).map((w, i) => (
@@ -959,7 +952,7 @@ function StepExecution({
                 )}
                 {ep.errors.length > 0 && (
                   <details>
-                    <summary style={{ color: '#991b1b', cursor: 'pointer' }}>
+                    <summary style={{ color: '#991b1b', cursor: 'pointer', fontSize: '0.82rem' }}>
                       {ep.errors.length} помилок
                     </summary>
                     {ep.errors.slice(0, 10).map((e, i) => (
@@ -975,88 +968,159 @@ function StepExecution({
 
       {/* Zero-price products */}
       {report.validation.zero_price_products.length > 0 && (
-        <div style={{ ...WARN_BOX, marginBottom: 16 }}>
-          <strong>Вироби без ціни ({report.validation.zero_price_products.length}):</strong>
-          <ul style={{ margin: '8px 0 0 16px', fontSize: '0.82rem' }}>
-            {report.validation.zero_price_products.map((n, i) => <li key={i}>{n}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {/* Balance reconciliation */}
-      <h3 style={{ fontSize: '0.95rem', marginBottom: 8 }}>Звірка балансів клієнтів</h3>
-      {mismatches.length === 0 ? (
-        <div style={{ color: '#16a34a', fontSize: '0.85rem', marginBottom: 16 }}>
-          ✓ Всі баланси співпадають
-        </div>
-      ) : (
-        <>
-          <p style={{ color: '#b45309', fontSize: '0.85rem', marginBottom: 8 }}>
-            Знайдено розбіжностей: {mismatches.length}. Натисніть «+ Корекція» для виправлення.
+        <div style={{ ...WARN_BOX, marginBottom: 24 }}>
+          <strong style={{ display: 'block', marginBottom: 8 }}>
+            Активні вироби без базової ціни ({report.validation.zero_price_products.filter(p => !priceSaved.has(p.id)).length}):
+          </strong>
+          <p style={{ fontSize: '0.82rem', color: '#92400e', marginBottom: 10 }}>
+            Встановіть початкову ціну для кожного виробу, щоб він відображався коректно в системі.
           </p>
-          <table style={tbl({ marginBottom: 20 })}>
+          <table style={tbl()}>
             <thead>
               <tr>
-                <th style={TH}>Клієнт</th>
-                <th style={{ ...TH, textAlign: 'right' }}>Баланс Access</th>
-                <th style={{ ...TH, textAlign: 'right' }}>Розрахований</th>
-                <th style={{ ...TH, textAlign: 'right' }}>Різниця</th>
+                <th style={TH}>Виріб</th>
+                <th style={{ ...TH, width: 140 }}>Ціна (грн)</th>
                 <th style={{ ...TH, width: 120 }}>Дія</th>
               </tr>
             </thead>
             <tbody>
-              {mismatches.map((m) => (
-                <tr key={m.client_id} style={{ background: corrected.has(m.client_id) ? '#f0fdf4' : '#fff' }}>
-                  <td style={TD}>{m.client_name}</td>
-                  <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(m.access_balance)}
-                  </td>
-                  <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(m.computed_balance)}
-                  </td>
-                  <td style={{
-                    ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-                    color: m.diff > 0 ? '#16a34a' : '#dc2626',
-                  }}>
-                    {m.diff > 0 ? '+' : ''}{fmt(m.diff)}
+              {report.validation.zero_price_products.map(p => (
+                <tr key={p.id} style={{ background: priceSaved.has(p.id) ? '#f0fdf4' : undefined }}>
+                  <td style={TD}>{p.name}</td>
+                  <td style={TD}>
+                    {priceSaved.has(p.id) ? (
+                      <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>
+                        {priceInputs[p.id] ?? '—'} грн
+                      </span>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={priceInputs[p.id] ?? ''}
+                        onChange={e => setPriceInputs(prev => ({ ...prev, [p.id]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') savePrice(p.id) }}
+                        style={{ width: 120, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 4 }}
+                        placeholder="0.00"
+                      />
+                    )}
+                    {priceErr[p.id] && (
+                      <div style={{ color: '#dc2626', fontSize: '0.72rem', marginTop: 2 }}>{priceErr[p.id]}</div>
+                    )}
                   </td>
                   <td style={TD}>
-                    {corrected.has(m.client_id) ? (
-                      <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>✓ Застосовано</span>
+                    {priceSaved.has(p.id) ? (
+                      <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>✓ Збережено</span>
                     ) : (
-                      <>
-                        <button
-                          style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
-                          disabled={correcting.has(m.client_id)}
-                          onClick={() => applyCorrection(m.client_id, m.diff)}
-                        >
-                          {correcting.has(m.client_id) ? '...' : '+ Корекція'}
-                        </button>
-                        {corrErr[m.client_id] && (
-                          <div style={{ color: '#dc2626', fontSize: '0.72rem', marginTop: 2 }}>
-                            {corrErr[m.client_id]}
-                          </div>
-                        )}
-                      </>
+                      <button
+                        style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
+                        disabled={priceSaving.has(p.id)}
+                        onClick={() => savePrice(p.id)}
+                      >
+                        {priceSaving.has(p.id) ? '...' : 'Зберегти'}
+                      </button>
                     )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
 
-          {mismatches.filter(m => !corrected.has(m.client_id)).length > 1 && (
+      {/* Balance reconciliation */}
+      <h3 style={{ fontSize: '0.95rem', marginBottom: 4 }}>Звірка балансів клієнтів</h3>
+      <p style={{ fontSize: '0.82rem', color: '#6b7280', marginBottom: 10 }}>
+        Клієнти з ненульовим балансом в Access. «Баланс Access» — розраховано з усіх операцій ^Баланс;
+        «Імпортовано» — фактично записано в нову систему. Різниця = 0 означає коректний імпорт.
+      </p>
+      {mismatches.length === 0 ? (
+        <div style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 16 }}>
+          Всі клієнти мають нульовий баланс або були пропущені при імпорті.
+        </div>
+      ) : (
+        <>
+          {(() => {
+            const errorRows = mismatches.filter(m => Math.abs(m.diff) > 0.01 && !corrected.has(m.client_id))
+            return errorRows.length > 0 ? (
+              <p style={{ color: '#b45309', fontSize: '0.85rem', marginBottom: 8 }}>
+                Розбіжностей: {errorRows.length} з {mismatches.length}. Натисніть «Корекція» для виправлення.
+              </p>
+            ) : (
+              <p style={{ color: '#16a34a', fontSize: '0.85rem', marginBottom: 8 }}>
+                ✓ Всі баланси імпортовано коректно ({mismatches.length} клієнтів з ненульовим балансом).
+              </p>
+            )
+          })()}
+          <table style={tbl({ marginBottom: 20 })}>
+            <thead>
+              <tr>
+                <th style={TH}>Клієнт</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Баланс Access</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Імпортовано</th>
+                <th style={{ ...TH, textAlign: 'right' }}>Різниця</th>
+                <th style={{ ...TH, width: 120 }}>Дія</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mismatches.map((m) => {
+                const hasDiff = Math.abs(m.diff) > 0.01
+                const rowBg = corrected.has(m.client_id) ? '#f0fdf4'
+                           : hasDiff ? '#fffbeb'
+                           : undefined
+                return (
+                  <tr key={m.client_id} style={{ background: rowBg }}>
+                    <td style={TD}>{m.client_name}</td>
+                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(m.access_balance)}
+                    </td>
+                    <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(m.computed_balance)}
+                    </td>
+                    <td style={{
+                      ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+                      color: !hasDiff ? '#16a34a' : m.diff > 0 ? '#b45309' : '#dc2626',
+                    }}>
+                      {!hasDiff ? '✓' : (m.diff > 0 ? '+' : '') + fmt(m.diff)}
+                    </td>
+                    <td style={TD}>
+                      {!hasDiff ? null : corrected.has(m.client_id) ? (
+                        <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>✓ Застосовано</span>
+                      ) : (
+                        <>
+                          <button
+                            style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
+                            disabled={correcting.has(m.client_id)}
+                            onClick={() => applyCorrection(m.client_id, m.diff)}
+                          >
+                            {correcting.has(m.client_id) ? '...' : 'Корекція'}
+                          </button>
+                          {corrErr[m.client_id] && (
+                            <div style={{ color: '#dc2626', fontSize: '0.72rem', marginTop: 2 }}>
+                              {corrErr[m.client_id]}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          {mismatches.filter(m => Math.abs(m.diff) > 0.01 && !corrected.has(m.client_id)).length > 1 && (
             <button
               style={{ ...BTN_SECONDARY, fontSize: '0.85rem', marginBottom: 20 }}
               onClick={async () => {
                 for (const m of mismatches) {
-                  if (!corrected.has(m.client_id)) {
+                  if (Math.abs(m.diff) > 0.01 && !corrected.has(m.client_id)) {
                     await applyCorrection(m.client_id, m.diff)
                   }
                 }
               }}
             >
-              Застосувати всі корекції ({mismatches.filter(m => !corrected.has(m.client_id)).length})
+              Застосувати всі корекції ({mismatches.filter(m => Math.abs(m.diff) > 0.01 && !corrected.has(m.client_id)).length})
             </button>
           )}
         </>
@@ -1085,13 +1149,18 @@ export default function ImportPage({ onClose }: Props) {
   const [file, setFile]             = useState<File | null>(null)
   const [password, setPassword]     = useState('')
   const [transDate, setTransDate]   = useState(today())
-  const [finMonths, setFinMonths]   = useState(2)
-  const [orderDays, setOrderDays]   = useState(60)
   const [uploading, setUploading]   = useState(false)
   const [uploadErr, setUploadErr]   = useState('')
   const [driverErr, setDriverErr]   = useState<string | null>(null)
   const [driverChecked, setDriverChecked] = useState(false)
   const [existingCount, setExistingCount] = useState<number | null>(null)
+  const [existingDetail, setExistingDetail] = useState('')  // напр. "108 клієнтів, 45 виробів"
+
+  // Скидання БД з майстра
+  const [resetModal, setResetModal]     = useState(false)
+  const [resetConfirm, setResetConfirm] = useState('')
+  const [resetBusy, setResetBusy]       = useState(false)
+  const [resetErr, setResetErr]         = useState('')
 
   // Preview & context
   const [preview, setPreview]   = useState<AccdbPreview | null>(null)
@@ -1108,6 +1177,43 @@ export default function ImportPage({ onClose }: Props) {
   const [report, setReport]             = useState<ImportReport | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const checkExistingData = async () => {
+    try {
+      const data: { total: number; counts: Record<string, number> } =
+        await fetch('/api/v1/import/db-status').then(r => r.json())
+      setExistingCount(data.total)
+      const LABELS: Record<string, string> = {
+        clients: 'клієнтів', products: 'виробів', routes: 'маршрутів',
+        units: 'одиниць', prices: 'цін', overrides: 'інд. цін',
+        orders: 'замовлень', finances: 'фін. операцій',
+      }
+      const parts = Object.entries(data.counts)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `${v} ${LABELS[k] ?? k}`)
+      setExistingDetail(parts.join(', '))
+    } catch {
+      setExistingCount(0)
+      setExistingDetail('')
+    }
+  }
+
+  const handleReset = async () => {
+    setResetBusy(true); setResetErr('')
+    try {
+      const res = await fetch('/api/v1/settings/reset-db', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(data.detail ?? res.statusText)
+      }
+      setResetModal(false)
+      setResetConfirm('')
+      await checkExistingData()
+      getImportContext().then(setContext).catch(() => {})
+    } catch (e: any) {
+      setResetErr(String(e.message ?? e))
+    } finally { setResetBusy(false) }
+  }
+
   // Checks on mount
   useEffect(() => {
     fetch('/api/v1/import/driver-check')
@@ -1115,11 +1221,7 @@ export default function ImportPage({ onClose }: Props) {
       .then(data => { setDriverErr(data.ok ? null : data.error); setDriverChecked(true) })
       .catch(() => setDriverChecked(true))
 
-    fetch('/api/v1/clients/?active_only=false')
-      .then(r => r.json())
-      .then((data: { client_kind?: string }[]) =>
-        setExistingCount(data.filter(c => c.client_kind === 'customer').length))
-      .catch(() => setExistingCount(0))
+    checkExistingData()
 
     getImportContext().then(setContext).catch(() => {})
   }, [])
@@ -1216,8 +1318,8 @@ export default function ImportPage({ onClose }: Props) {
         temp_file_token:     preview.temp_file_token,
         db_password:         password,
         transition_date:     transDate,
-        finance_months:      finMonths,
-        order_days:          orderDays,
+        finance_months:      0,
+        order_days:          0,
         route_mappings:      routeMappings,
         category_mappings:   catMappings,
         client_mappings:     clientMappings,
@@ -1278,13 +1380,13 @@ export default function ImportPage({ onClose }: Props) {
                   file={file} setFile={setFile}
                   password={password} setPassword={setPassword}
                   transDate={transDate} setTransDate={setTransDate}
-                  finMonths={finMonths} setFinMonths={setFinMonths}
-                  orderDays={orderDays} setOrderDays={setOrderDays}
                   driverErr={driverChecked ? driverErr : null}
                   existingCount={existingCount}
+                  existingDetail={existingDetail}
                   uploading={uploading}
                   uploadErr={uploadErr}
                   onUpload={handleUpload}
+                  onResetClick={() => { setResetModal(true); setResetConfirm(''); setResetErr('') }}
                 />
               )}
               {step === 2 && preview && (
@@ -1320,27 +1422,15 @@ export default function ImportPage({ onClose }: Props) {
                 />
               )}
               {step === 7 && preview && (
-                <StepOrders
-                  preview={preview}
-                  orderDays={orderDays}
-                  setOrderDays={setOrderDays}
-                  transDate={transDate}
-                />
+                <StepOrders preview={preview} />
               )}
               {step === 8 && preview && (
-                <StepFinances
-                  preview={preview}
-                  finMonths={finMonths}
-                  setFinMonths={setFinMonths}
-                  transDate={transDate}
-                />
+                <StepFinances preview={preview} />
               )}
               {step === 9 && preview && (
                 <StepConfirm
                   preview={preview}
                   transDate={transDate}
-                  finMonths={finMonths}
-                  orderDays={orderDays}
                   routeMappings={routeMappings}
                   catMappings={catMappings}
                   clientMappings={clientMappings}
@@ -1390,6 +1480,57 @@ export default function ImportPage({ onClose }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Модаль підтвердження скидання БД */}
+      {resetModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
+          onClick={() => !resetBusy && setResetModal(false)}>
+          <div style={{ background: '#fff', borderRadius: 10, padding: '1.75rem',
+            maxWidth: 460, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 1rem', color: '#c0392b', fontSize: '1.1rem' }}>Скидання бази даних</h3>
+            <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+              Ця дія <strong>незворотна</strong>. Будуть видалені всі вироби, клієнти,
+              замовлення, накладні, ціни, фінанси та всі інші робочі дані.
+            </p>
+            <p style={{ fontSize: '0.9rem', marginTop: 0, lineHeight: 1.55 }}>
+              Системні клієнти, користувачі та налаштування залишаться.
+            </p>
+            <p style={{ fontSize: '0.9rem', marginBottom: '0.4rem' }}>
+              Щоб підтвердити, введіть <strong>СКИНУТИ</strong>:
+            </p>
+            <input
+              autoFocus
+              value={resetConfirm}
+              onChange={e => setResetConfirm(e.target.value.toUpperCase())}
+              placeholder="СКИНУТИ"
+              style={{ padding: '0.4rem 0.7rem', border: '1.5px solid #ccc', borderRadius: 4,
+                fontSize: '1rem', width: '100%', marginBottom: '0.85rem', boxSizing: 'border-box' }}
+            />
+            {resetErr && <div style={{ color: '#c0392b', fontSize: '0.85rem', marginBottom: '0.6rem' }}>{resetErr}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button onClick={() => setResetModal(false)} disabled={resetBusy}
+                style={{ background: '#f3f4f6', border: '1px solid #d1d5db', color: '#374151',
+                  padding: '0.4rem 1rem', borderRadius: 4, cursor: 'pointer', fontSize: '0.9rem' }}>
+                Скасувати
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={resetConfirm !== 'СКИНУТИ' || resetBusy}
+                style={{
+                  background: resetConfirm === 'СКИНУТИ' ? '#e74c3c' : '#ccc',
+                  color: '#fff', border: 'none', padding: '0.4rem 1.1rem', borderRadius: 4,
+                  cursor: resetConfirm === 'СКИНУТИ' ? 'pointer' : 'not-allowed',
+                  fontWeight: 600, fontSize: '0.9rem',
+                }}
+              >
+                {resetBusy ? 'Очищення...' : 'Скинути'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

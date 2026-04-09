@@ -128,11 +128,12 @@ export interface ImportContext {
 // ─── Report types ─────────────────────────────────────────────────────────────
 
 export interface EntityReport {
-  found:    number
-  imported: number
-  skipped:  number
-  warnings: string[]
-  errors:   string[]
+  found:        number
+  imported:     number
+  skipped:      number
+  skip_reasons: Record<string, number>
+  warnings:     string[]
+  errors:       string[]
 }
 
 export interface BalanceMismatch {
@@ -143,9 +144,14 @@ export interface BalanceMismatch {
   diff:             number
 }
 
+export interface ZeroPriceProduct {
+  id:   number
+  name: string
+}
+
 export interface ValidationReport {
   balance_mismatches:  BalanceMismatch[]
-  zero_price_products: string[]
+  zero_price_products: ZeroPriceProduct[]
   order_count_ok:      boolean
   overall_ok:          boolean
 }

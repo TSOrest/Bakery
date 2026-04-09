@@ -12,7 +12,10 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models.references import Category, Client, Route
+from backend.models.finances import Finance
+from backend.models.orders import Order
+from backend.models.pricing import ClientPriceOverride, Price
+from backend.models.references import Category, Client, Product, Route, Unit
 from backend.schemas.import_accdb import (
     AccdbPreview, ImportContext, ImportMapping, ImportReport,
     ExistingClient, ExistingRoute, ExistingCategory,
@@ -41,6 +44,27 @@ def _cleanup_old_tmp() -> None:
                 f.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+@router.get("/db-status")
+def db_status(db: Session = Depends(get_db)):
+    """
+    Повертає кількість записів у всіх цільових таблицях імпорту.
+    Якщо total > 0 — БД потребує скидання перед імпортом.
+    """
+    from sqlalchemy import func as sqlfunc
+    counts = {
+        "clients":   db.query(sqlfunc.count(Client.id)).filter(Client.client_kind == "customer").scalar() or 0,
+        "products":  db.query(sqlfunc.count(Product.id)).scalar() or 0,
+        "routes":    db.query(sqlfunc.count(Route.id)).scalar() or 0,
+        "units":     db.query(sqlfunc.count(Unit.id)).scalar() or 0,
+        "prices":    db.query(sqlfunc.count(Price.id)).scalar() or 0,
+        "overrides": db.query(sqlfunc.count(ClientPriceOverride.id)).scalar() or 0,
+        "orders":    db.query(sqlfunc.count(Order.id)).scalar() or 0,
+        "finances":  db.query(sqlfunc.count(Finance.id)).scalar() or 0,
+    }
+    total = sum(counts.values())
+    return {"total": total, "counts": counts}
 
 
 @router.get("/driver-check")

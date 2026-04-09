@@ -93,8 +93,8 @@ class ImportMapping(BaseModel):
     temp_file_token:  str
     db_password:      str = ''
     transition_date:  str                           # YYYY-MM-DD
-    finance_months:   int = Field(2, ge=1, le=24)
-    order_days:       int = Field(60, ge=1, le=365)
+    finance_months:   int = Field(0, ge=0)   # 0 = вся історія
+    order_days:       int = Field(0, ge=0)   # 0 = вся історія
     route_mappings:   list[RouteMapping] = []
     category_mappings: list[CategoryMapping] = []  # замінює product_type_categories
     client_mappings:  list[ClientMapping] = []     # замінює client_kinds
@@ -105,11 +105,12 @@ class ImportMapping(BaseModel):
 # ─── Звіт ─────────────────────────────────────────────────────────────────────
 
 class EntityReport(BaseModel):
-    found:    int = 0
-    imported: int = 0
-    skipped:  int = 0
-    warnings: list[str] = []
-    errors:   list[str] = []
+    found:        int = 0
+    imported:     int = 0
+    skipped:      int = 0
+    skip_reasons: dict[str, int] = {}   # причина → кількість
+    warnings:     list[str] = []
+    errors:       list[str] = []
 
 
 class BalanceMismatch(BaseModel):
@@ -120,9 +121,14 @@ class BalanceMismatch(BaseModel):
     diff:             float
 
 
+class ZeroPriceProduct(BaseModel):
+    id:   int
+    name: str
+
+
 class ValidationReport(BaseModel):
     balance_mismatches:   list[BalanceMismatch] = []
-    zero_price_products:  list[str] = []
+    zero_price_products:  list[ZeroPriceProduct] = []
     order_count_ok:       bool = True
     overall_ok:           bool = True
 

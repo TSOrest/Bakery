@@ -407,10 +407,11 @@ function ProductsTab({
   categories: Category[]
   onReload: () => void
 }) {
-  const [modal, setModal]   = useState(false)
-  const [editing, setEditing] = useState<Product | null>(null)
-  const [form, setForm]     = useState<ProductFormState>(emptyProduct())
-  const [saving, setSaving] = useState(false)
+  const [modal, setModal]         = useState(false)
+  const [editing, setEditing]     = useState<Product | null>(null)
+  const [form, setForm]           = useState<ProductFormState>(emptyProduct())
+  const [saving, setSaving]       = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
 
   const openNew  = () => { setEditing(null); setForm(emptyProduct()); setModal(true) }
   const openEdit = (p: Product) => {
@@ -466,10 +467,30 @@ function ProductsTab({
     onReload()
   }
 
+  const activeProducts   = products.filter(p => p.is_active)
+  const inactiveProducts = products.filter(p => !p.is_active)
+
+  const renderProductRow = (p: Product) => (
+    <tr key={p.id}>
+      <Td>{p.name}</Td>
+      <Td>{p.short_name ?? '—'}</Td>
+      <Td>{categories.find((c) => c.id === p.category_id)?.name ?? '—'}</Td>
+      <Td>{p.weight ?? '—'}</Td>
+      <Td>
+        <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>
+        {p.is_active === 1 ? (
+          <button onClick={() => handleDeactivate(p)} style={delBtnStyle}>Деактивувати</button>
+        ) : (
+          <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+        )}
+      </Td>
+    </tr>
+  )
+
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Вироби ({products.length})</strong>
+        <strong>Вироби ({activeProducts.length})</strong>
         <button onClick={openNew} style={addBtnStyle}>+ Додати виріб</button>
       </div>
 
@@ -477,24 +498,32 @@ function ProductsTab({
         <thead>
           <tr style={{ background: '#e8eef5' }}>
             <Th>Назва</Th><Th>Скорочена</Th><Th>Категорія</Th>
-            <Th>Вага, кг</Th><Th>Активний</Th><Th>Дії</Th>
+            <Th>Вага, кг</Th><Th>Дії</Th>
           </tr>
         </thead>
         <tbody>
-          {products.map((p) => (
-            <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.45 }}>
+          {activeProducts.map(renderProductRow)}
+          {inactiveProducts.length > 0 && (
+            <tr>
+              <td colSpan={5} style={{ padding: '6px 10px', borderTop: '2px dashed #d1d5db' }}>
+                <button
+                  onClick={() => setShowInactive(v => !v)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 13, padding: 0 }}
+                >
+                  {showInactive ? '▲' : '▼'} Деактивовані ({inactiveProducts.length})
+                </button>
+              </td>
+            </tr>
+          )}
+          {showInactive && inactiveProducts.map(p => (
+            <tr key={p.id} style={{ opacity: 0.5, background: '#f9fafb' }}>
               <Td>{p.name}</Td>
               <Td>{p.short_name ?? '—'}</Td>
               <Td>{categories.find((c) => c.id === p.category_id)?.name ?? '—'}</Td>
               <Td>{p.weight ?? '—'}</Td>
-              <Td>{p.is_active ? '✓' : '✗'}</Td>
               <Td>
                 <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>
-                {p.is_active === 1 ? (
-                  <button onClick={() => handleDeactivate(p)} style={delBtnStyle}>Деактивувати</button>
-                ) : (
-                  <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
-                )}
+                <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
               </Td>
             </tr>
           ))}
@@ -594,6 +623,7 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
   const [form, setForm]         = useState<ClientFormState>(emptyClient())
   const [saving, setSaving]     = useState(false)
   const [botUsers, setBotUsers] = useState<BotUser[]>([])
+  const [showInactive, setShowInactive] = useState(false)
 
   // Індивідуальні ціни клієнта
   const [clientOverrides,    setClientOverrides]    = useState<ClientPriceOverride[]>([])
@@ -666,58 +696,71 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
 
   const routeName = (id: number | null) => routes.find((r) => r.id === id)?.name ?? '—'
 
+  const activeClients   = clients.filter(c => c.is_active)
+  const inactiveClients = clients.filter(c => !c.is_active)
+
+  const renderClientRow = (c: Client, dimmed = false) => (
+    <tr key={c.id} style={dimmed ? { opacity: 0.5, background: '#f9fafb' } : undefined}>
+      <Td>{c.full_name}</Td>
+      <Td>{c.short_name ?? '—'}</Td>
+      <Td>{routeName(c.route_id)}</Td>
+      <Td>{c.discount_pct}</Td>
+      <Td>{c.phone ?? '—'}</Td>
+      <Td>
+        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+        {c.is_active === 1
+          ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+          : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+        }
+      </Td>
+    </tr>
+  )
+
+  const SECTION_HEADER_STYLE: React.CSSProperties = {
+    background: '#f0f4f8', padding: '4px 10px', fontSize: 11,
+    fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase',
+  }
+
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Клієнти ({clients.length})</strong>
+        <strong>Клієнти ({activeClients.length})</strong>
         <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>
       </div>
 
       {(() => {
-        const shops     = clients.filter(c => c.client_kind === 'shop')
-        const customers = clients.filter(c => c.client_kind !== 'shop')
-        const renderRow = (c: Client) => (
-          <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
-            <Td>{c.full_name}</Td>
-            <Td>{c.short_name ?? '—'}</Td>
-            <Td>{routeName(c.route_id)}</Td>
-            <Td>{c.discount_pct}</Td>
-            <Td>{c.phone ?? '—'}</Td>
-            <Td>{c.is_active ? '✓' : '✗'}</Td>
-            <Td>
-              <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-              {c.is_active === 1
-                ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
-                : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
-              }
-            </Td>
-          </tr>
-        )
+        const activeShops     = activeClients.filter(c => c.client_kind === 'shop')
+        const activeCustomers = activeClients.filter(c => c.client_kind !== 'shop')
         return (
           <table style={tableStyle}>
             <thead>
               <tr style={{ background: '#e8eef5' }}>
                 <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
-                <Th>Знижка %</Th><Th>Телефон</Th><Th>Активний</Th><Th>Дії</Th>
+                <Th>Знижка %</Th><Th>Телефон</Th><Th>Дії</Th>
               </tr>
             </thead>
             <tbody>
-              {shops.length > 0 && (
+              {activeShops.length > 0 && (
+                <tr><td colSpan={6} style={SECTION_HEADER_STYLE}>Магазини ({activeShops.length})</td></tr>
+              )}
+              {activeShops.map(c => renderClientRow(c))}
+              {activeShops.length > 0 && activeCustomers.length > 0 && (
+                <tr><td colSpan={6} style={SECTION_HEADER_STYLE}>Клієнти ({activeCustomers.length})</td></tr>
+              )}
+              {activeCustomers.map(c => renderClientRow(c))}
+              {inactiveClients.length > 0 && (
                 <tr>
-                  <td colSpan={7} style={{ background: '#f0f4f8', padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                    Магазини ({shops.length})
+                  <td colSpan={6} style={{ padding: '6px 10px', borderTop: '2px dashed #d1d5db' }}>
+                    <button
+                      onClick={() => setShowInactive(v => !v)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 13, padding: 0 }}
+                    >
+                      {showInactive ? '▲' : '▼'} Деактивовані ({inactiveClients.length})
+                    </button>
                   </td>
                 </tr>
               )}
-              {shops.map(renderRow)}
-              {shops.length > 0 && customers.length > 0 && (
-                <tr>
-                  <td colSpan={7} style={{ background: '#f0f4f8', padding: '4px 10px', fontSize: 11, fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                    Клієнти ({customers.length})
-                  </td>
-                </tr>
-              )}
-              {customers.map(renderRow)}
+              {showInactive && inactiveClients.map(c => renderClientRow(c, true))}
             </tbody>
           </table>
         )
@@ -992,6 +1035,7 @@ function SystemClientsTab({ routes }: { routes: Route[] }) {
   const [editing, setEditing]   = useState<Client | null>(null)
   const [form, setForm]         = useState<ClientFormState>({ ...emptyClient(), client_kind: 'writeoff' })
   const [saving, setSaving]     = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
 
   const load = () => api.get<Client[]>('/clients/?active_only=false')
     .then(data => setClients(data.filter(c => c.client_kind !== 'customer' && c.client_kind !== 'shop')))
@@ -1040,38 +1084,55 @@ function SystemClientsTab({ routes }: { routes: Route[] }) {
 
   const routeName = (id: number | null) => routes.find((r) => r.id === id)?.name ?? '—'
 
+  const activeClients   = clients.filter(c => c.is_active)
+  const inactiveClients = clients.filter(c => !c.is_active)
+
+  const renderSysRow = (c: Client, dimmed = false) => (
+    <tr key={c.id} style={dimmed ? { opacity: 0.5, background: '#f9fafb' } : undefined}>
+      <Td>{c.full_name}</Td>
+      <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
+      <Td>{routeName(c.route_id)}</Td>
+      <Td>
+        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+        {c.is_active === 1 ? (
+          PROTECTED_KINDS.has(c.client_kind)
+            ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
+            : <button onClick={async () => { if (!confirm(`Деактивувати "${c.full_name}"?`)) return; await api.delete(`/clients/${c.id}`); load() }} style={delBtnStyle}>Деактивувати</button>
+        ) : (
+          <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+        )}
+      </Td>
+    </tr>
+  )
+
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Системні клієнти ({clients.length})</strong>
+        <strong>Системні клієнти ({activeClients.length})</strong>
         <button onClick={openNew} style={addBtnStyle}>+ Додати</button>
       </div>
 
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Тип</Th><Th>Маршрут</Th><Th>Активний</Th><Th>Дії</Th>
+            <Th>Назва</Th><Th>Тип</Th><Th>Маршрут</Th><Th>Дії</Th>
           </tr>
         </thead>
         <tbody>
-          {clients.map((c) => (
-            <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
-              <Td>{c.full_name}</Td>
-              <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
-              <Td>{routeName(c.route_id)}</Td>
-              <Td>{c.is_active ? '✓' : '✗'}</Td>
-              <Td>
-                <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-                {c.is_active === 1 ? (
-                  PROTECTED_KINDS.has(c.client_kind)
-                    ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
-                    : <button onClick={async () => { if (!confirm(`Деактивувати "${c.full_name}"?`)) return; await api.delete(`/clients/${c.id}`); load() }} style={delBtnStyle}>Деактивувати</button>
-                ) : (
-                  <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
-                )}
-              </Td>
+          {activeClients.map(c => renderSysRow(c))}
+          {inactiveClients.length > 0 && (
+            <tr>
+              <td colSpan={4} style={{ padding: '6px 10px', borderTop: '2px dashed #d1d5db' }}>
+                <button
+                  onClick={() => setShowInactive(v => !v)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 13, padding: 0 }}
+                >
+                  {showInactive ? '▲' : '▼'} Деактивовані ({inactiveClients.length})
+                </button>
+              </td>
             </tr>
-          ))}
+          )}
+          {showInactive && inactiveClients.map(c => renderSysRow(c, true))}
         </tbody>
       </table>
 
@@ -2248,6 +2309,7 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
   const [saving,  setSaving]  = useState(false)
   const [newName, setNewName] = useState('')
   const [error,   setError]   = useState<string | null>(null)
+  const [showInactive, setShowInactive] = useState(false)
 
   const openEdit = (c: Category) => {
     setEditing(c)
@@ -2299,11 +2361,28 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
     onReload()
   }
 
-  const sorted = [...categories].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+  const sorted         = [...categories].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+  const sortedActive   = sorted.filter(c => c.is_active)
+  const sortedInactive = sorted.filter(c => !c.is_active)
+
+  const renderCatRow = (c: Category, dimmed = false) => (
+    <tr key={c.id} style={dimmed ? { opacity: 0.5, background: '#f9fafb' } : undefined}>
+      <Td>{c.sort_order}</Td>
+      <Td>{c.name}</Td>
+      <Td>{c.is_baked ? '✓ Випікається' : '—'}</Td>
+      <Td>{c.is_baked ? `${c.reserve_pct}%` : '—'}</Td>
+      <Td>
+        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+        <button onClick={() => handleToggle(c)} style={c.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}>
+          {c.is_active ? 'Приховати' : 'Відновити'}
+        </button>
+      </Td>
+    </tr>
+  )
 
   return (
     <section>
-      <strong>Категорії (відділи) — {categories.filter((c) => c.is_active).length} активних</strong>
+      <strong>Категорії (відділи) — {sortedActive.length} активних</strong>
       <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0', flexWrap: 'wrap' }}>
         <input value={newName} onChange={(e) => { setNewName(e.target.value); setError(null) }}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
@@ -2315,25 +2394,24 @@ function CategoriesTab({ categories, onReload }: { categories: Category[]; onRel
       <table style={tableStyle}>
         <thead>
           <tr style={{ background: '#e8eef5' }}>
-            <Th>Порядок</Th><Th>Назва</Th><Th>Відділ випічки</Th><Th>Резерв, %</Th><Th>Активна</Th><Th>Дії</Th>
+            <Th>Порядок</Th><Th>Назва</Th><Th>Відділ випічки</Th><Th>Резерв, %</Th><Th>Дії</Th>
           </tr>
         </thead>
         <tbody>
-          {sorted.map((c) => (
-            <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
-              <Td>{c.sort_order}</Td>
-              <Td>{c.name}</Td>
-              <Td>{c.is_baked ? '✓ Випікається' : '—'}</Td>
-              <Td>{c.is_baked ? `${c.reserve_pct}%` : '—'}</Td>
-              <Td>{c.is_active ? '✓' : '✗'}</Td>
-              <Td>
-                <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-                <button onClick={() => handleToggle(c)} style={c.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}>
-                  {c.is_active ? 'Приховати' : 'Відновити'}
+          {sortedActive.map(c => renderCatRow(c))}
+          {sortedInactive.length > 0 && (
+            <tr>
+              <td colSpan={5} style={{ padding: '6px 10px', borderTop: '2px dashed #d1d5db' }}>
+                <button
+                  onClick={() => setShowInactive(v => !v)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 13, padding: 0 }}
+                >
+                  {showInactive ? '▲' : '▼'} Деактивовані ({sortedInactive.length})
                 </button>
-              </Td>
+              </td>
             </tr>
-          ))}
+          )}
+          {showInactive && sortedInactive.map(c => renderCatRow(c, true))}
         </tbody>
       </table>
 
@@ -2393,6 +2471,7 @@ function SimpleListTab({
   const [saving,  setSaving]        = useState(false)
   const [editItem, setEditItem]     = useState<SimpleItem | null>(null)
   const [editName, setEditName]     = useState('')
+  const [showInactive, setShowInactive] = useState(false)
 
   const handleAdd = async () => {
     const name = newName.trim()
@@ -2421,10 +2500,44 @@ function SimpleListTab({
   const active   = items.filter((i) => i.is_active)
   const inactive = items.filter((i) => !i.is_active)
 
+  const renderRow = (item: SimpleItem, dimmed = false) => (
+    <tr key={item.id} style={dimmed ? { opacity: 0.5, background: '#f9fafb' } : undefined}>
+      <Td>{item.id}</Td>
+      <Td>
+        {editItem?.id === item.id ? (
+          <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+            <input
+              autoFocus
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditItem(null) }}
+              style={{ padding: '0.2rem 0.4rem', border: '1px solid #bcd', borderRadius: '3px', fontSize: '0.9rem' }}
+            />
+            <button onClick={handleRename} style={editBtnStyle}>Зберегти</button>
+            <button onClick={() => setEditItem(null)} style={{ ...editBtnStyle, color: '#888' }}>✕</button>
+          </span>
+        ) : (
+          item.name
+        )}
+      </Td>
+      <Td>
+        {editItem?.id !== item.id && (
+          <button onClick={() => openEdit(item)} style={editBtnStyle}>Перейменувати</button>
+        )}
+        <button
+          onClick={() => handleToggleActive(item)}
+          style={item.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}
+        >
+          {item.is_active ? 'Приховати' : 'Відновити'}
+        </button>
+      </Td>
+    </tr>
+  )
+
   return (
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>{title} ({active.length} активних{inactive.length > 0 ? `, ${inactive.length} прихованих` : ''})</strong>
+        <strong>{title} ({active.length})</strong>
       </div>
 
       {/* Форма додавання */}
@@ -2448,44 +2561,25 @@ function SimpleListTab({
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
-            <tr key={item.id} style={{ opacity: item.is_active ? 1 : 0.5 }}>
-              <Td>{item.id}</Td>
-              <Td>
-                {editItem?.id === item.id ? (
-                  <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                    <input
-                      autoFocus
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditItem(null) }}
-                      style={{ padding: '0.2rem 0.4rem', border: '1px solid #bcd', borderRadius: '3px', fontSize: '0.9rem' }}
-                    />
-                    <button onClick={handleRename} style={editBtnStyle}>Зберегти</button>
-                    <button onClick={() => setEditItem(null)} style={{ ...editBtnStyle, color: '#888' }}>✕</button>
-                  </span>
-                ) : (
-                  item.name
-                )}
-              </Td>
-              <Td>
-                {editItem?.id !== item.id && (
-                  <button onClick={() => openEdit(item)} style={editBtnStyle}>Перейменувати</button>
-                )}
-                <button
-                  onClick={() => handleToggleActive(item)}
-                  style={item.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}
-                >
-                  {item.is_active ? 'Приховати' : 'Відновити'}
-                </button>
-              </Td>
-            </tr>
-          ))}
-          {items.length === 0 && (
+          {active.map(item => renderRow(item))}
+          {active.length === 0 && (
             <tr><td colSpan={3} style={{ textAlign: 'center', padding: '1rem', color: '#888' }}>
               Список порожній
             </td></tr>
           )}
+          {inactive.length > 0 && (
+            <tr>
+              <td colSpan={3} style={{ padding: '6px 10px', borderTop: '2px dashed #d1d5db' }}>
+                <button
+                  onClick={() => setShowInactive(v => !v)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: 13, padding: 0 }}
+                >
+                  {showInactive ? '▲' : '▼'} Деактивовані ({inactive.length})
+                </button>
+              </td>
+            </tr>
+          )}
+          {showInactive && inactive.map(item => renderRow(item, true))}
         </tbody>
       </table>
     </section>
