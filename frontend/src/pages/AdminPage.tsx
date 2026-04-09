@@ -1426,6 +1426,15 @@ function PricesTab({ products, clients, categories }: {
       .sort((a, b) => a.product_name.localeCompare(b.product_name, 'uk'))
   })()
 
+  // Найдавніша дата серед усіх базових цін (нижня межа слайдера)
+  const earliestPriceDate = prices.length > 0
+    ? prices.reduce((m, p) => p.valid_from < m ? p.valid_from : m, prices[0].valid_from)
+    : undefined
+
+  // Найдавніша дата серед усіх індивідуальних цін
+  const earliestOvDate = overrides.length > 0
+    ? overrides.reduce((m, o) => o.valid_from < m ? o.valid_from : m, overrides[0].valid_from)
+    : undefined
 
   // ── Редагування — замінює ціну ──────────────────────────────────────────────
   const openEdit = (priceId: number) => {
@@ -1677,45 +1686,93 @@ function PricesTab({ products, clients, categories }: {
     >{label}</button>
   )
 
-  /** Швидкий вибір тимфрейму: backMonths назад від сьогодні, fwdMonths вперед */
-  const quickRange = (
-    backMonths: number, fwdMonths: number,
-    setFrom: (v: string) => void, setTo: (v: string) => void,
-  ) => {
-    const from = new Date(); from.setMonth(from.getMonth() - backMonths)
-    const to   = new Date(); to.setMonth(to.getMonth() + fwdMonths)
-    setFrom(from.toISOString().slice(0, 10))
-    setTo(to.toISOString().slice(0, 10))
+  /**
+   * Швидкий вибір тимфрейму: рухає ТІЛЬКИ ліву межу (timeFrom).
+   * Права межа (timeTo) залишається фіксованою = today+1m або дата майбутньої ціни+1m.
+   */
+  const quickRange = (backMonths: number, setFrom: (v: string) => void) => {
+    const d = new Date(today)
+    d.setMonth(d.getMonth() - backMonths)
+    setFrom(d.toISOString().slice(0, 10))
+  }
+
+  // Кількість місяців між двома ISO датами
+  const monthsBetween = (a: string, b: string) => {
+    const da = new Date(a), db = new Date(b)
+    return (db.getFullYear() - da.getFullYear()) * 12 + db.getMonth() - da.getMonth()
   }
 
   const QUICK_PRESETS = [
-    { label: '2 міс',   back: 1,  fwd: 1  },
-    { label: '4 міс',   back: 1,  fwd: 3  },
-    { label: '6 міс',   back: 2,  fwd: 4  },
-    { label: '1 рік',   back: 3,  fwd: 9  },
-    { label: '2 роки',  back: 6,  fwd: 18 },
+    { label: '2 міс',  back: 1  },
+    { label: '4 міс',  back: 3  },
+    { label: '6 міс',  back: 5  },
+    { label: '1 рік',  back: 11 },
+    { label: '2 роки', back: 23 },
   ]
 
+  /**
+   * Панель вибору часового діапазону.
+   * earliestDate — найдавніша дата в даних (нижня межа слайдера).
+   */
   const timeframeBar = (
     from: string, setFrom: (v: string) => void,
-    to: string,   setTo:   (v: string) => void,
-  ) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-      <span style={{ fontSize: 13, color: '#64748b' }}>Період:</span>
-      <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-        style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-      <span style={{ color: '#94a3b8' }}>—</span>
-      <input type="date" value={to} onChange={e => setTo(e.target.value)}
-        style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-      {QUICK_PRESETS.map(({ label, back, fwd }) => (
-        <button key={label} onClick={() => quickRange(back, fwd, setFrom, setTo)}
-          style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #cbd5e1', borderRadius: 6,
-            background: '#f8fafc', cursor: 'pointer' }}>
-          {label}
-        </button>
-      ))}
-    </div>
-  )
+    to:   string, setTo:   (v: string) => void,
+    earliestDate?: string,
+  ) => {
+    const earliest = earliestDate ?? from
+    // Скільки місяців від найдавнішої дати до сьогодні (макс. діапазон слайдера)
+    const maxSlider = Math.max(2, monthsBetween(earliest, today))
+    // Поточне значення слайдера = скільки місяців від earliest до from
+    const sliderVal = Math.min(maxSlider, Math.max(0, monthsBetween(earliest, from)))
+
+    return (
+      <div style={{ marginBottom: 12 }}>
+        {/* Рядок з датами + кнопки */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+          <span style={{ fontSize: 13, color: '#64748b' }}>Період:</span>
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+            style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          <span style={{ color: '#94a3b8' }}>—</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)}
+            style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          {QUICK_PRESETS.map(({ label, back }) => (
+            <button key={label} onClick={() => quickRange(back, setFrom)}
+              style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #cbd5e1', borderRadius: 6,
+                background: '#f8fafc', cursor: 'pointer' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Слайдер глибини історії */}
+        {earliestDate && maxSlider > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52, textAlign: 'right' }}>
+              {earliest.slice(0, 7)}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={maxSlider}
+              value={sliderVal}
+              onChange={e => {
+                const v = Number(e.target.value)
+                const d = new Date(earliest)
+                d.setMonth(d.getMonth() + v)
+                setFrom(d.toISOString().slice(0, 10))
+              }}
+              style={{ flex: 1, cursor: 'pointer', accentColor: '#2563eb' }}
+            />
+            <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52 }}>
+              {today.slice(0, 7)}
+            </span>
+            <span style={{ fontSize: 11, color: '#2563eb', minWidth: 56, fontWeight: 500 }}>
+              ↤ {from.slice(0, 7)}
+            </span>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <section>
@@ -1747,7 +1804,7 @@ function PricesTab({ products, clients, categories }: {
             </div>
           </div>
 
-          {timeframeBar(timeFrom, setTimeFrom, timeTo, setTimeTo)}
+          {timeframeBar(timeFrom, setTimeFrom, timeTo, setTimeTo, earliestPriceDate)}
 
           <PriceGantt
             rows={ganttRows}
@@ -2174,7 +2231,7 @@ function PricesTab({ products, clients, categories }: {
                   </div>
                   {isExpanded && (
                     <div style={{ padding: '8px 0 4px' }}>
-                      {timeframeBar(ovTimeFrom, setOvTimeFrom, ovTimeTo, setOvTimeTo)}
+                      {timeframeBar(ovTimeFrom, setOvTimeFrom, ovTimeTo, setOvTimeTo, earliestOvDate)}
                       <PriceGantt
                         rows={ovGanttRows}
                         timeFrom={ovTimeFrom}
