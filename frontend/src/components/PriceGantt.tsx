@@ -34,6 +34,13 @@ function daysBetween(a: string, b: string): number {
   return (new Date(b).getTime() - new Date(a).getTime()) / 86_400_000
 }
 
+/** valid_to є включним — бар має закінчуватись на початку НАСТУПНОГО дня. */
+function nextDay(iso: string): string {
+  const d = new Date(iso)
+  d.setDate(d.getDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
 function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v))
 }
@@ -255,8 +262,9 @@ const PriceGantt: React.FC<PriceGanttProps> = ({
             )}
             {row.prices.map(seg => {
               const startPct = toPct(seg.valid_from)
-              const endPct   = toPct(seg.valid_to ?? timeTo)
-              const width    = Math.max(endPct - startPct, 0.4)
+              // valid_to включний: відображаємо до початку наступного дня → no gap між суміжними барами
+              const endPct   = toPct(seg.valid_to ? nextDay(seg.valid_to) : timeTo)
+              const width    = Math.max(endPct - startPct, 0.3)
               const isPast    = (seg.valid_to ?? '9999-12-31') < today
               const isFuture  = seg.valid_from > today
               const isCurrent = !isPast && !isFuture
