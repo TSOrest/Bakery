@@ -69,9 +69,9 @@ function PriceTooltip({ row, x, y, today }: {
   const sorted = [...row.prices].sort((a, b) => a.valid_from.localeCompare(b.valid_from))
   if (sorted.length === 0) return null
 
-  const SVG_W = 220
-  const SVG_H = 90
-  const PAD   = { top: 8, right: 8, bottom: 20, left: 40 }
+  const SVG_W = 440
+  const SVG_H = 180
+  const PAD   = { top: 12, right: 12, bottom: 24, left: 46 }
   const plotW = SVG_W - PAD.left - PAD.right
   const plotH = SVG_H - PAD.top - PAD.bottom
 
@@ -111,8 +111,8 @@ function PriceTooltip({ row, x, y, today }: {
   ) ?? sorted[sorted.length - 1]
 
   // Clamp tooltip to viewport
-  const TW = 256
-  const TH = 160
+  const TW = 480
+  const TH = 260
   const tx = Math.min(x + 14, window.innerWidth  - TW - 8)
   const ty = Math.min(y - TH / 2, window.innerHeight - TH - 8)
 
@@ -242,7 +242,6 @@ const PriceGantt: React.FC<PriceGanttProps> = ({
         <div key={row.product_id} className={styles.row}>
           <div
             className={styles.rowLabel}
-            title={row.product_name}
             onMouseEnter={e => setTooltip({ row, x: e.clientX, y: e.clientY })}
             onMouseMove={e => setTooltip(t => t ? { ...t, x: e.clientX, y: e.clientY } : null)}
             onMouseLeave={() => setTooltip(null)}
