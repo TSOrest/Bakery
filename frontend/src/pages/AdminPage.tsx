@@ -1317,15 +1317,26 @@ function PricesTab({ products, clients, categories }: {
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState('')
 
-  // Timeframe для Gantt
+  // Timeframe для Gantt — за замовчуванням: -1 місяць … +1 місяць
   const defaultTimeFrom = (() => {
-    const d = new Date(); d.setMonth(d.getMonth() - 3); return d.toISOString().slice(0, 10)
+    const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 10)
   })()
   const defaultTimeTo = (() => {
-    const d = new Date(); d.setMonth(d.getMonth() + 6); return d.toISOString().slice(0, 10)
+    const d = new Date(); d.setMonth(d.getMonth() + 1); return d.toISOString().slice(0, 10)
   })()
   const [timeFrom, setTimeFrom] = useState(defaultTimeFrom)
   const [timeTo,   setTimeTo]   = useState(defaultTimeTo)
+  // Авто-розширення timeTo при першому завантаженні: якщо є ціни далі за timeTo
+  const pricesAutoExtended = useRef(false)
+  useEffect(() => {
+    if (prices.length === 0 || pricesAutoExtended.current) return
+    pricesAutoExtended.current = true
+    const maxDate = prices.reduce((m, p) => p.valid_from > m ? p.valid_from : m, '')
+    if (!maxDate || maxDate <= today) return
+    const d = new Date(maxDate); d.setDate(d.getDate() + 14)
+    const smartTo = d.toISOString().slice(0, 10)
+    setTimeTo(prev => smartTo > prev ? smartTo : prev)
+  }, [prices]) // eslint-disable-line
 
   // ── Масова зміна (новий стан) ──
   const [bulkDate, setBulkDate]   = useState(tomorrow)
@@ -1339,6 +1350,16 @@ function PricesTab({ products, clients, categories }: {
   const [expandedClient,   setExpandedClient]   = useState<number | null>(null)
   const [ovTimeFrom,       setOvTimeFrom]       = useState(defaultTimeFrom)
   const [ovTimeTo,         setOvTimeTo]         = useState(defaultTimeTo)
+  const ovAutoExtended = useRef(false)
+  useEffect(() => {
+    if (overrides.length === 0 || ovAutoExtended.current) return
+    ovAutoExtended.current = true
+    const maxDate = overrides.reduce((m, p) => p.valid_from > m ? p.valid_from : m, '')
+    if (!maxDate || maxDate <= today) return
+    const d = new Date(maxDate); d.setDate(d.getDate() + 14)
+    const smartTo = d.toISOString().slice(0, 10)
+    setOvTimeTo(prev => smartTo > prev ? smartTo : prev)
+  }, [overrides]) // eslint-disable-line
   const [ovModalClient,    setOvModalClient]    = useState('')
   const [ovModalValidFrom, setOvModalValidFrom] = useState(tomorrow)
   const [ovModalValidTo,   setOvModalValidTo]   = useState('')
@@ -1656,13 +1677,24 @@ function PricesTab({ products, clients, categories }: {
     >{label}</button>
   )
 
-  /** Швидкий вибір тимфрейму */
-  const quickRange = (months: number, setFrom: (v: string) => void, setTo: (v: string) => void) => {
-    const from = new Date(); from.setMonth(from.getMonth() - Math.floor(months / 3))
-    const to   = new Date(); to.setMonth(to.getMonth() + Math.ceil(months * 2 / 3))
+  /** Швидкий вибір тимфрейму: backMonths назад від сьогодні, fwdMonths вперед */
+  const quickRange = (
+    backMonths: number, fwdMonths: number,
+    setFrom: (v: string) => void, setTo: (v: string) => void,
+  ) => {
+    const from = new Date(); from.setMonth(from.getMonth() - backMonths)
+    const to   = new Date(); to.setMonth(to.getMonth() + fwdMonths)
     setFrom(from.toISOString().slice(0, 10))
     setTo(to.toISOString().slice(0, 10))
   }
+
+  const QUICK_PRESETS = [
+    { label: '2 міс',   back: 1,  fwd: 1  },
+    { label: '4 міс',   back: 1,  fwd: 3  },
+    { label: '6 міс',   back: 2,  fwd: 4  },
+    { label: '1 рік',   back: 3,  fwd: 9  },
+    { label: '2 роки',  back: 6,  fwd: 18 },
+  ]
 
   const timeframeBar = (
     from: string, setFrom: (v: string) => void,
@@ -1675,8 +1707,8 @@ function PricesTab({ products, clients, categories }: {
       <span style={{ color: '#94a3b8' }}>—</span>
       <input type="date" value={to} onChange={e => setTo(e.target.value)}
         style={{ fontSize: 13, padding: '3px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
-      {[{ label: '6 міс', m: 6 }, { label: '1 рік', m: 12 }, { label: '2 роки', m: 24 }].map(({ label, m }) => (
-        <button key={m} onClick={() => quickRange(m, setFrom, setTo)}
+      {QUICK_PRESETS.map(({ label, back, fwd }) => (
+        <button key={label} onClick={() => quickRange(back, fwd, setFrom, setTo)}
           style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #cbd5e1', borderRadius: 6,
             background: '#f8fafc', cursor: 'pointer' }}>
           {label}

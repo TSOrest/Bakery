@@ -29,13 +29,18 @@
 .row:hover { background: #fafbfc; }
 
 .rowLabel {
-  flex: 0 0 200px;
+  flex: 0 0 240px;
   padding: 4px 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #1e293b;
   border-right: 1px solid #e2e8f0;
+  cursor: default;
+}
+/* Subtle underline hint that the label is hoverable */
+.row .rowLabel:hover {
+  color: #2563eb;
 }
 
 .barArea {
@@ -80,13 +85,26 @@
   white-space: nowrap;
 }
 
+/* Today line in header */
 .todayLine {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
   background: #ef4444;
-  opacity: 0.7;
+  opacity: 0.75;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Today line inside data rows (slightly lighter so bars remain readable) */
+.todayLineRow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ef4444;
+  opacity: 0.35;
   pointer-events: none;
   z-index: 2;
 }
@@ -97,7 +115,7 @@
   position: absolute;
   top: 6px;
   bottom: 6px;
-  background: #94a3b8; /* базовий (не класифікований) */
+  background: #94a3b8;
   border-radius: 4px;
   overflow: hidden;
   display: flex;
@@ -106,8 +124,10 @@
   cursor: default;
   min-width: 2px;
   transition: opacity 0.12s;
+  /* Thin white inset border to visually separate adjacent bars */
+  box-shadow: inset 1.5px 0 0 rgba(255,255,255,0.65), inset -1.5px 0 0 rgba(255,255,255,0.35);
 }
-.bar:hover { opacity: 0.85; }
+.bar:hover { opacity: 0.82; }
 
 /* Минула ціна */
 .barPast {
@@ -124,7 +144,7 @@
   background: #f59e0b;
 }
 .barFuture .barLabel {
-  color: #1c1917; /* темний текст для кращої читабельності на жовтому */
+  color: #1c1917;
 }
 
 .barLabel {
