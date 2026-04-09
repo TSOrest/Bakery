@@ -548,7 +548,7 @@ INSERT INTO settings VALUES
   - `rollback.ps1`: приймає `-TargetTag`; якщо не вказаний — читає `PREVIOUS_VERSION`
   - вибір версії відкату через PowerShell `Out-GridView` (список локальних git-тегів)
   - автоматичний бекап `bakery.db` перед оновленням і відкатом (`bakery.db.bak-VERSION-TIMESTAMP`)
-- [x] Dev-режим: `start-dev.bat` (uvicorn --reload + Vite HMR, polling для мережевого диску)
+- [x] Dev-режим: `start-dev.bat` (uvicorn --reload + Vite HMR)
 - [x] `scripts/release.ps1` — автоматизований реліз: оновлює `VERSION`, комітить, пушить, створює GitHub Release через REST API
 - [x] `scripts/create-installer.ps1` — генерує `Bakery-Setup.ps1` з вбудованими токенами (git clone + install + write ISSUES_TOKEN до БД)
 - [x] Система звернень (Issues): `backend/routers/issues.py` проксує GitHub Issues API; `IssuesWidget.tsx` — плаваюча кнопка 💬 на всіх сторінках; токен зберігається в БД, ніколи не потрапляє у браузер
@@ -679,9 +679,8 @@ INSERT INTO settings VALUES
 - SQLite — один файл, повністю офлайн
 - Друк через браузер на лазерний принтер (PDF)
 - Кілька операторів одночасно (локальна мережа)
-- Windows-середовище, проект може лежати на мережевому диску (Z:)
-  - Vite: `usePolling: true` для chokidar на мережевому диску
-  - Task Scheduler замість NSSM (NSSM з SYSTEM не бачить мережеві диски)
+- Windows-середовище, проект на локальному диску
+  - Task Scheduler (AtLogon) для автозапуску сервера і трею
   - `pythonw.exe` для запуску трею без консольного вікна
 - Майбутня підтримка кількох магазинів (архітектурно врахувати)
 - Міграція зі старої бази: клієнти, вироби, ціни, замовлення, рухи, фінанси
