@@ -134,6 +134,7 @@ export interface EntityReport {
   skip_reasons: Record<string, number>
   warnings:     string[]
   errors:       string[]
+  notes:        string
 }
 
 export interface BalanceMismatch {

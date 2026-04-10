@@ -928,6 +928,9 @@ function StepExecution({
                 {ep.skipped > 0 ? ep.skipped : '—'}
               </td>
               <td style={TD}>
+                {ep.notes && (
+                  <div style={{ color: '#1d4ed8', fontSize: '0.82rem', marginBottom: 2 }}>{ep.notes}</div>
+                )}
                 {ep.skipped > 0 && Object.keys(ep.skip_reasons ?? {}).length > 0 && (
                   <details>
                     <summary style={{ color: '#b45309', cursor: 'pointer', fontSize: '0.82rem' }}>

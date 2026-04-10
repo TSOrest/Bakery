@@ -265,8 +265,13 @@ def broadcast_deadline(order_date: Optional[str] = None, db: Session = Depends(g
 # ── Статус прийому замовлень ─────────────────────────────────────────────────
 
 def _bot_accepting(db: Session) -> tuple[bool, str]:
-    """Повертає (accepting, closed_until_iso). Якщо closed_until в майбутньому — не приймаємо."""
+    """Повертає (accepting, closed_until_iso).
+    False якщо: бот вимкнений (bot_enabled=0) або closed_until в майбутньому.
+    """
     from datetime import datetime
+    # Бот вимкнений адміністратором
+    if _get_setting(db, "bot_enabled", "1") == "0":
+        return False, ""
     closed_until = _get_setting(db, "bot_orders_closed_until", "")
     if closed_until:
         try:
@@ -280,8 +285,13 @@ def _bot_accepting(db: Session) -> tuple[bool, str]:
 @router.get("/order-status")
 def get_order_status(db: Session = Depends(get_db)):
     """Чи приймає бот замовлення зараз."""
+    from backend.services.telegram_bot import bot_is_running
     accepting, closed_until = _bot_accepting(db)
-    return {"accepting": accepting, "closed_until": closed_until or None}
+    return {
+        "accepting": accepting,
+        "closed_until": closed_until or None,
+        "bot_running": bot_is_running(),
+    }
 
 
 @router.post("/order-status/stop")

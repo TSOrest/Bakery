@@ -109,7 +109,7 @@ export default function OrdersPage() {
   const [printNotice,       setPrintNotice]       = useState<string | null>(null)
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false)
 
-  const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null } | null>(null)
+  const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null; bot_running?: boolean } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
   const [lockedClientIds,  setLockedClientIds]  = useState<Set<number>>(new Set())
   const [expandedIds,      setExpandedIds]      = useState<Set<number>>(new Set())
@@ -387,7 +387,12 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       if (rOrd !== 0) return rOrd
       const cName = (ca?.short_name ?? ca?.full_name ?? '').localeCompare(cb?.short_name ?? cb?.full_name ?? '', 'uk')
       if (cName !== 0) return cName
-      return (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
+      const pName = (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
+      if (pName !== 0) return pName
+      // Однаковий продукт: основний рядок перед exchange/discount
+      const aMain = a.exchange_type === 'none' && a.price_override == null ? 0 : 1
+      const bMain = b.exchange_type === 'none' && b.price_override == null ? 0 : 1
+      return aMain - bMain
     })
 
   const routeBadge = (routeId: number | null) => {
@@ -465,34 +470,50 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
               )}
             </div>
           )}
-          <button
-            className={styles.btnBaking}
-            disabled={broadcastLoading}
-            title="Нагадати клієнтам у боті, що не подали замовлення на вибрану дату"
-            onClick={() => handleBroadcast('reminder')}
-          >🔔 Нагадування</button>
           {botStatus && (
             <>
-              <span
-                className={botStatus.accepting ? styles.botStatusOn : styles.botStatusOff}
-                title={botStatus.accepting ? 'Бот приймає замовлення' : `Прийом зупинено до ${botStatus.closed_until?.slice(11, 16) ?? '—'}`}
-              >
-                {botStatus.accepting ? '● Бот — прийом відкрито' : '● Бот — прийом зупинено'}
-              </span>
-              {botStatus.accepting ? (
-                <button
-                  className={`${styles.btnBaking} ${styles.btnBotStop}`}
-                  disabled={botStatusLoading}
-                  title="Зупинити прийом замовлень через бота до ранку наступного дня"
-                  onClick={handleBotStop}
-                >🚫 Стоп-прийом</button>
+              {/* ── Розділювач між блоком друку і блоком бота ── */}
+              <div className={styles.botSeparator} />
+
+              {botStatus.bot_running === false ? (
+                /* Бот вимкнений в налаштуваннях — тільки сірий статус */
+                <span className={styles.botStatusDisabled} title="Telegram бот вимкнений в налаштуваннях">
+                  ● Бот — вимкнений
+                </span>
               ) : (
-                <button
-                  className={`${styles.btnBaking} ${styles.btnBotResume}`}
-                  disabled={botStatusLoading}
-                  title="Відновити прийом замовлень через бота"
-                  onClick={handleBotResume}
-                >▶ Відновити прийом</button>
+                <>
+                  <span
+                    className={botStatus.accepting ? styles.botStatusOn : styles.botStatusOff}
+                    title={
+                      botStatus.accepting ? 'Бот приймає замовлення' :
+                      botStatus.closed_until ? `Прийом зупинено до ${botStatus.closed_until.slice(11, 16)}` :
+                      'Прийом замовлень вимкнено'
+                    }
+                  >
+                    {botStatus.accepting ? '● Бот — прийом відкрито' : '● Бот — прийом зупинено'}
+                  </span>
+                  <button
+                    className={styles.btnBaking}
+                    disabled={broadcastLoading}
+                    title="Нагадати клієнтам у боті, що не подали замовлення на вибрану дату"
+                    onClick={() => handleBroadcast('reminder')}
+                  >🔔 Нагадування</button>
+                  {botStatus.accepting ? (
+                    <button
+                      className={`${styles.btnBaking} ${styles.btnBotStop}`}
+                      disabled={botStatusLoading}
+                      title="Зупинити прийом замовлень через бота до ранку наступного дня"
+                      onClick={handleBotStop}
+                    >🚫 Стоп-прийом</button>
+                  ) : (
+                    <button
+                      className={`${styles.btnBaking} ${styles.btnBotResume}`}
+                      disabled={botStatusLoading}
+                      title="Відновити прийом замовлень через бота"
+                      onClick={handleBotResume}
+                    >▶ Відновити прийом</button>
+                  )}
+                </>
               )}
             </>
           )}

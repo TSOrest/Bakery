@@ -1050,6 +1050,18 @@ def _polling_loop(token: str, stop: threading.Event) -> None:
 
 # ── Публічний API ─────────────────────────────────────────────────────────────
 
+def _set_bot_enabled(enabled: bool) -> None:
+    """Зберігає стан бота (enabled/disabled) в налаштуваннях, щоб пережити рестарт."""
+    with SessionLocal() as db:
+        row = db.get(Setting, "bot_enabled")
+        if row:
+            row.value = "1" if enabled else "0"
+        else:
+            db.add(Setting(key="bot_enabled", value="1" if enabled else "0",
+                           description="Telegram бот запущений (1/0)"))
+        db.commit()
+
+
 def start_bot(token: str) -> None:
     global _bot_thread, _stop_event
     if _bot_thread and _bot_thread.is_alive():
@@ -1062,6 +1074,7 @@ def start_bot(token: str) -> None:
         name="telegram-bot",
     )
     _bot_thread.start()
+    _set_bot_enabled(True)
 
 
 def stop_bot() -> None:
@@ -1070,6 +1083,7 @@ def stop_bot() -> None:
     if _bot_thread:
         _bot_thread.join(timeout=5)
         _bot_thread = None
+    _set_bot_enabled(False)
 
 
 def restart_bot(token: str) -> None:
@@ -1084,7 +1098,12 @@ def bot_is_running() -> bool:
 
 def init_bot_from_settings() -> None:
     token = _get_token()
-    if token:
-        start_bot(token)
-    else:
+    if not token:
         log.info("Telegram bot token not set — bot disabled")
+        return
+    with SessionLocal() as db:
+        enabled = _get_setting(db, "bot_enabled", "1")  # за замовчуванням увімкнений
+    if enabled == "0":
+        log.info("Telegram bot is disabled (bot_enabled=0) — not starting")
+        return
+    start_bot(token)

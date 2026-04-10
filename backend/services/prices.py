@@ -46,12 +46,13 @@ def get_price(
     if override:
         return override.price
 
-    # 3 & 4. Базова ціна — шукаємо найактуальнішу
+    # 3 & 4. Базова ціна — шукаємо найактуальнішу за діапазоном дат.
+    # Не фільтруємо по is_active: він позначає лише "останній запис", але поточний
+    # запис може бути is_active=0, якщо є майбутня ціна зі старшим valid_from.
     base_price_row = (
         db.query(Price)
         .filter(
             Price.product_id == product_id,
-            Price.is_active == 1,
             Price.valid_from <= date,
         )
         .filter(
@@ -106,7 +107,6 @@ def get_price_with_source(
         db.query(Price)
         .filter(
             Price.product_id == product_id,
-            Price.is_active == 1,
             Price.valid_from <= date,
         )
         .filter(

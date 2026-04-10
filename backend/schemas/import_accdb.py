@@ -111,6 +111,7 @@ class EntityReport(BaseModel):
     skip_reasons: dict[str, int] = {}   # причина → кількість
     warnings:     list[str] = []
     errors:       list[str] = []
+    notes:        str = ""
 
 
 class BalanceMismatch(BaseModel):

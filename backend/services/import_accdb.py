@@ -129,6 +129,7 @@ _EXACT_COLS: dict[str, dict[str, str]] = {
         "product_id": "Код Виробу",
         "qty":        "Кількість",
         "date":       "На Дату",
+        # "Обмін" читається окремо через _ORDER_EXCHANGE_COL
     },
     "finances": {
         "article_id": "Стаття",
@@ -148,6 +149,9 @@ _EXACT_COLS: dict[str, dict[str, str]] = {
         "end_balance": "EndBalance",
     },
 }
+
+# Точна назва колонки обміну в таблиці ^Закази
+_ORDER_EXCHANGE_COL = "Обмін"
 
 # Описи полів (Ukrainian) для відображення у Preview
 _COL_DESC: dict[str, dict[str, str]] = {
@@ -173,6 +177,7 @@ _COL_DESC: dict[str, dict[str, str]] = {
     "orders":   {
         "client_id": "Клієнт", "product_id": "Виріб",
         "qty": "Кількість", "date": "Дата замовлення",
+        "exchange_qty": "К-сть обміну (Обмін)",
     },
     "finances": {
         "article_id": "Стаття (тип операції)", "client_id": "Контрагент",
@@ -641,6 +646,72 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
         suggested_route_skips=suggested_route_skips,
         suggested_non_customers=suggested_non_customers,
     )
+
+
+# ─── Створення архівних накладних з імпортованих замовлень ───────────────────
+
+def _create_historical_invoices(
+    db: Session,
+    orders: list[Order],
+) -> tuple[int, int]:
+    """Групує імпортовані замовлення по (client_id, order_date) і створює накладні.
+    Статус одразу 'accepted'. НЕ викликає create_invoice_finance_entry — фінанси
+    вже імпортовані з ^Баланс, дублювати не потрібно.
+    Повертає (кількість накладних, кількість рядків накладних)."""
+    from collections import defaultdict
+
+    from backend.models.invoices import Invoice, InvoiceLine
+    from backend.services.invoices import generate_invoice_number
+    from backend.services.prices import get_price
+
+    if not orders:
+        return 0, 0
+
+    # Кешуємо route_id клієнтів щоб не звертатись до БД у циклі
+    cids = {o.client_id for o in orders}
+    route_of: dict[int, int | None] = {
+        c.id: c.route_id
+        for c in db.query(Client).filter(Client.id.in_(cids)).all()
+    }
+
+    # Групуємо по (client_id, order_date), сортуємо по даті щоб номери Invoice зростали
+    groups: dict[tuple[int, str], list[Order]] = defaultdict(list)
+    for o in orders:
+        if o.qty and o.qty > 0:
+            groups[(o.client_id, o.order_date)].append(o)
+
+    inv_count = line_count = 0
+    for (client_id, order_date), grp in sorted(groups.items(), key=lambda x: x[0][1]):
+        inv_num = generate_invoice_number(db, order_date)
+        inv = Invoice(
+            invoice_number=inv_num,
+            invoice_date=order_date,
+            client_id=client_id,
+            route_id=route_of.get(client_id),
+            status="accepted",
+            total_sum=0.0,
+        )
+        db.add(inv)
+        db.flush()  # отримуємо inv.id
+
+        total = 0.0
+        for o in grp:
+            price = o.price_override or get_price(db, o.product_id, client_id, order_date) or 0.0
+            line_sum = round(o.qty * price, 2)
+            db.add(InvoiceLine(
+                invoice_id=inv.id,
+                product_id=o.product_id,
+                qty=o.qty,
+                price=price,
+                sum=line_sum,
+            ))
+            total += line_sum
+            line_count += 1
+
+        inv.total_sum = round(total, 2)
+        inv_count += 1
+
+    return inv_count, line_count
 
 
 # ─── Full import ──────────────────────────────────────────────────────────────
@@ -1154,9 +1225,13 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             # ── 7. Замовлення (^Закази) ───────────────────────────────────────
             _update_state(step="Замовлення", progress=55)
             ep = EntityReport()
+            order_objs: list[Order] = []
             order_tname = _find_table_for("orders", tables)
             if order_tname:
-                cm = _cols_for("orders", reader.columns(order_tname))
+                actual_order_cols = reader.columns(order_tname)
+                cm = _cols_for("orders", actual_order_cols)
+                has_exchange_col = _ORDER_EXCHANGE_COL in actual_order_cols
+                ep_exchange_count = 0
                 for row in reader.rows(order_tname):
                     ep.found += 1
                     date_val = _safe_date(row.get(cm.get("date", "")) if cm.get("date") else None)
@@ -1193,12 +1268,37 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         ep.skip_reasons["Кількість = 0"] = ep.skip_reasons.get("Кількість = 0", 0) + 1
                         continue
 
-                    db.add(Order(
+                    o = Order(
                         client_id=client_id, product_id=prod_id,
                         qty=qty, order_date=date_val,
                         source="phone", created_at=now_str, created_by="import",
-                    ))
+                    )
+                    order_objs.append(o)
+                    db.add(o)
                     ep.imported += 1
+
+                    # Обмін: якщо є колонка і значення > 0 — окремий рядок pre_order
+                    if has_exchange_col:
+                        exch_qty = _safe_float(row.get(_ORDER_EXCHANGE_COL)) or 0
+                        if exch_qty > 0:
+                            db.add(Order(
+                                client_id=client_id, product_id=prod_id,
+                                qty=exch_qty, order_date=date_val,
+                                exchange_type="pre_order",
+                                price_override=0.0,
+                                source="phone", created_at=now_str, created_by="import",
+                            ))
+                            ep_exchange_count += 1
+
+            # Flush щоб orders отримали id, потім створюємо архівні накладні.
+            # НЕ викликаємо create_invoice_finance_entry — фінанси вже є з ^Баланс.
+            if order_objs:
+                db.flush()
+                _update_state(step="Створення накладних", progress=62)
+                inv_count, inv_lines = _create_historical_invoices(db, order_objs)
+                exch_note = f", обмінів: {ep_exchange_count}" if ep_exchange_count else ""
+                ep.notes = f"Створено {inv_count} накладних ({inv_lines} рядків{exch_note})"
+
             entities["orders"] = ep
 
             # ── 8. Фінансові операції (^Баланс) ──────────────────────────────

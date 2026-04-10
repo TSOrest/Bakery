@@ -35,7 +35,7 @@ interface TabGroup {
   tabs: { key: Tab; label: string }[]
 }
 
-export const ADMIN_TAB_GROUPS: TabGroup[] = [
+const ADMIN_TAB_GROUPS: TabGroup[] = [
   {
     label: 'Виробництво',
     permKey: 'admin_goods',
@@ -126,7 +126,7 @@ export default function AdminPage() {
   const reloadCategories = () => api.get<Category[]>('/categories?active_only=false').then(setCategories)
 
   return (
-    <div style={{ padding: '1.5rem', display: 'flex', gap: 0, minHeight: 'calc(100vh - 80px)' }}>
+    <div style={{ padding: '1.5rem', display: 'flex', gap: 0, height: '100%', overflow: 'hidden', boxSizing: 'border-box' }}>
 
       {/* ── Вертикальний сайдбар ────────────────────────────────────────────── */}
       <nav style={{
@@ -135,6 +135,8 @@ export default function AdminPage() {
         paddingRight: '0.75rem',
         marginRight: '1.75rem',
         paddingTop: '0.25rem',
+        overflowY: 'auto',
+        height: '100%',
       }}>
         {visibleGroups.map(group => (
           <div key={group.label} style={{ marginBottom: '1.1rem' }}>
@@ -211,7 +213,7 @@ export default function AdminPage() {
       </nav>
 
       {/* ── Контент ─────────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', height: '100%' }}>
         {activeTab === 'products' && (
           <ProductsTab products={products} units={units} categories={categories} onReload={reloadProducts} />
         )}
@@ -412,6 +414,11 @@ function ProductsTab({
   const [form, setForm]           = useState<ProductFormState>(emptyProduct())
   const [saving, setSaving]       = useState(false)
   const [showInactive, setShowInactive] = useState(false)
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const [theadTop, setTheadTop] = useState(50)
+  useEffect(() => {
+    if (controlsRef.current) setTheadTop(controlsRef.current.offsetHeight)
+  })
 
   const openNew  = () => { setEditing(null); setForm(emptyProduct()); setModal(true) }
   const openEdit = (p: Product) => {
@@ -489,16 +496,21 @@ function ProductsTab({
 
   return (
     <section>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Вироби ({activeProducts.length})</strong>
-        <button onClick={openNew} style={addBtnStyle}>+ Додати виріб</button>
+      <div ref={controlsRef} style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white', paddingBottom: 6, marginBottom: 2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <strong>Вироби ({activeProducts.length})</strong>
+          <button onClick={openNew} style={addBtnStyle}>+ Додати виріб</button>
+        </div>
       </div>
 
       <table style={tableStyle}>
         <thead>
-          <tr style={{ background: '#e8eef5' }}>
-            <Th>Назва</Th><Th>Скорочена</Th><Th>Категорія</Th>
-            <Th>Вага, кг</Th><Th>Дії</Th>
+          <tr>
+            <Th top={theadTop}>Назва</Th>
+            <Th top={theadTop}>Скорочена</Th>
+            <Th top={theadTop}>Категорія</Th>
+            <Th top={theadTop}>Вага, кг</Th>
+            <Th top={theadTop}>Дії</Th>
           </tr>
         </thead>
         <tbody>
@@ -624,6 +636,11 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
   const [saving, setSaving]     = useState(false)
   const [botUsers, setBotUsers] = useState<BotUser[]>([])
   const [showInactive, setShowInactive] = useState(false)
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const [theadTop, setTheadTop] = useState(50)
+  useEffect(() => {
+    if (controlsRef.current) setTheadTop(controlsRef.current.offsetHeight)
+  })
 
   // Індивідуальні ціни клієнта
   const [clientOverrides,    setClientOverrides]    = useState<ClientPriceOverride[]>([])
@@ -723,9 +740,11 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
 
   return (
     <section>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <strong>Клієнти ({activeClients.length})</strong>
-        <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>
+      <div ref={controlsRef} style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white', paddingBottom: 6, marginBottom: 2 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <strong>Клієнти ({activeClients.length})</strong>
+          <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>
+        </div>
       </div>
 
       {(() => {
@@ -734,9 +753,13 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
         return (
           <table style={tableStyle}>
             <thead>
-              <tr style={{ background: '#e8eef5' }}>
-                <Th>Назва</Th><Th>Скорочена</Th><Th>Маршрут</Th>
-                <Th>Знижка %</Th><Th>Телефон</Th><Th>Дії</Th>
+              <tr>
+                <Th top={theadTop}>Назва</Th>
+                <Th top={theadTop}>Скорочена</Th>
+                <Th top={theadTop}>Маршрут</Th>
+                <Th top={theadTop}>Знижка %</Th>
+                <Th top={theadTop}>Телефон</Th>
+                <Th top={theadTop}>Дії</Th>
               </tr>
             </thead>
             <tbody>
@@ -1776,36 +1799,52 @@ function PricesTab({ products, clients, categories }: {
 
   return (
     <section>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        {tabBtn('base', 'Базові ціни')}
-        {tabBtn('overrides', 'Індивідуальні ціни клієнтів')}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white', paddingBottom: 4 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {tabBtn('base', 'Базові ціни')}
+          {tabBtn('overrides', 'Індивідуальні ціни клієнтів')}
+        </div>
+
+        {/* ── Базові ціни — контролери ── */}
+        {innerTab === 'base' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
+              <strong style={{ fontSize: 14 }}>
+                Ціни ({ganttRows.length} виробів)
+                {productsWithoutPrice.length > 0 && (
+                  <span style={{ color: '#e67e22', fontWeight: 400, marginLeft: 8 }}>
+                    ⚠ {productsWithoutPrice.length} без ціни
+                  </span>
+                )}
+              </strong>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setBulkModal(true); setError('') }}
+                  style={{ ...addBtnStyle, background: '#e67e22' }}>
+                  % Масова зміна
+                </button>
+                <button onClick={() => { setNewModal(true); setError('') }} style={addBtnStyle}>
+                  + Нова ціна
+                </button>
+              </div>
+            </div>
+
+            {timeframeBar(timeFrom, setTimeFrom, timeTo, setTimeTo, earliestPriceDate)}
+          </>
+        )}
+
+        {/* ── Індивідуальні ціни — контролери ── */}
+        {innerTab === 'overrides' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button onClick={() => openOverrideModal()} style={addBtnStyle}>
+              + Встановити індивідуальні ціни
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ── Базові ціни ── */}
+      {/* ── Базові ціни — список ── */}
       {innerTab === 'base' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 8 }}>
-            <strong style={{ fontSize: 14 }}>
-              Ціни ({ganttRows.length} виробів)
-              {productsWithoutPrice.length > 0 && (
-                <span style={{ color: '#e67e22', fontWeight: 400, marginLeft: 8 }}>
-                  ⚠ {productsWithoutPrice.length} без ціни
-                </span>
-              )}
-            </strong>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setBulkModal(true); setError('') }}
-                style={{ ...addBtnStyle, background: '#e67e22' }}>
-                % Масова зміна
-              </button>
-              <button onClick={() => { setNewModal(true); setError('') }} style={addBtnStyle}>
-                + Нова ціна
-              </button>
-            </div>
-          </div>
-
-          {timeframeBar(timeFrom, setTimeFrom, timeTo, setTimeTo, earliestPriceDate)}
-
           <PriceGantt
             rows={ganttRows}
             timeFrom={timeFrom}
@@ -2172,11 +2211,6 @@ function PricesTab({ products, clients, categories }: {
 
         return (
           <>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-              <button onClick={() => openOverrideModal()} style={addBtnStyle}>
-                + Встановити індивідуальні ціни
-              </button>
-            </div>
 
             {sortedClients.length === 0 && (
               <p style={{ color: '#94a3b8', padding: 24, textAlign: 'center' }}>Немає індивідуальних цін</p>
@@ -2682,12 +2716,19 @@ const tableStyle: React.CSSProperties = {
   borderCollapse: 'collapse',
   background: '#fff',
   borderRadius: '6px',
-  overflow: 'hidden',
+  // overflow: hidden прибрано — воно блокує position:sticky на <th>
   boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
 }
 
-const Th = ({ children }: { children: React.ReactNode }) => (
-  <th style={{ padding: '0.45rem 0.8rem', textAlign: 'left', fontWeight: 600, fontSize: '0.875rem' }}>
+const Th = ({ children, top }: { children: React.ReactNode; top?: number }) => (
+  <th style={{
+    padding: '0.45rem 0.8rem', textAlign: 'left', fontWeight: 600, fontSize: '0.875rem',
+    ...(top !== undefined ? {
+      position: 'sticky', top, zIndex: 5,
+      background: '#e8eef5',
+      boxShadow: 'inset 0 -1px 0 #d1d5db',
+    } : {}),
+  }}>
     {children}
   </th>
 )

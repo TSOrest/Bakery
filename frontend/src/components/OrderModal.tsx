@@ -18,7 +18,7 @@ interface Props {
   saving: SavingMap
   locked?: boolean
   onQtyChange: (clientId: number, productId: number, qty: number) => void
-  onOrdersChange: () => void   // замінює onExchangeQtyChange; викликається після add/delete extra рядків
+  onOrdersChange: () => void
   onClose: () => void
 }
 
@@ -33,17 +33,30 @@ export default function OrderModal({
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
   const [prices,  setPrices]  = useState<Record<number, EffectivePriceInfo>>({})
 
+  // ── Дата замовлення (може відрізнятись від workDate) ──────────────────────
+  const [orderForDate, setOrderForDate] = useState(workDate)
+  // Власні замовлення для orderForDate != workDate
+  const [ownOrders,    setOwnOrders]    = useState<Order[] | null>(null)
+  const ownOrdersRef = useRef<Order[] | null>(null)
+  useEffect(() => { ownOrdersRef.current = ownOrders }, [ownOrders])
+
+  // Inline обмін: productId → значення поля вводу
+  const [exchangeInputs, setExchangeInputs] = useState<Record<number, string>>({})
+  const ownTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
+
+  // effectiveOrders — те що показує модалка
+  const effectiveOrders = orderForDate !== workDate && ownOrders !== null ? ownOrders : orders
+
   const yesterday = (() => { const d = new Date(workDate); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) })()
   const [repeatDate,    setRepeatDate]    = useState(yesterday)
   const [repeatOrders,  setRepeatOrders]  = useState<Order[]>([])
   const [repeatChecked, setRepeatChecked] = useState<Set<number>>(new Set())
   const [repeatLoading, setRepeatLoading] = useState(false)
 
-  // Стан форми додавання extra рядка (обмін / знижка)
+  // Форма додавання discount-рядка (обмін тепер інлайн)
   const [addLine, setAddLine] = useState<{
     productId: number
     qty: string
-    type: 'exchange' | 'discount'
     price: string
   } | null>(null)
   const [addingSaving, setAddingSaving] = useState(false)
@@ -61,11 +74,10 @@ export default function OrderModal({
     }
   }, [onClose])
 
-  // Завантажуємо ефективні ціни при відкритті
+  // Завантажуємо ефективні ціни при зміні orderForDate
   useEffect(() => {
-    api.get<Record<number, EffectivePriceInfo | number>>(`/prices/effective?client_id=${client.id}&date=${workDate}`)
+    api.get<Record<number, EffectivePriceInfo | number>>(`/prices/effective?client_id=${client.id}&date=${orderForDate}`)
       .then(raw => {
-        // Normalize: backend may return {id: number} (old) or {id: {price, source}} (new)
         const normalized: Record<number, EffectivePriceInfo> = {}
         for (const [k, v] of Object.entries(raw)) {
           normalized[Number(k)] = typeof v === 'number'
@@ -74,9 +86,21 @@ export default function OrderModal({
         }
         setPrices(normalized)
       }).catch(() => {})
-  }, [client.id, workDate])
+  }, [client.id, orderForDate])
 
-  // Завантажуємо частоту клієнта при перемиканні на сортування за частотою
+  // Коли orderForDate змінюється на non-workDate — завантажуємо власні замовлення
+  const fetchOwnOrders = () => {
+    api.get<Order[]>(`/orders/?order_date=${orderForDate}&client_id=${client.id}`)
+      .then(data => setOwnOrders(data.filter(o => o.qty > 0)))
+      .catch(() => setOwnOrders([]))
+  }
+  useEffect(() => {
+    if (orderForDate === workDate) { setOwnOrders(null); return }
+    fetchOwnOrders()
+    setExchangeInputs({})
+  }, [orderForDate, workDate, client.id])
+
+  // Частота замовлень (для сортування)
   useEffect(() => {
     if (sortBy !== 'freq' || Object.keys(freqs).length > 0) return
     const from = new Date(); from.setDate(from.getDate() - 90)
@@ -85,7 +109,7 @@ export default function OrderModal({
     ).then(setFreqs).catch(() => {})
   }, [sortBy, client.id, freqs])
 
-  // Завантажуємо замовлення для дати повтору
+  // Замовлення для панелі "Повтор"
   useEffect(() => {
     if (!repeatDate) return
     setRepeatLoading(true)
@@ -102,9 +126,8 @@ export default function OrderModal({
 
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
-  // Основне замовлення: exchange_type='none', price_override=null
   const getQty = (productId: number): number =>
-    orders.find(o =>
+    effectiveOrders.find(o =>
       o.client_id === client.id &&
       o.product_id === productId &&
       o.parent_order_id == null &&
@@ -113,9 +136,8 @@ export default function OrderModal({
       o.price_override == null
     )?.qty ?? 0
 
-  // Додаткові рядки: exchange або ручна ціна (окремі order рядки)
   const getExtraLines = (productId: number): Order[] =>
-    orders.filter(o =>
+    effectiveOrders.filter(o =>
       o.client_id === client.id &&
       o.product_id === productId &&
       o.parent_order_id == null &&
@@ -134,8 +156,8 @@ export default function OrderModal({
     return a.name.localeCompare(b.name, 'uk')
   })
 
-  // Підсумки: основні + exchange рядки (exchange ціна = 0 → не впливає на суму)
-  const clientOrders = orders.filter(o =>
+  // Підсумки
+  const clientOrders = effectiveOrders.filter(o =>
     o.client_id === client.id &&
     o.parent_order_id == null &&
     o.origin_id == null &&
@@ -159,43 +181,107 @@ export default function OrderModal({
     }
   }
 
-  // ─── Додавання з повтору ──────────────────────────────────────────────────
+  // ─── Qty для non-workDate замовлень (з debounce) ─────────────────────────
 
-  const handleAddRepeat = () => {
-    for (const o of repeatOrders) {
-      if (repeatChecked.has(o.product_id)) onQtyChange(client.id, o.product_id, o.qty)
+  const handleOwnQtyChange = (productId: number, qty: number) => {
+    // Оптимістичне оновлення ownOrders
+    setOwnOrders(prev => {
+      const isMain = (o: Order) =>
+        o.product_id === productId && o.parent_order_id == null &&
+        o.exchange_type === 'none' && o.price_override == null
+      const exists = (prev ?? []).find(isMain)
+      if (exists) {
+        if (qty <= 0) return (prev ?? []).filter(o => !isMain(o))
+        return (prev ?? []).map(o => isMain(o) ? { ...o, qty } : o)
+      }
+      if (qty <= 0) return prev ?? []
+      return [...(prev ?? []), {
+        id: -1, client_id: client.id, product_id: productId, qty,
+        order_date: orderForDate, source: 'phone' as const, exchange_type: 'none' as const,
+        exchange_qty: 0, exchange_price: null, exchange_notes: null, price_override: null,
+        notes: null, created_at: null, parent_order_id: null, delivered_qty: null,
+        origin_id: null, bot_status: null, bot_rejection_reason: null, bot_original_qty: null,
+      } as Order]
+    })
+
+    if (ownTimers.current[productId]) clearTimeout(ownTimers.current[productId])
+    ownTimers.current[productId] = setTimeout(async () => {
+      const curOrders = ownOrdersRef.current ?? []
+      const isMain = (o: Order) =>
+        o.product_id === productId && o.parent_order_id == null &&
+        o.exchange_type === 'none' && o.price_override == null
+      const existing = curOrders.find(isMain)
+      try {
+        if (existing && existing.id !== -1) {
+          if (qty <= 0) {
+            await api.delete(`/orders/${existing.id}`)
+          } else {
+            const upd = await api.put<Order>(`/orders/${existing.id}`, { qty })
+            setOwnOrders(p => (p ?? []).map(o => o.id === existing.id ? upd : o))
+          }
+        } else if (qty > 0) {
+          const created = await api.post<Order>('/orders/', {
+            client_id: client.id, product_id: productId, qty, order_date: orderForDate,
+          })
+          setOwnOrders(p => (p ?? []).map(o => isMain(o) && o.id === -1 ? created : o))
+        }
+      } catch {}
+    }, 600)
+  }
+
+  // ─── Inline обмін ─────────────────────────────────────────────────────────
+
+  const handleInlineExchange = async (productId: number, qtyStr: string) => {
+    const qty = Number(qtyStr)
+    if (!qty || qty <= 0) return
+    try {
+      await api.post('/orders/', {
+        client_id: client.id,
+        product_id: productId,
+        qty,
+        order_date: orderForDate,
+        exchange_type: 'pre_order',
+        price_override: 0,
+      })
+      setExchangeInputs(p => ({ ...p, [productId]: '' }))
+      if (orderForDate !== workDate) { fetchOwnOrders() } else { onOrdersChange() }
+    } catch {}
+  }
+
+  // ─── Повтор замовлення ────────────────────────────────────────────────────
+
+  const handleAddRepeat = async () => {
+    const items = repeatOrders.filter(o => repeatChecked.has(o.product_id))
+    if (orderForDate === workDate) {
+      for (const o of items) onQtyChange(client.id, o.product_id, o.qty)
+    } else {
+      for (const o of items) {
+        await api.post('/orders/', {
+          client_id: client.id, product_id: o.product_id, qty: o.qty, order_date: orderForDate,
+        }).catch(() => {})
+      }
+      fetchOwnOrders()
     }
   }
 
-  // ─── Extra рядки: додавання / видалення ──────────────────────────────────
+  // ─── Discount-рядок (+ кнопка) ───────────────────────────────────────────
 
-  const handleAddExtraLine = async () => {
+  const handleAddDiscountLine = async () => {
     if (!addLine) return
     const qty = Number(addLine.qty)
     if (!qty || qty <= 0) return
     setAddingSaving(true)
     try {
-      if (addLine.type === 'exchange') {
-        await api.post('/orders/', {
-          client_id: client.id,
-          product_id: addLine.productId,
-          qty,
-          order_date: workDate,
-          exchange_type: 'pre_order',
-          price_override: 0,
-        })
-      } else {
-        const price = addLine.price !== '' ? Number(addLine.price) : null
-        await api.post('/orders/', {
-          client_id: client.id,
-          product_id: addLine.productId,
-          qty,
-          order_date: workDate,
-          price_override: price,
-        })
-      }
+      const price = addLine.price !== '' ? Number(addLine.price) : null
+      await api.post('/orders/', {
+        client_id: client.id,
+        product_id: addLine.productId,
+        qty,
+        order_date: orderForDate,
+        price_override: price,
+      })
       setAddLine(null)
-      onOrdersChange()
+      if (orderForDate !== workDate) { fetchOwnOrders() } else { onOrdersChange() }
     } finally {
       setAddingSaving(false)
     }
@@ -203,12 +289,13 @@ export default function OrderModal({
 
   const handleDeleteExtraLine = async (orderId: number) => {
     await api.delete(`/orders/${orderId}`)
-    onOrdersChange()
+    if (orderForDate !== workDate) { fetchOwnOrders() } else { onOrdersChange() }
   }
 
   // ─── Рендер ───────────────────────────────────────────────────────────────
 
   const hasDiscount = (client.discount_pct ?? 0) > 0
+  const isNonWorkDate = orderForDate !== workDate
 
   return (
     <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -226,6 +313,21 @@ export default function OrderModal({
                 -{client.discount_pct}%
               </span>
             )}
+          </div>
+          {/* На дату */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 8 }}>
+            <span style={{ fontSize: '0.8rem', color: '#64748b', whiteSpace: 'nowrap' }}>На дату:</span>
+            <input
+              type="date"
+              value={orderForDate}
+              disabled={locked}
+              style={{
+                fontSize: '0.85rem', padding: '2px 6px', border: '1px solid #cbd5e1',
+                borderRadius: 5, background: isNonWorkDate ? '#fef3c7' : undefined,
+                fontWeight: isNonWorkDate ? 700 : undefined, color: isNonWorkDate ? '#92400e' : undefined,
+              }}
+              onChange={e => { setOrderForDate(e.target.value); setAddLine(null) }}
+            />
           </div>
           <button className={styles.closeBtn} onClick={onClose} title="Закрити (Esc)">×</button>
         </div>
@@ -288,13 +390,15 @@ export default function OrderModal({
               <tbody>
                 {displayed.map(product => {
                   const key: CellKey = `${client.id}-${product.id}`
-                  const state      = saving[key]
+                  // saving state only relevant for workDate orders (managed by parent)
+                  const state      = orderForDate === workDate ? saving[key] : undefined
                   const qty        = getQty(product.id)
                   const freq       = freqs[product.id]
                   const priceInfo  = prices[product.id]
                   const price      = priceInfo?.price
                   const extraLines = getExtraLines(product.id)
                   const showAdd    = addLine?.productId === product.id
+                  const hasExchange = extraLines.some(l => l.exchange_type === 'pre_order')
 
                   return (
                     <Fragment key={product.id}>
@@ -318,9 +422,9 @@ export default function OrderModal({
                           {!locked && !showAdd && (
                             <button
                               className={styles.btnAddLine}
-                              title="Додати рядок (обмін або знижка)"
-                              onClick={() => setAddLine({ productId: product.id, qty: '', type: 'exchange', price: '' })}
-                            >+</button>
+                              title="Додати рядок зі знижкою / своєю ціною"
+                              onClick={() => setAddLine({ productId: product.id, qty: '', price: '' })}
+                            >%</button>
                           )}
                         </td>
                         <td className={styles.tdInput}>
@@ -339,7 +443,15 @@ export default function OrderModal({
                               (state === 'error'  ? ' ' + styles.error  : '')
                             }
                             onFocus={e => e.target.select()}
-                            onChange={e => !locked && onQtyChange(client.id, product.id, Number(e.target.value))}
+                            onChange={e => {
+                              if (locked) return
+                              const v = Number(e.target.value)
+                              if (orderForDate === workDate) {
+                                onQtyChange(client.id, product.id, v)
+                              } else {
+                                handleOwnQtyChange(product.id, v)
+                              }
+                            }}
                             onKeyDown={e => handleKeyDown(e, product.id)}
                           />
                         </td>
@@ -347,6 +459,41 @@ export default function OrderModal({
                           {price != null && qty > 0 ? fmt(qty * price) : '—'}
                         </td>
                       </tr>
+
+                      {/* ── Inline Обмін (якщо є qty і ще немає рядка обміну) ── */}
+                      {qty > 0 && !hasExchange && !locked && (
+                        <tr style={{ background: '#f0fdf4' }}>
+                          <td colSpan={2} style={{ paddingLeft: 20, fontSize: '0.78rem', color: '#16a34a', fontWeight: 600 }}>
+                            ↔ Обмін
+                          </td>
+                          <td />
+                          <td />
+                          <td className={styles.tdInput}>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={exchangeInputs[product.id] ?? ''}
+                              placeholder="0"
+                              className={styles.qtyInput}
+                              style={{ background: '#dcfce7' }}
+                              onChange={e => setExchangeInputs(p => ({ ...p, [product.id]: e.target.value }))}
+                              onBlur={() => {
+                                const v = exchangeInputs[product.id]
+                                if (v && Number(v) > 0) handleInlineExchange(product.id, v)
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const v = exchangeInputs[product.id]
+                                  if (v && Number(v) > 0) handleInlineExchange(product.id, v)
+                                  e.preventDefault()
+                                }
+                              }}
+                            />
+                          </td>
+                          <td style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: 4 }}>безкошт.</td>
+                        </tr>
+                      )}
 
                       {/* ── Існуючі extra рядки ─────────────────────────── */}
                       {extraLines.map(line => (
@@ -377,35 +524,26 @@ export default function OrderModal({
                         </tr>
                       ))}
 
-                      {/* ── Форма додавання extra рядка ─────────────────── */}
+                      {/* ── Форма discount-рядка (%) ─────────────────────── */}
                       {showAdd && (
                         <tr className={styles.addLineFormRow}>
                           <td colSpan={2} className={styles.addLineCell}>
-                            <select
-                              value={addLine!.type}
-                              className={styles.addLineSelect}
-                              onChange={e => setAddLine(p => p ? { ...p, type: e.target.value as 'exchange' | 'discount' } : null)}
-                            >
-                              <option value="exchange">↔ Обмін (безкоштовно)</option>
-                              <option value="discount">% Знижка (своя ціна)</option>
-                            </select>
+                            <span style={{ fontSize: '0.82rem', color: '#475569' }}>% Знижка — своя ціна</span>
                           </td>
                           <td className={styles.addLineCell}>
-                            {addLine!.type === 'discount' && (
-                              <input
-                                type="number" min={0} step={0.01}
-                                value={addLine!.price}
-                                placeholder="Ціна"
-                                className={styles.addLinePriceInput}
-                                onChange={e => setAddLine(p => p ? { ...p, price: e.target.value } : null)}
-                              />
-                            )}
+                            <input
+                              type="number" min={0} step={0.01}
+                              value={addLine!.price}
+                              placeholder="Ціна"
+                              className={styles.addLinePriceInput}
+                              onChange={e => setAddLine(p => p ? { ...p, price: e.target.value } : null)}
+                            />
                           </td>
                           <td className={styles.tdAct}>
                             <button
                               className={styles.btnSaveLine}
                               disabled={addingSaving || !addLine!.qty}
-                              onClick={handleAddExtraLine}
+                              onClick={handleAddDiscountLine}
                               title="Зберегти"
                             >✓</button>
                             <button
@@ -421,7 +559,7 @@ export default function OrderModal({
                               placeholder="К-сть"
                               className={styles.addLineQtyInput}
                               autoFocus
-                              onKeyDown={e => { if (e.key === 'Enter') handleAddExtraLine() }}
+                              onKeyDown={e => { if (e.key === 'Enter') handleAddDiscountLine() }}
                               onChange={e => setAddLine(p => p ? { ...p, qty: e.target.value } : null)}
                             />
                           </td>

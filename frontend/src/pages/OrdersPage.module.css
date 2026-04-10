@@ -589,6 +589,25 @@
 
 /* ─── Bot order status ───────────────────────────────────────────────────── */
 
+.botSeparator {
+  width: 1px;
+  height: 24px;
+  background: #d1d5db;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.botStatusDisabled {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9ca3af;
+  white-space: nowrap;
+  padding: 0.2rem 0.5rem;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+}
+
 .botStatusOn {
   font-size: 0.82rem;
   font-weight: 600;
