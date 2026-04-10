@@ -122,24 +122,21 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const fetchPricesForClients = (clientIds: number[], date: string) => {
     const missing = clientIds.filter(id => !(id in prices))
     if (missing.length === 0) return
-    Promise.all(
-      missing.map(cid =>
-        api.get<Record<number, number | PriceEntry>>(`/prices/effective?client_id=${cid}&date=${date}`)
-          .then(raw => {
-            const p: Record<number, PriceEntry> = {}
-            for (const [k, v] of Object.entries(raw))
-              p[Number(k)] = typeof v === 'number' ? { price: v, source: 'base' } : v as PriceEntry
-            return { cid, p }
-          })
-          .catch(() => ({ cid, p: {} as Record<number, PriceEntry> }))
-      )
-    ).then(results => {
+    api.get<Record<string, Record<string, PriceEntry>>>(
+      `/prices/effective-batch?client_ids=${missing.join(',')}&date=${date}`
+    ).then(batch => {
       setPrices(prev => {
         const next = { ...prev }
-        for (const { cid, p } of results) next[cid] = p
+        for (const [cidStr, prMap] of Object.entries(batch)) {
+          const cid = Number(cidStr)
+          const p: Record<number, PriceEntry> = {}
+          for (const [pidStr, entry] of Object.entries(prMap))
+            p[Number(pidStr)] = entry
+          next[cid] = p
+        }
         return next
       })
-    })
+    }).catch(() => {})
   }
 
   const loadAll = (date: string) => {
@@ -158,25 +155,22 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       setCategories(cats)
       setOrders(o)
       setLoading(false)
-      // Завантажуємо ціни для всіх клієнтів з замовленнями
+      // Один batch-запит для всіх клієнтів із замовленнями
       const uniqueIds = [...new Set(o.map(ord => ord.client_id))]
       if (uniqueIds.length > 0) {
-        Promise.all(
-          uniqueIds.map(cid =>
-            api.get<Record<number, number | PriceEntry>>(`/prices/effective?client_id=${cid}&date=${date}`)
-              .then(raw => {
-                const pr: Record<number, PriceEntry> = {}
-                for (const [k, v] of Object.entries(raw))
-                  pr[Number(k)] = typeof v === 'number' ? { price: v, source: 'base' } : v as PriceEntry
-                return { cid, pr }
-              })
-              .catch(() => ({ cid, pr: {} as Record<number, PriceEntry> }))
-          )
-        ).then(results => {
+        api.get<Record<string, Record<string, PriceEntry>>>(
+          `/prices/effective-batch?client_ids=${uniqueIds.join(',')}&date=${date}`
+        ).then(batch => {
           const cache: PricesCache = {}
-          for (const { cid, pr } of results) cache[cid] = pr
+          for (const [cidStr, prMap] of Object.entries(batch)) {
+            const cid = Number(cidStr)
+            const pr: Record<number, PriceEntry> = {}
+            for (const [pidStr, entry] of Object.entries(prMap))
+              pr[Number(pidStr)] = entry
+            cache[cid] = pr
+          }
           setPrices(cache)
-        })
+        }).catch(() => {})
       }
     })
   }

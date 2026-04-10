@@ -2,13 +2,14 @@
 
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
 
 from backend.database import get_db
 from backend.models.pricing import Price, ClientPriceOverride
-from backend.models.references import Product
+from backend.models.references import Product, Client
 from backend.schemas.pricing import (
     PriceCreate, PriceOut, PriceReplaceRequest,
     BulkChangeRequest, BulkChangePreview, BulkChangePreviewItem,
@@ -20,6 +21,93 @@ router = APIRouter(prefix="/prices", tags=["Ціни"])
 
 
 # ── Ефективні ціни для клієнта ─────────────────────────────────────────────────
+
+@router.get("/effective-batch")
+def effective_prices_batch(client_ids: str, date: str, db: Session = Depends(get_db)):
+    """Ефективні ціни для кількох клієнтів за один запит.
+    client_ids — через кому: "1,2,3".
+    Повертає {client_id: {product_id: {price, source}}}.
+    Використовує 4 SQL-запити незалежно від кількості клієнтів і продуктів.
+    """
+    cids = [int(x) for x in client_ids.split(",") if x.strip().isdigit()]
+    if not cids:
+        return {}
+
+    # 1. Активні продукти
+    prod_ids: list[int] = [
+        r[0] for r in db.query(Product.id).filter(Product.is_active == 1).all()
+    ]
+    if not prod_ids:
+        return {cid: {} for cid in cids}
+
+    # 2. Найактуальніші базові ціни на дату (один запит)
+    base_rows = (
+        db.query(Price.product_id, Price.price)
+        .filter(
+            Price.product_id.in_(prod_ids),
+            Price.valid_from <= date,
+            or_(Price.valid_to.is_(None), Price.valid_to >= date),
+        )
+        .order_by(Price.product_id, Price.valid_from.desc())
+        .all()
+    )
+    base_by_product: dict[int, float] = {}
+    for pid, price in base_rows:
+        if pid not in base_by_product:   # перший = найновіший valid_from
+            base_by_product[pid] = price
+
+    # 3. Індивідуальні ціни клієнтів на дату (один запит)
+    override_rows = (
+        db.query(
+            ClientPriceOverride.client_id,
+            ClientPriceOverride.product_id,
+            ClientPriceOverride.price,
+        )
+        .filter(
+            ClientPriceOverride.client_id.in_(cids),
+            ClientPriceOverride.product_id.in_(prod_ids),
+            ClientPriceOverride.valid_from <= date,
+            or_(ClientPriceOverride.valid_to.is_(None), ClientPriceOverride.valid_to >= date),
+        )
+        .order_by(ClientPriceOverride.client_id, ClientPriceOverride.product_id,
+                  ClientPriceOverride.valid_from.desc())
+        .all()
+    )
+    override_by: dict[tuple[int, int], float] = {}
+    for cid, pid, price in override_rows:
+        key = (cid, pid)
+        if key not in override_by:       # перший = найновіший valid_from
+            override_by[key] = price
+
+    # 4. Знижки клієнтів (один запит)
+    discount_by: dict[int, float] = {
+        c.id: (c.discount_pct or 0.0)
+        for c in db.query(Client).filter(Client.id.in_(cids)).all()
+    }
+
+    # Збираємо відповідь
+    result: dict[int, dict[int, dict]] = {}
+    for cid in cids:
+        disc = discount_by.get(cid, 0.0)
+        client_prices: dict[int, dict] = {}
+        for pid in prod_ids:
+            ind = override_by.get((cid, pid))
+            if ind is not None:
+                client_prices[pid] = {"price": ind, "source": "individual"}
+            else:
+                base = base_by_product.get(pid)
+                if base is None:
+                    client_prices[pid] = {"price": 0.0, "source": "base"}
+                elif disc:
+                    client_prices[pid] = {
+                        "price": round(base * (1 - disc / 100), 4),
+                        "source": "discounted",
+                    }
+                else:
+                    client_prices[pid] = {"price": base, "source": "base"}
+        result[cid] = client_prices
+    return result
+
 
 @router.get("/effective")
 def effective_prices_for_client(client_id: int, date: str, db: Session = Depends(get_db)):
