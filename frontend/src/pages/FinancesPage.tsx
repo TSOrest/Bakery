@@ -268,8 +268,8 @@ export default function FinancesPage() {
   // Фільтри
   const [search,      setSearch]      = useState('')
   const [filterRoute, setFilterRoute] = useState('')
-  const [filterFrom,  setFilterFrom]  = useState('')
-  const [filterTo,    setFilterTo]    = useState('')
+  const [filterFrom,  setFilterFrom]  = useState(today)
+  const [filterTo,    setFilterTo]    = useState(today)
   const [filterType,  setFilterType]  = useState('')
 
   const [articles,   setArticles]   = useState<FinanceArticle[]>([])
@@ -399,18 +399,6 @@ export default function FinancesPage() {
             <span className={styles.summaryLabel}>Чистий баланс</span>
             <span className={`${styles.summaryValue} ${summary.net_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
               {summary.net_balance >= 0 ? '+' : ''}{fmt(summary.net_balance)} грн
-            </span>
-          </div>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Надходження 7 днів</span>
-            <span className={`${styles.summaryValue} ${styles.creditColor}`}>
-              +{fmt(summary.income_7d)} грн
-            </span>
-          </div>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Надходження 30 днів</span>
-            <span className={`${styles.summaryValue} ${styles.creditColor}`}>
-              +{fmt(summary.income_30d)} грн
             </span>
           </div>
           {internalKpi && (<>

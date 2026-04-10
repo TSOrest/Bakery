@@ -1047,44 +1047,70 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
 
             # ── 5. Фін. статті (_Статті) + нова стаття для корекцій ──────────
             _update_state(step="Фінансові статті", progress=35)
-            # Читаємо статті з Access → визначаємо напрям
-            access_article_dir: dict[str, str] = {}   # access_art_id → 'income'|'expense'
+
+            # ── Маппінг назв статей Access → назви статей нової БД ──────────
+            # Ключ: (нижній регістр назви Access, direction)
+            # Значення: назва статті в новій БД
+            _ACCESS_ARTICLE_MAP: dict[tuple[str, str], str] = {
+                ("клієнт",           "income"):  "Оплата",
+                ("клієнт",           "expense"): "Накладна",
+                ("видача виручки",   "expense"): "Виведення з каси",
+                ("внесення в касу",  "income"):  "Внесення в касу",
+                ("оплата з каси",    "expense"): "Оплата з каси",
+                ("списання магазину","expense"): "Списання магазину",
+            }
+
+            # Читаємо статті з Access → будуємо access_art_id → (direction, new_name)
+            access_article_dir:  dict[str, str] = {}  # id → 'income'|'expense'
+            access_article_newid: dict[str, int] = {}  # id → finance_articles.id нової БД
+
+            # Індекс статей нової БД: назва.lower() → id
+            db_art_by_name: dict[str, int] = {
+                a.name.lower(): a.id
+                for a in db.query(FinanceArticle).all()
+            }
+
             art_tname = _find_table_for("articles", tables)
             if art_tname:
                 cm_art = _cols_for("articles", reader.columns(art_tname))
                 for row in reader.rows(art_tname):
-                    art_id  = _safe_str(row.get(cm_art.get("id", "")) if cm_art.get("id") else None, 10)
-                    art_dir = _safe_str(row.get(cm_art.get("direction", "")) if cm_art.get("direction") else None, 50)
-                    if art_id and art_dir:
-                        access_article_dir[art_id] = (
-                            "income" if "рихід" in art_dir else "expense"
-                        )
+                    a_id   = _safe_str(row.get(cm_art.get("id",        "")) if cm_art.get("id")        else None, 10)
+                    a_name = _safe_str(row.get(cm_art.get("name",      "")) if cm_art.get("name")      else None, 100) or ""
+                    a_dir  = _safe_str(row.get(cm_art.get("direction", "")) if cm_art.get("direction") else None, 50)  or ""
+                    if not a_id:
+                        continue
+                    direction = "income" if "рихід" in a_dir else "expense"
+                    access_article_dir[a_id] = direction
 
-            # Знаходимо системні статті нової БД
-            income_art = (
-                db.query(FinanceArticle)
-                .filter(FinanceArticle.direction == "income", FinanceArticle.is_system == 1,
-                        FinanceArticle.name.ilike("%оплат%"))
-                .first()
-                or db.query(FinanceArticle)
-                .filter(FinanceArticle.direction == "income", FinanceArticle.is_system == 1)
-                .first()
-            )
-            expense_art = (
-                db.query(FinanceArticle)
-                .filter(FinanceArticle.direction == "expense", FinanceArticle.is_system == 1,
-                        FinanceArticle.name.ilike("%накладн%"))
-                .first()
-                or db.query(FinanceArticle)
-                .filter(FinanceArticle.direction == "expense", FinanceArticle.is_system == 1)
-                .first()
-            )
-            # Стаття для корекцій балансу
-            import_art = FinanceArticle(
-                name="Початковий баланс (імпорт з Access)", direction="income", is_system=1
-            )
-            db.add(import_art); db.flush()
-            import_art_id = import_art.id
+                    # Пробуємо знайти відповідну статтю в новій БД
+                    new_name = _ACCESS_ARTICLE_MAP.get((a_name.lower().strip(), direction))
+                    if new_name:
+                        new_id = db_art_by_name.get(new_name.lower())
+                        if new_id:
+                            access_article_newid[a_id] = new_id
+
+            # Fallback-статті якщо маппінг не спрацював
+            fallback_income_id  = db_art_by_name.get("оплата") or next(
+                (a.id for a in db.query(FinanceArticle)
+                 .filter(FinanceArticle.direction == "income", FinanceArticle.is_system == 1).all()),
+                None)
+            fallback_expense_id = db_art_by_name.get("накладна") or next(
+                (a.id for a in db.query(FinanceArticle)
+                 .filter(FinanceArticle.direction == "expense", FinanceArticle.is_system == 1).all()),
+                None)
+
+            # Стаття для корекцій початкового балансу — знаходимо або створюємо ОДИН раз
+            import_art_id: int
+            existing_import_art = db_art_by_name.get("початковий баланс")
+            if existing_import_art:
+                import_art_id = existing_import_art
+            else:
+                import_art = FinanceArticle(
+                    name="Початковий баланс", direction="income", is_system=1
+                )
+                db.add(import_art); db.flush()
+                import_art_id = import_art.id
+                db_art_by_name["початковий баланс"] = import_art_id
 
             # ── 6. Ціни (^Ціни) — повна історія через TS ────────────────────
             _update_state(step="Ціни", progress=42)
@@ -1330,11 +1356,12 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         except (ValueError, TypeError): pass
 
                     # Визначаємо напрям через _Статті
-                    art_raw = str(row.get(cm.get("article_id", ""), "") or "").strip()
+                    art_raw   = str(row.get(cm.get("article_id", ""), "") or "").strip()
                     direction = access_article_dir.get(art_raw, "income")
                     sign      = 1 if direction == "income" else -1
-                    art_obj   = income_art if direction == "income" else expense_art
-                    art_id    = art_obj.id if art_obj else import_art_id
+                    art_id    = access_article_newid.get(art_raw) or (
+                        fallback_income_id if direction == "income" else fallback_expense_id
+                    ) or import_art_id
                     ftype     = "payment" if direction == "income" else "invoice"
 
                     notes = _safe_str(row.get(cm.get("notes", "")) if cm.get("notes") else None, 500)
