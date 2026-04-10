@@ -107,6 +107,18 @@
   font-size: 0.9rem;
 }
 
+.dateInputWarn {
+  background: #fff3cd;
+  color: #7a4f00;
+  font-weight: 600;
+}
+
+.dateWarnBadge {
+  font-size: 1rem;
+  color: #f59e0b;
+  line-height: 1;
+}
+
 .main {
   flex: 1;
   min-height: 0;

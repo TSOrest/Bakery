@@ -48,6 +48,7 @@ DEFAULT_SETTINGS = {
     "bank":                  ("",               "Банк"),
     "order_lock_time":       ("22:00",          "Час блокування замовлень"),
     "order_past_days":       ("1",              "Днів назад від сьогодні доступних для редагування замовлень"),
+    "work_date_next_day_time": ("18:00",        "Час переходу дати роботи на наступний день"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
     "github_client_id":      ("",               "GitHub OAuth App Client ID"),

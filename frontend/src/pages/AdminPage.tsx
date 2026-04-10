@@ -2785,8 +2785,9 @@ const SETTINGS_LABELS: Record<string, string> = {
   edrpou:            'Код ЄДРПОУ',
   iban:              'IBAN рахунок',
   bank:              'Банк',
-  order_lock_time:   'Час блокування замовлень',
-  order_past_days:   'Днів назад для редагування замовлень',
+  order_lock_time:          'Час блокування замовлень',
+  order_past_days:          'Днів назад для редагування замовлень',
+  work_date_next_day_time:  'Час переходу дати роботи на завтра',
 }
 
 type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
