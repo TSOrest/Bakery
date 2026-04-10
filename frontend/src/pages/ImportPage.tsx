@@ -682,15 +682,58 @@ function StepPrices({
 
 // ─── Step 7: Orders ───────────────────────────────────────────────────────────
 
-function StepOrders({ preview }: { preview: AccdbPreview }) {
+function StepOrders({
+  preview,
+  invoiceDraftFrom,
+  setInvoiceDraftFrom,
+}: {
+  preview: AccdbPreview
+  invoiceDraftFrom: string
+  setInvoiceDraftFrom: (d: string) => void
+}) {
   return (
     <div>
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 7 — Замовлення</h2>
       <p style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: 20 }}>
-        Вся історія замовлень з Access буде перенесена повністю.
+        Вся історія замовлень з Access буде перенесена повністю. До кожного замовлення
+        формується накладна.
       </p>
       <div style={INFO_BOX}>
         <strong>Знайдено замовлень в Access: {preview.orders.count}</strong>
+      </div>
+
+      <div style={{ marginTop: 24, padding: '16px 20px', background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>
+          Незавершені накладні
+        </div>
+        <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '0 0 12px' }}>
+          Якщо на момент імпорту є замовлення що ще не були доставлені (наприклад, внесені
+          вчора ввечері на сьогодні або завтра) — вкажіть дату, починаючи з якої накладні
+          залишити <strong>чернетками</strong>. Прийняті рейси до цієї дати залишаться
+          зі статусом «прийнято».
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.9rem' }}>
+          <span style={{ whiteSpace: 'nowrap' }}>Чернетки починаючи з:</span>
+          <input
+            type="date"
+            value={invoiceDraftFrom}
+            onChange={e => setInvoiceDraftFrom(e.target.value)}
+            style={{ padding: '0.3rem 0.5rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.9rem' }}
+          />
+          {invoiceDraftFrom && (
+            <button
+              onClick={() => setInvoiceDraftFrom('')}
+              style={{ fontSize: '0.8rem', color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              очистити (всі прийнято)
+            </button>
+          )}
+        </label>
+        {!invoiceDraftFrom && (
+          <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '8px 0 0' }}>
+            Дата не вказана — всі накладні будуть зі статусом «прийнято».
+          </p>
+        )}
       </div>
     </div>
   )
@@ -716,7 +759,7 @@ function StepFinances({ preview }: { preview: AccdbPreview }) {
 
 function StepConfirm({
   preview, transDate,
-  routeMappings, catMappings, clientMappings, basePriceCat,
+  routeMappings, catMappings, clientMappings, basePriceCat, invoiceDraftFrom,
 }: {
   preview: AccdbPreview
   transDate: string
@@ -724,6 +767,7 @@ function StepConfirm({
   catMappings: CategoryMapping[]
   clientMappings: ClientMapping[]
   basePriceCat: string
+  invoiceDraftFrom: string
 }) {
   const importedRoutes = routeMappings.filter(r => r.import_it).length
   const skippedRoutes  = routeMappings.filter(r => !r.import_it).length
@@ -743,6 +787,10 @@ function StepConfirm({
         <SummaryRow label="Дата переходу" value={transDate} />
         <SummaryRow label="Фінансова історія" value="вся" />
         <SummaryRow label="Замовлення" value="всі" />
+        <SummaryRow
+          label="Накладні-чернетки з"
+          value={invoiceDraftFrom || '— (всі прийнято)'}
+        />
         <SummaryRow label="Маршрути" value={
           `${importedRoutes} переноситься${skippedRoutes > 0 ? `, ${skippedRoutes} пропущено` : ''}`
         } />
@@ -1175,6 +1223,9 @@ export default function ImportPage({ onClose }: Props) {
   const [clientMappings, setClientMappings] = useState<ClientMapping[]>([])
   const [basePriceCat, setBasePriceCat]     = useState('')
 
+  // Step 7: накладні-чернетки
+  const [invoiceDraftFrom, setInvoiceDraftFrom] = useState<string>(today())
+
   // Execution state
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null)
   const [report, setReport]             = useState<ImportReport | null>(null)
@@ -1328,6 +1379,7 @@ export default function ImportPage({ onClose }: Props) {
         client_mappings:     clientMappings,
         default_client_kind: 'customer',
         base_price_category: basePriceCat,
+        invoice_draft_from:  invoiceDraftFrom || null,
       })
       goTo(10)
     } catch (e: any) {
@@ -1425,7 +1477,11 @@ export default function ImportPage({ onClose }: Props) {
                 />
               )}
               {step === 7 && preview && (
-                <StepOrders preview={preview} />
+                <StepOrders
+                  preview={preview}
+                  invoiceDraftFrom={invoiceDraftFrom}
+                  setInvoiceDraftFrom={setInvoiceDraftFrom}
+                />
               )}
               {step === 8 && preview && (
                 <StepFinances preview={preview} />
@@ -1438,6 +1494,7 @@ export default function ImportPage({ onClose }: Props) {
                   catMappings={catMappings}
                   clientMappings={clientMappings}
                   basePriceCat={basePriceCat}
+                  invoiceDraftFrom={invoiceDraftFrom}
                 />
               )}
               {step === 10 && (

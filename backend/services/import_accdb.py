@@ -653,10 +653,12 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
 def _create_historical_invoices(
     db: Session,
     orders: list[Order],
+    draft_from: str | None = None,
 ) -> tuple[int, int]:
     """Групує імпортовані замовлення по (client_id, order_date) і створює накладні.
-    Статус одразу 'accepted'. НЕ викликає create_invoice_finance_entry — фінанси
-    вже імпортовані з ^Баланс, дублювати не потрібно.
+    Накладні до draft_from — статус 'accepted'; починаючи з draft_from — 'draft'.
+    Якщо draft_from=None — всі 'accepted'.
+    НЕ викликає create_invoice_finance_entry — фінанси вже імпортовані з ^Баланс.
     Повертає (кількість накладних, кількість рядків накладних)."""
     from collections import defaultdict
 
@@ -683,12 +685,13 @@ def _create_historical_invoices(
     inv_count = line_count = 0
     for (client_id, order_date), grp in sorted(groups.items(), key=lambda x: x[0][1]):
         inv_num = generate_invoice_number(db, order_date)
+        inv_status = "draft" if (draft_from and order_date >= draft_from) else "accepted"
         inv = Invoice(
             invoice_number=inv_num,
             invoice_date=order_date,
             client_id=client_id,
             route_id=route_of.get(client_id),
-            status="accepted",
+            status=inv_status,
             total_sum=0.0,
         )
         db.add(inv)
@@ -1321,7 +1324,9 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             if order_objs:
                 db.flush()
                 _update_state(step="Створення накладних", progress=62)
-                inv_count, inv_lines = _create_historical_invoices(db, order_objs)
+                inv_count, inv_lines = _create_historical_invoices(
+                    db, order_objs, draft_from=mapping.invoice_draft_from
+                )
                 exch_note = f", обмінів: {ep_exchange_count}" if ep_exchange_count else ""
                 ep.notes = f"Створено {inv_count} накладних ({inv_lines} рядків{exch_note})"
 

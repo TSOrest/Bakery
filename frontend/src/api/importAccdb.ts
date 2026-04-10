@@ -95,6 +95,7 @@ export interface ImportMapping {
   client_mappings:      ClientMapping[]
   default_client_kind:  string
   base_price_category:  string          // Access КодКатегорії for base prices
+  invoice_draft_from:   string | null   // YYYY-MM-DD; накладні з цієї дати = draft
 }
 
 // ─── Context types ────────────────────────────────────────────────────────────

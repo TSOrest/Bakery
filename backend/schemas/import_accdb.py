@@ -100,6 +100,7 @@ class ImportMapping(BaseModel):
     client_mappings:  list[ClientMapping] = []     # замінює client_kinds
     default_client_kind: str = 'customer'
     base_price_category: str = ''                  # Access КодКатегорії для базових цін
+    invoice_draft_from: str | None = None          # YYYY-MM-DD; накладні з цієї дати = draft
 
 
 # ─── Звіт ─────────────────────────────────────────────────────────────────────
