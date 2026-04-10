@@ -259,20 +259,19 @@
 }
 .historyRow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 14px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 14px;
   border-bottom: 1px solid #f0f0f0;
-  gap: 8px;
 }
 .historyRow:last-child { border-bottom: none; }
-.historyLeft {
+.historyRowTop {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
+  justify-content: space-between;
+  gap: 8px;
 }
-.historyRight {
+.historyRowRight {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -281,17 +280,23 @@
   font-size: 13px;
   font-weight: 600;
 }
+.historyRowMeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 2px;
+}
 .historyDate {
-  font-size: 12px;
-  color: #888;
+  font-size: 11px;
+  color: #9ca3af;
 }
 .historyNotes {
-  font-size: 12px;
-  color: #555;
+  font-size: 11px;
+  color: #6b7280;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100px;
+  max-width: 180px;
 }
 
 /* ── Тег типу ── */

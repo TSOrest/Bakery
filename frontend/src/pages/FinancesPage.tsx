@@ -35,6 +35,52 @@ function fmt(n: number) {
   return n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// ── Міні-графік оборотів ──────────────────────────────────────────────────────
+
+function TurnoverChart({ history }: { history: Finance[] }) {
+  const byMonth: Record<string, { income: number; expense: number }> = {}
+  for (const e of history) {
+    const month = e.finance_date.slice(0, 7)
+    if (!byMonth[month]) byMonth[month] = { income: 0, expense: 0 }
+    if (e.sign === 1) byMonth[month].income  += e.amount
+    else              byMonth[month].expense += e.amount
+  }
+  const months = Object.keys(byMonth).sort().slice(-6)
+  if (months.length === 0) return null
+  const maxVal = Math.max(...months.flatMap(m => [byMonth[m].income, byMonth[m].expense]), 1)
+
+  const W = 320, H = 58, BOTTOM = 14, BAR_H = H - BOTTOM
+  const colW = W / months.length
+  const bw   = Math.max(4, Math.floor(colW / 2) - 2)
+
+  return (
+    <div style={{ padding: '6px 14px 10px', borderBottom: '1px solid #eee' }}>
+      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3, fontWeight: 500 }}>
+        Оборот по місяцях
+        <span style={{ marginLeft: 10, color: '#27ae60' }}>■ оплата</span>
+        <span style={{ marginLeft: 6,  color: '#e74c3c' }}>■ накладна</span>
+      </div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        {months.map((month, i) => {
+          const { income, expense } = byMonth[month]
+          const cx = i * colW + colW / 2
+          const incH = Math.round((income  / maxVal) * BAR_H)
+          const expH = Math.round((expense / maxVal) * BAR_H)
+          return (
+            <g key={month}>
+              {income  > 0 && <rect x={cx - bw - 1} y={BAR_H - incH} width={bw} height={incH} fill="#27ae60" rx={2} opacity={0.85} />}
+              {expense > 0 && <rect x={cx + 1}       y={BAR_H - expH} width={bw} height={expH} fill="#e74c3c" rx={2} opacity={0.75} />}
+              <text x={cx} y={H - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">
+                {month.slice(5)}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+
 // ── Форма нової операції ──────────────────────────────────────────────────────
 
 interface PaymentFormProps {
@@ -199,6 +245,8 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
         </span>
       </div>
 
+      {!loading && history.length > 0 && <TurnoverChart history={history} />}
+
       <div className={styles.historyList}>
         {loading && <p className={styles.hint}>Завантаження…</p>}
         {!loading && history.length === 0 && (
@@ -206,30 +254,32 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
         )}
         {history.map(e => (
           <div key={e.id} className={styles.historyRow}>
-            <div className={styles.historyLeft}>
+            <div className={styles.historyRowTop}>
               <span
                 className={styles.typeTag}
                 style={{ background: TYPE_COLORS[e.finance_type] ?? '#888' }}
               >
                 {e.type_label ?? e.finance_type}
               </span>
+              <div className={styles.historyRowRight}>
+                <span className={e.sign === 1 ? styles.creditColor : styles.debtColor}>
+                  {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
+                </span>
+                {e.finance_type !== 'invoice' && (
+                  <button
+                    className={styles.delBtn}
+                    title="Видалити"
+                    disabled={deleting === e.id}
+                    onClick={() => handleDelete(e.id)}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className={styles.historyRowMeta}>
               <span className={styles.historyDate}>{e.finance_date}</span>
               {e.notes && <span className={styles.historyNotes}>{e.notes}</span>}
-            </div>
-            <div className={styles.historyRight}>
-              <span className={e.sign === 1 ? styles.creditColor : styles.debtColor}>
-                {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
-              </span>
-              {e.finance_type !== 'invoice' && (
-                <button
-                  className={styles.delBtn}
-                  title="Видалити"
-                  disabled={deleting === e.id}
-                  onClick={() => handleDelete(e.id)}
-                >
-                  ×
-                </button>
-              )}
             </div>
           </div>
         ))}
