@@ -109,8 +109,8 @@
 /* ─── Ліва панель ────────────────────────────────────────────── */
 
 .sidebar {
-  width: 230px;
-  min-width: 190px;
+  width: 300px;
+  min-width: 250px;
   border-right: 1px solid #d0dcea;
   display: flex;
   flex-direction: column;
