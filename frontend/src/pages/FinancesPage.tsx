@@ -252,7 +252,12 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
         {!loading && history.length === 0 && (
           <p className={styles.hint}>Операцій ще немає</p>
         )}
-        {history.map(e => (
+        {history
+          .filter(e => {
+            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30)
+            return new Date(e.finance_date) >= cutoff
+          })
+          .map(e => (
           <div key={e.id} className={styles.historyRow}>
             <div className={styles.historyRowTop}>
               <span
@@ -261,21 +266,20 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
               >
                 {e.type_label ?? e.finance_type}
               </span>
-              <div className={styles.historyRowRight}>
-                <span className={e.sign === 1 ? styles.creditColor : styles.debtColor}>
-                  {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
-                </span>
-                {e.finance_type !== 'invoice' && (
-                  <button
-                    className={styles.delBtn}
-                    title="Видалити"
-                    disabled={deleting === e.id}
-                    onClick={() => handleDelete(e.id)}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
+              <span />
+              <span className={`${styles.historyRowAmount} ${e.sign === 1 ? styles.creditColor : styles.debtColor}`}>
+                {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
+              </span>
+              {e.finance_type !== 'invoice' ? (
+                <button
+                  className={styles.delBtn}
+                  title="Видалити"
+                  disabled={deleting === e.id}
+                  onClick={() => handleDelete(e.id)}
+                >
+                  ×
+                </button>
+              ) : <span />}
             </div>
             <div className={styles.historyRowMeta}>
               <span className={styles.historyDate}>{e.finance_date}</span>
