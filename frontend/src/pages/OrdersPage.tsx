@@ -112,6 +112,7 @@ export default function OrdersPage() {
   const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null; bot_running?: boolean } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
   const [lockedClientIds,  setLockedClientIds]  = useState<Set<number>>(new Set())
+  const [orderPastDays,    setOrderPastDays]    = useState(1)
   const [expandedIds,      setExpandedIds]      = useState<Set<number>>(new Set())
 
 const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
@@ -200,6 +201,24 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     api.get<number[]>(`/invoices/locked-clients?date=${date}`)
       .then(ids => setLockedClientIds(new Set(ids))).catch(() => {})
   }
+
+  // Завантажуємо налаштування кількості днів назад для редагування
+  useEffect(() => {
+    api.get<Record<string, { value: string }>>('/settings/')
+      .then(s => {
+        const v = parseInt(s['order_past_days']?.value ?? '1', 10)
+        setOrderPastDays(isNaN(v) ? 1 : v)
+      }).catch(() => {})
+  }, [])
+
+  // Перевіряємо чи поточна дата заблокована через архів
+  const isDateLocked = (() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const selected = new Date(workDate + 'T00:00:00')
+    const diffDays = Math.round((today.getTime() - selected.getTime()) / 86_400_000)
+    return diffDays > orderPastDays
+  })()
+
   useEffect(() => { fetchBotStatus(); fetchLockedClients(workDate) }, [workDate])
 
   const handleVerify = async (orderId: number, action: 'confirm' | 'reject' | 'modify', newQty?: number, reason?: string) => {
@@ -592,10 +611,10 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                       </span>
                     ))}
                     <button
-                      className={`${styles.ciAddBtn} ${lockedClientIds.has(client.id) ? styles.ciLocked : ''}`}
-                      title={lockedClientIds.has(client.id) ? 'Накладна сформована — замовлення заблоковані' : 'Відкрити замовлення'}
+                      className={`${styles.ciAddBtn} ${(isDateLocked || lockedClientIds.has(client.id)) ? styles.ciLocked : ''}`}
+                      title={isDateLocked ? `Дата заблокована (архів > ${orderPastDays} дн.)` : lockedClientIds.has(client.id) ? 'Накладна сформована — замовлення заблоковані' : 'Відкрити замовлення'}
                       onClick={e => { e.stopPropagation(); setModalClientId(client.id) }}
-                    >{lockedClientIds.has(client.id) ? '🔒' : '+'}</button>
+                    >{(isDateLocked || lockedClientIds.has(client.id)) ? '🔒' : '+'}</button>
                   </div>
                 )
               })}
@@ -786,7 +805,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           categories={categories}
           orders={orders}
           saving={saving}
-          locked={lockedClientIds.has(modalClient.id)}
+          locked={isDateLocked || lockedClientIds.has(modalClient.id)}
           onQtyChange={handleQtyChange}
           onOrdersChange={() => loadAll(workDate)}
           onClose={() => setModalClientId(null)}

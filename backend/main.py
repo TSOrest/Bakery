@@ -47,6 +47,7 @@ DEFAULT_SETTINGS = {
     "iban":                  ("",               "IBAN рахунок"),
     "bank":                  ("",               "Банк"),
     "order_lock_time":       ("22:00",          "Час блокування замовлень"),
+    "order_past_days":       ("1",              "Днів назад від сьогодні доступних для редагування замовлень"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
     "github_client_id":      ("",               "GitHub OAuth App Client ID"),

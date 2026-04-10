@@ -2786,6 +2786,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   iban:              'IBAN рахунок',
   bank:              'Банк',
   order_lock_time:   'Час блокування замовлень',
+  order_past_days:   'Днів назад для редагування замовлень',
 }
 
 type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
