@@ -45,8 +45,33 @@ except Exception:
     sys.exit(1)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-ROOT       = Path(__file__).parent
-DATA_DIR   = Path(os.environ.get("BAKERY_DATA_DIR", ROOT))
+ROOT = Path(__file__).parent
+
+
+def _resolve_data_dir() -> Path:
+    """Визначає DATA_DIR: env → run-server.ps1 → ROOT.
+    run-tray.ps1 не виставляє BAKERY_DATA_DIR, тому читаємо зі згенерованого
+    scripts/run-server.ps1, де install-service.ps1 прописує правильний шлях.
+    """
+    from_env = os.environ.get("BAKERY_DATA_DIR", "")
+    if from_env:
+        return Path(from_env)
+    import re
+    runner = ROOT / "scripts" / "run-server.ps1"
+    if runner.exists():
+        try:
+            for line in runner.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+                m = re.match(r"\$env:BAKERY_DATA_DIR\s*=\s*'(.+)'", line.strip())
+                if m:
+                    p = Path(m.group(1))
+                    if p.exists():
+                        return p
+        except Exception:
+            pass
+    return ROOT
+
+
+DATA_DIR   = _resolve_data_dir()
 TASK_NAME  = "BakeryApp"
 TRAY_TASK  = "BakeryTray"
 HEALTH_URL = "http://localhost:8000/api/health"
