@@ -881,13 +881,10 @@ def _poll_updates(icon) -> None:
         time.sleep(UPDATE_INTERVAL)
 
 
-def _poll_backup(icon) -> None:
-    """Щоденний автобекап за налаштованим часом + обробка прапорів demo/restore."""
-    global _last_backup_date
-    time.sleep(90)  # початкова затримка після старту
+def _poll_flags(icon) -> None:
+    """Швидкий цикл (2 сек) — обробка прапорів від frontend: restore, demo."""
     while True:
         try:
-            # ── Обробка прапорів від frontend ──────────────────────────────────
             if DEMO_ENTER_REQUESTED.exists():
                 DEMO_ENTER_REQUESTED.unlink(missing_ok=True)
                 threading.Thread(target=_action_demo_enter, args=(icon,), daemon=True).start()
@@ -910,7 +907,17 @@ def _poll_backup(icon) -> None:
                     ).start()
                 except Exception:
                     RESTORE_REQUESTED.unlink(missing_ok=True)
+        except Exception:
+            pass
+        time.sleep(2)
 
+
+def _poll_backup(icon) -> None:
+    """Щоденний автобекап за налаштованим часом."""
+    global _last_backup_date
+    time.sleep(90)  # початкова затримка після старту
+    while True:
+        try:
             # ── Розклад автобекапу ──────────────────────────────────────────
             if _read_setting("backup_enabled") == "1":
                 btime = (_read_setting("backup_time") or "02:00").strip()
@@ -963,6 +970,7 @@ def main() -> None:
     threading.Thread(target=_poll_status,   args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_internet, args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_updates,  args=(icon,), daemon=True).start()
+    threading.Thread(target=_poll_flags,    args=(icon,), daemon=True).start()
     threading.Thread(target=_poll_backup,   args=(icon,), daemon=True).start()
 
     def _startup_notify():
