@@ -360,53 +360,59 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       )
       .reduce((s, o) => s + (productMap.get(o.product_id)?.category_id === categoryId ? o.qty : 0), 0)
 
+  const isShop = (c: Client) => c.client_kind === 'shop'
+
+  const sidebarClients = useMemo(() =>
+    clients
+      .filter(c => {
+        if (!c.is_active) return false
+        if (c.client_kind === 'writeoff' || c.client_kind === 'ration' || c.client_kind === 'underbaked') return false
+        if (isShop(c)) return true   // магазин — завжди видно
+        return selectedRouteId == null || c.route_id === selectedRouteId
+      })
+      .sort((a, b) => {
+        // Магазини — завжди зверху
+        const aShop = isShop(a) ? 0 : 1
+        const bShop = isShop(b) ? 0 : 1
+        if (aShop !== bShop) return aShop - bShop
+        return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
+      }),
+    [clients, selectedRouteId]
+  )
+
+  const ordersToShow = useMemo(() =>
+    orders
+      .filter(o => {
+        // Тільки кореневі рядки — виключаємо лише знімання нестачі (дочірні)
+        if (o.parent_order_id != null) return false
+        if (o.qty <= 0) return false
+        if (selectedRouteId != null) {
+          const c = clientMap.get(o.client_id)
+          if (!c || c.route_id !== selectedRouteId) return false
+        }
+        if (selectedClientId != null && o.client_id !== selectedClientId) return false
+        return true
+      })
+      .sort((a, b) => {
+        const ca = clientMap.get(a.client_id); const cb = clientMap.get(b.client_id)
+        const ra = routeMap.get(ca?.route_id ?? 0); const rb = routeMap.get(cb?.route_id ?? 0)
+        const rOrd = (ra?.sort_order ?? 0) - (rb?.sort_order ?? 0)
+        if (rOrd !== 0) return rOrd
+        const cName = (ca?.short_name ?? ca?.full_name ?? '').localeCompare(cb?.short_name ?? cb?.full_name ?? '', 'uk')
+        if (cName !== 0) return cName
+        const pName = (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
+        if (pName !== 0) return pName
+        // Однаковий продукт: основний рядок перед exchange/discount
+        const aMain = a.exchange_type === 'none' && a.price_override == null ? 0 : 1
+        const bMain = b.exchange_type === 'none' && b.price_override == null ? 0 : 1
+        return aMain - bMain
+      }),
+    [orders, selectedRouteId, selectedClientId, clientMap, routeMap, productMap]
+  )
+
   // ─── Рендер ────────────────────────────────────────────────────────────────
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
-
-  const isShop = (c: Client) => c.client_kind === 'shop'
-
-  const sidebarClients = clients
-    .filter(c => {
-      if (!c.is_active) return false
-      if (c.client_kind === 'writeoff' || c.client_kind === 'ration' || c.client_kind === 'underbaked') return false
-      if (isShop(c)) return true   // магазин — завжди видно
-      return selectedRouteId == null || c.route_id === selectedRouteId
-    })
-    .sort((a, b) => {
-      // Магазини — завжди зверху
-      const aShop = isShop(a) ? 0 : 1
-      const bShop = isShop(b) ? 0 : 1
-      if (aShop !== bShop) return aShop - bShop
-      return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
-    })
-
-  const ordersToShow = orders
-    .filter(o => {
-      // Тільки кореневі рядки — виключаємо лише знімання нестачі (дочірні)
-      if (o.parent_order_id != null) return false
-      if (o.qty <= 0) return false
-      if (selectedRouteId != null) {
-        const c = clientMap.get(o.client_id)
-        if (!c || c.route_id !== selectedRouteId) return false
-      }
-      if (selectedClientId != null && o.client_id !== selectedClientId) return false
-      return true
-    })
-    .sort((a, b) => {
-      const ca = clientMap.get(a.client_id); const cb = clientMap.get(b.client_id)
-      const ra = routeMap.get(ca?.route_id ?? 0); const rb = routeMap.get(cb?.route_id ?? 0)
-      const rOrd = (ra?.sort_order ?? 0) - (rb?.sort_order ?? 0)
-      if (rOrd !== 0) return rOrd
-      const cName = (ca?.short_name ?? ca?.full_name ?? '').localeCompare(cb?.short_name ?? cb?.full_name ?? '', 'uk')
-      if (cName !== 0) return cName
-      const pName = (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
-      if (pName !== 0) return pName
-      // Однаковий продукт: основний рядок перед exchange/discount
-      const aMain = a.exchange_type === 'none' && a.price_override == null ? 0 : 1
-      const bMain = b.exchange_type === 'none' && b.price_override == null ? 0 : 1
-      return aMain - bMain
-    })
 
   const routeBadge = (routeId: number | null) => {
     const visible = (c: typeof clients[0]) =>

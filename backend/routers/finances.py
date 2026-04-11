@@ -19,17 +19,17 @@ from backend.services.finance import get_all_balances, get_summary
 router = APIRouter(prefix="/finances", tags=["Фінанси"])
 
 
-def _enrich(entry: Finance, db: Session) -> FinanceOut:
+def _enrich(
+    entry: Finance,
+    clients: dict,
+    articles: dict,
+) -> FinanceOut:
     """Додає client_name, type_label, article_name, signed_amount до запису."""
-    client_name = None
-    if entry.client_id:
-        c = db.get(Client, entry.client_id)
-        client_name = c.short_name or c.full_name if c else None
+    c = clients.get(entry.client_id) if entry.client_id else None
+    client_name = (c.short_name or c.full_name) if c else None
 
-    article_name = None
-    if entry.article_id:
-        a = db.get(FinanceArticle, entry.article_id)
-        article_name = a.name if a else None
+    a = articles.get(entry.article_id) if entry.article_id else None
+    article_name = a.name if a else None
 
     type_label = article_name or FINANCE_LABELS.get(entry.finance_type, entry.finance_type)
 
@@ -49,6 +49,17 @@ def _enrich(entry: Finance, db: Session) -> FinanceOut:
         created_at    = entry.created_at,
         created_by    = entry.created_by,
     )
+
+
+def _batch_enrich(entries: list, db: Session) -> list[FinanceOut]:
+    """Batch-збагачення списку Finance-записів: 2 запити замість 2N."""
+    client_ids  = {e.client_id  for e in entries if e.client_id}
+    article_ids = {e.article_id for e in entries if e.article_id}
+
+    clients  = {c.id: c for c in db.query(Client).filter(Client.id.in_(client_ids)).all()} if client_ids else {}
+    articles = {a.id: a for a in db.query(FinanceArticle).filter(FinanceArticle.id.in_(article_ids)).all()} if article_ids else {}
+
+    return [_enrich(e, clients, articles) for e in entries]
 
 
 # ── Список операцій ────────────────────────────────────────────────────────────
@@ -74,7 +85,7 @@ def list_finances(
     if article_id:
         q = q.filter(Finance.article_id == article_id)
     entries = q.order_by(Finance.finance_date.desc(), Finance.id.desc()).all()
-    return [_enrich(e, db) for e in entries]
+    return _batch_enrich(entries, db)
 
 
 # ── Баланси клієнтів ──────────────────────────────────────────────────────────
@@ -165,7 +176,7 @@ def client_history(
         q = q.filter(Finance.finance_date <= date_to)
 
     entries = q.order_by(Finance.finance_date.desc(), Finance.id.desc()).all()
-    return [_enrich(e, db) for e in entries]
+    return _batch_enrich(entries, db)
 
 
 # ── Додавання операцій ─────────────────────────────────────────────────────────
@@ -196,7 +207,7 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return _enrich(entry, db)
+    return _batch_enrich([entry], db)[0]
 
 
 # ── Видалення ─────────────────────────────────────────────────────────────────

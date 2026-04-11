@@ -25,6 +25,10 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")   # FULL→NORMAL: 2-3x швидше write
+    cursor.execute("PRAGMA cache_size=-65536")    # 64 MB кеш сторінок
+    cursor.execute("PRAGMA temp_store=MEMORY")    # тимчасові таблиці в RAM
+    cursor.execute("PRAGMA mmap_size=134217728")  # 128 MB mmap
     cursor.close()
 
 

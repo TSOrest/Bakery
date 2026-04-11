@@ -10,6 +10,15 @@ export default defineConfig({
       targets: ['defaults', 'iOS >= 11', 'Android >= 6'],
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
   resolve: {
     preserveSymlinks: true,
   },

@@ -3,7 +3,7 @@
 from datetime import datetime, date as _date, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, case
 
 from backend.models.finances import Finance
 from backend.models.references import Client
@@ -21,7 +21,9 @@ def get_client_balance(db: Session, client_id: int, as_of: Optional[str] = None)
 
 
 def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBalance]:
-    """Баланси всіх активних клієнтів станом на дату as_of."""
+    """Баланси всіх активних клієнтів станом на дату as_of.
+    Один GROUP BY запит замість 3 запитів на кожного клієнта.
+    """
     from backend.models.references import Route
 
     clients = (
@@ -30,22 +32,36 @@ def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBal
         .order_by(Client.full_name)
         .all()
     )
+    client_ids = [c.id for c in clients]
 
     routes = {r.id: r.name for r in db.query(Route).all()}
 
+    # Один агрегований запит для балансів, останніх платежів і накладних
+    fin_q = db.query(
+        Finance.client_id,
+        func.sum(Finance.amount * Finance.sign).label("balance"),
+        func.max(
+            case((Finance.finance_type == "payment", Finance.finance_date), else_=None)
+        ).label("last_payment"),
+        func.max(
+            case((Finance.finance_type == "invoice", Finance.finance_date), else_=None)
+        ).label("last_invoice"),
+    ).filter(Finance.client_id.in_(client_ids))
+
+    if as_of:
+        fin_q = fin_q.filter(Finance.finance_date <= as_of)
+
+    agg = {
+        row.client_id: row
+        for row in fin_q.group_by(Finance.client_id).all()
+    }
+
     result = []
     for c in clients:
-        balance = get_client_balance(db, c.id, as_of)
-
-        q_pay = db.query(func.max(Finance.finance_date)).filter(
-            Finance.client_id == c.id, Finance.finance_type == "payment"
-        )
-        q_inv = db.query(func.max(Finance.finance_date)).filter(
-            Finance.client_id == c.id, Finance.finance_type == "invoice"
-        )
-        if as_of:
-            q_pay = q_pay.filter(Finance.finance_date <= as_of)
-            q_inv = q_inv.filter(Finance.finance_date <= as_of)
+        row = agg.get(c.id)
+        balance           = round(float(row.balance), 2) if row and row.balance is not None else 0.0
+        last_payment_date = row.last_payment if row else None
+        last_invoice_date = row.last_invoice if row else None
 
         result.append(ClientBalance(
             client_id         = c.id,
@@ -54,8 +70,8 @@ def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBal
             route_id          = c.route_id,
             route_name        = routes.get(c.route_id) if c.route_id else None,
             balance           = balance,
-            last_payment_date = q_pay.scalar(),
-            last_invoice_date = q_inv.scalar(),
+            last_payment_date = last_payment_date,
+            last_invoice_date = last_invoice_date,
             client_kind       = c.client_kind or "customer",
         ))
 

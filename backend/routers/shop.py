@@ -277,9 +277,15 @@ def get_summary(date: str, db: Session = Depends(get_db)):
         if last_rec:
             all_pids |= {ln.product_id for ln in last_rec.lines}
 
+        # Batch-завантаження продуктів — один запит замість len(all_pids) db.get()
+        products_map = {
+            p.id: p
+            for p in db.query(Product).filter(Product.id.in_(all_pids)).all()
+        } if all_pids else {}
+
         rows = []
         for pid in sorted(all_pids):
-            product = db.get(Product, pid)
+            product = products_map.get(pid)
             if not product or not product.is_active:
                 continue
             # Відкриваючий залишок = сума entered_balance всіх рядків продукту в останній закритій звірці
@@ -287,8 +293,7 @@ def get_summary(date: str, db: Session = Depends(get_db)):
             if last_rec and last_rec.closed:
                 opening = sum(ln.entered_balance or 0 for ln in last_rec.lines if ln.product_id == pid)
             elif not last_rec:
-                product = db.get(Product, pid)
-                opening = (product.initial_stock or 0) if product else 0.0
+                opening = (product.initial_stock or 0)
             received = (bakery.get(pid, 0) + ext.get(pid, 0) + inv.get(pid, 0))
             # Продано = сума calculated_sold з усіх рядків в останній звірці
             sold = 0.0

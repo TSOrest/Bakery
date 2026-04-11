@@ -270,6 +270,13 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
     }
   }
 
+  const recentHistory = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffISO = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`
+    return history.filter(e => e.finance_date >= cutoffISO)
+  }, [history])
+
   const isDebt   = balance.balance < 0
   const isCredit = balance.balance > 0
 
@@ -306,12 +313,7 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
         {!loading && history.length === 0 && (
           <p className={styles.hint}>Операцій ще немає</p>
         )}
-        {history
-          .filter(e => {
-            const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30)
-            return new Date(e.finance_date) >= cutoff
-          })
-          .map(e => (
+        {recentHistory.map(e => (
           <div key={e.id} className={styles.historyRow}>
             <div className={styles.historyRowTop}>
               <span
