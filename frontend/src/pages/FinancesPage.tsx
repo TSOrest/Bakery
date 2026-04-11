@@ -636,21 +636,9 @@ export default function FinancesPage() {
             </label>
             <select value={filterType} onChange={e => setFilterType(e.target.value)}>
               <option value="">Всі типи</option>
-              <optgroup label="Системні">
-                <option value="invoice">Накладна</option>
-                <option value="payment">Оплата</option>
-                <option value="writeoff">Списання</option>
-                <option value="deposit">Внесення в касу</option>
-                <option value="route_cash">Готівка водія</option>
-                <option value="exchange_credit">Кредит обміну</option>
-              </optgroup>
-              {articles.length > 0 && (
-                <optgroup label="Статті">
-                  {articles.map(a => (
-                    <option key={a.id} value={`article:${a.id}`}>{a.name}</option>
-                  ))}
-                </optgroup>
-              )}
+              {articles.map(a => (
+                <option key={a.id} value={`article:${a.id}`}>{a.name}</option>
+              ))}
             </select>
           </div>
 
