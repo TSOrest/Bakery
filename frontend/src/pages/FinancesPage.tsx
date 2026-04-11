@@ -12,14 +12,7 @@ import styles from './FinancesPage.module.css'
 
 type TabId = 'balances' | 'journal'
 
-const MANUAL_TYPES = [
-  { value: 'payment',    label: 'Оплата від клієнта', sign:  1, needsClient: true  },
-  { value: 'writeoff',   label: 'Списання боргу',      sign:  1, needsClient: true  },
-  { value: 'deposit',    label: 'Внесення в касу',     sign:  1, needsClient: false },
-  { value: 'route_cash', label: 'Готівка водія',        sign:  1, needsClient: false },
-] as const
 
-type ManualType = typeof MANUAL_TYPES[number]['value']
 
 const TYPE_COLORS: Record<string, string> = {
   invoice:         '#e74c3c',
@@ -87,35 +80,45 @@ interface PaymentFormProps {
   clientId?:   number
   clientName?: string
   defaultDate: string
+  balances?:   ClientBalance[]   // для вибору клієнта якщо clientId не переданий
   onSave: (data: Parameters<typeof createFinance>[0]) => Promise<void>
   onClose: () => void
 }
 
-function PaymentForm({ clientId, clientName, defaultDate, onSave, onClose }: PaymentFormProps) {
-  const [date,   setDate]   = useState(defaultDate)
-  const [type,   setType]   = useState<ManualType>('payment')
-  const [amount, setAmount] = useState('')
-  const [notes,  setNotes]  = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error,  setError]  = useState('')
+function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onClose }: PaymentFormProps) {
+  const [date,       setDate]       = useState(defaultDate)
+  const [articleId,  setArticleId]  = useState<number | null>(null)
+  const [selClientId, setSelClientId] = useState<number | null>(clientId ?? null)
+  const [amount,     setAmount]     = useState('')
+  const [notes,      setNotes]      = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const [error,      setError]      = useState('')
+  const [articles,   setArticles]   = useState<FinanceArticle[]>([])
 
-  const chosen     = MANUAL_TYPES.find(t => t.value === type)!
-  const needClient = chosen.needsClient
+  useEffect(() => {
+    fetchFinanceArticles().then(list => {
+      setArticles(list)
+      if (list.length > 0) setArticleId(list[0].id)
+    })
+  }, [])
+
+  const chosen = articles.find(a => a.id === articleId)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const num = parseFloat(amount.replace(',', '.'))
     if (!num || num <= 0) { setError('Введіть суму > 0'); return }
-    if (needClient && !clientId) { setError('Клієнт не вибраний'); return }
+    if (!chosen) { setError('Оберіть статтю операції'); return }
     setSaving(true)
     setError('')
     try {
       await onSave({
         finance_date: date,
-        client_id:    needClient ? (clientId ?? null) : null,
-        finance_type: type,
+        client_id:    selClientId ?? null,
+        finance_type: chosen.direction === 'income' ? 'payment' : 'invoice',
+        article_id:   chosen.id,
         amount:       num,
-        sign:         chosen.sign,
+        sign:         chosen.direction === 'income' ? 1 : -1,
         notes:        notes || undefined,
       })
       onClose()
@@ -125,6 +128,9 @@ function PaymentForm({ clientId, clientName, defaultDate, onSave, onClose }: Pay
       setSaving(false)
     }
   }
+
+  const incomeArticles  = articles.filter(a => a.direction === 'income')
+  const expenseArticles = articles.filter(a => a.direction === 'expense')
 
   return (
     <div className={styles.modalOverlay} onClick={onClose}>
@@ -137,13 +143,37 @@ function PaymentForm({ clientId, clientName, defaultDate, onSave, onClose }: Pay
           <label>Дата
             <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
           </label>
-          <label>Тип операції
-            <select value={type} onChange={e => setType(e.target.value as ManualType)}>
-              {MANUAL_TYPES
-                .filter(t => !t.needsClient || clientId)
-                .map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          {!clientId && balances && (
+            <label>Клієнт
+              <select value={selClientId ?? ''} onChange={e => setSelClientId(e.target.value ? Number(e.target.value) : null)}>
+                <option value="">— без клієнта —</option>
+                {balances.map(b => (
+                  <option key={b.client_id} value={b.client_id}>
+                    {b.short_name ?? b.client_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>Стаття операції
+            <select value={articleId ?? ''} onChange={e => setArticleId(Number(e.target.value))}>
+              {incomeArticles.length > 0 && (
+                <optgroup label="Надходження (+)">
+                  {incomeArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </optgroup>
+              )}
+              {expenseArticles.length > 0 && (
+                <optgroup label="Витрати (−)">
+                  {expenseArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </optgroup>
+              )}
             </select>
           </label>
+          {chosen && (
+            <p style={{ margin: '-4px 0 6px', fontSize: '0.8rem', color: chosen.direction === 'income' ? '#27ae60' : '#e74c3c' }}>
+              {chosen.direction === 'income' ? '+ надходження' : '− витрата'}
+            </p>
+          )}
           <label>Сума (грн)
             <input
               type="number" min="0.01" step="0.01" autoFocus
@@ -163,7 +193,7 @@ function PaymentForm({ clientId, clientName, defaultDate, onSave, onClose }: Pay
             <button type="button" className={styles.btnSecondary} onClick={onClose}>
               Скасувати
             </button>
-            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+            <button type="submit" className={styles.btnPrimary} disabled={saving || !chosen}>
               {saving ? 'Зберігаємо…' : 'Зберегти'}
             </button>
           </div>
@@ -698,6 +728,7 @@ export default function FinancesPage() {
       {showForm && (
         <PaymentForm
           defaultDate={today}
+          balances={balances}
           onSave={handleSaveGlobal}
           onClose={() => setShowForm(false)}
         />

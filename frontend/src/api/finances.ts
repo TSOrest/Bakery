@@ -56,6 +56,7 @@ export async function createFinance(data: {
   finance_date: string
   client_id?: number | null
   finance_type: string
+  article_id?: number | null
   amount: number
   sign: number
   notes?: string
