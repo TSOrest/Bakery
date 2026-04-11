@@ -22,10 +22,10 @@ Base.metadata.create_all(bind=engine)
 
 
 DEFAULT_ROLE_PERMISSIONS = {
-    "operator":   ["orders", "baking", "routes", "shop"],
-    "accountant": ["orders", "finances"],
-    "admin":      ["orders", "baking", "routes", "shop", "finances", "admin", "pos"],
-    "owner":      ["orders"],
+    "operator":   ["orders", "baking", "routes", "shop", "reports"],
+    "accountant": ["orders", "finances", "reports"],
+    "admin":      ["orders", "baking", "routes", "shop", "finances", "admin", "pos", "reports"],
+    "owner":      ["orders", "reports"],
     "seller":     ["pos"],
 }
 

@@ -48,14 +48,15 @@ export default function Layout() {
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
     { path: '/shop',     label: 'Магазин',    key: 'shop'     },
     { path: '/finances', label: 'Фінанси',    key: 'finances' },
+    { path: '/reports',  label: 'Звіти',      key: 'reports'  },
     { path: '/admin',     label: 'Налаштування', key: 'admin'   },
   ]
 
   // Адмін завжди має всі права — ігноруємо permissions для нього
   const ADMIN_KEYS = ALL_TABS.map(t => t.key)
   const FALLBACK: Record<string, string[]> = {
-    operator:   ['dashboard', 'orders', 'baking', 'routes', 'shop'],
-    accountant: ['dashboard', 'orders', 'finances'],
+    operator:   ['dashboard', 'orders', 'baking', 'routes', 'shop', 'reports'],
+    accountant: ['dashboard', 'orders', 'finances', 'reports'],
     admin:      ADMIN_KEYS,
     owner:      ['dashboard'],
   }

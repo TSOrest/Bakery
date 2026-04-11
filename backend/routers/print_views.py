@@ -7,10 +7,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from datetime import date as date_type
 
+from sqlalchemy import func
+
 from backend.database import get_db
-from backend.models.invoices import Invoice
+from backend.models.invoices import Invoice, InvoiceLine
 from backend.models.baking import BakingTask
-from backend.models.references import Product, Category
+from backend.models.references import Product, Category, Client, Route
+from backend.models.finances import Finance, FinanceArticle
+from backend.models.orders import Order
 from backend.models.settings import Setting
 from backend.services.orders import aggregate_for_baking
 
@@ -1091,6 +1095,306 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
   </div>
   {cats_html}
   {disc_section}
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+# ─── Денний звіт пекарні ─────────────────────────────────────────────────────
+
+def _dr_section1(db: Session, date: str) -> str:
+    """Секція 1: продукція — замовлено/спечено/обмін/магазин по категоріях."""
+    tasks = {
+        bt.product_id: bt
+        for bt in db.query(BakingTask).filter(BakingTask.task_date == date).all()
+    }
+    exchange_rows = (
+        db.query(Order.product_id, func.sum(Order.exchange_qty).label("exc"))
+        .filter(Order.order_date == date, Order.exchange_type != "none")
+        .group_by(Order.product_id)
+        .all()
+    )
+    exchanges: dict[int, float] = {r.product_id: (r.exc or 0.0) for r in exchange_rows}
+
+    shop_rows = (
+        db.query(Order.product_id, func.sum(Order.qty).label("sq"))
+        .join(Client, Order.client_id == Client.id)
+        .filter(Order.order_date == date, Client.client_kind == "shop")
+        .group_by(Order.product_id)
+        .all()
+    )
+    to_shop: dict[int, float] = {r.product_id: (r.sq or 0.0) for r in shop_rows}
+
+    all_pids = set(tasks) | set(exchanges) | set(to_shop)
+    if not all_pids:
+        return "<p style='color:#888;font-size:9pt;'>— Даних про продукцію немає —</p>"
+
+    products_map = {p.id: p for p in db.query(Product).filter(Product.id.in_(all_pids)).all()}
+    cats_map     = {c.id: c for c in db.query(Category).filter(Category.is_baked == 1).all()}
+
+    by_cat: dict[int, list] = {}
+    for pid in all_pids:
+        p = products_map.get(pid)
+        if not p or not p.category_id or p.category_id not in cats_map:
+            continue
+        by_cat.setdefault(p.category_id, []).append(pid)
+
+    if not by_cat:
+        return "<p style='color:#888;font-size:9pt;'>— Даних про продукцію немає —</p>"
+
+    html = ""
+    for cat_id in sorted(by_cat, key=lambda cid: cats_map[cid].sort_order):
+        cat  = cats_map[cat_id]
+        pids = sorted(by_cat[cat_id], key=lambda pid: products_map[pid].name)
+        tot_ord = tot_bak = tot_exc = tot_shop = 0.0
+        rows_html = ""
+        for pid in pids:
+            bt      = tasks.get(pid)
+            ordered = bt.ordered_qty if bt else 0.0
+            baked   = (bt.baked_qty  if bt and bt.baked_qty is not None else 0.0)
+            exc     = exchanges.get(pid, 0.0)
+            shop    = to_shop.get(pid, 0.0)
+            tot_ord += ordered; tot_bak += baked; tot_exc += exc; tot_shop += shop
+            pname   = products_map[pid].name
+            rows_html += f"""
+      <tr>
+        <td>{pname}</td>
+        <td class="dr-num">{fmt(ordered) if ordered else "—"}</td>
+        <td class="dr-num">{fmt(baked)   if baked   else "—"}</td>
+        <td class="dr-num">{fmt(exc)     if exc     else "—"}</td>
+        <td class="dr-num">{fmt(shop)    if shop    else "—"}</td>
+      </tr>"""
+        html += f"""
+  <div class="dr-cat-title">{cat.name.upper()}</div>
+  <table class="dr-table">
+    <thead>
+      <tr>
+        <th>Виріб</th><th class="dr-num">Замовлено</th>
+        <th class="dr-num">Спечено</th><th class="dr-num">Обмін</th>
+        <th class="dr-num">Магазин</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}
+      <tr class="dr-total">
+        <td>Разом</td>
+        <td class="dr-num">{fmt(tot_ord)}</td>
+        <td class="dr-num">{fmt(tot_bak)}</td>
+        <td class="dr-num">{fmt(tot_exc)}</td>
+        <td class="dr-num">{fmt(tot_shop)}</td>
+      </tr>
+    </tbody>
+  </table>"""
+    return html
+
+
+def _dr_section2(db: Session, date: str) -> str:
+    """Секція 2: агрегація по маршрутах із накладних."""
+    all_cats = {c.id: c for c in db.query(Category).filter(Category.is_baked == 1).all()}
+    invoices_list = (
+        db.query(Invoice)
+        .filter(Invoice.invoice_date == date, Invoice.status != "cancelled")
+        .all()
+    )
+    if not invoices_list:
+        return "<p style='color:#888;font-size:9pt;'>— Накладних за цей день немає —</p>"
+
+    routes_map   = {r.id: r for r in db.query(Route).filter(Route.is_active == 1).all()}
+    all_pids     = {ln.product_id for inv in invoices_list for ln in inv.lines}
+    products_map = {p.id: p for p in db.query(Product).filter(Product.id.in_(all_pids)).all()} if all_pids else {}
+
+    agg: dict[int, dict] = {}
+    for inv in invoices_list:
+        rid = inv.route_id or 0
+        if rid not in agg:
+            agg[rid] = {"sum": 0.0, "cats": {}}
+        for ln in inv.lines:
+            prod   = products_map.get(ln.product_id)
+            cat_id = prod.category_id if prod else None
+            if cat_id and cat_id not in all_cats:
+                cat_id = None
+            agg[rid]["cats"].setdefault(cat_id, {"qty": 0.0, "exch": 0.0})
+            if ln.is_exchange:
+                agg[rid]["cats"][cat_id]["exch"] += ln.qty
+            else:
+                agg[rid]["cats"][cat_id]["qty"]  += ln.qty
+                agg[rid]["sum"] += ln.sum
+
+    used_cats = sorted(
+        {cid for rd in agg.values() for cid in rd["cats"] if cid and cid in all_cats},
+        key=lambda cid: all_cats[cid].sort_order,
+    )
+
+    cat_headers = "".join(
+        f'<th class="dr-num">{all_cats[cid].name}</th><th class="dr-num">Обм.</th>'
+        for cid in used_cats
+    )
+    thead = f'<tr><th>Маршрут</th>{cat_headers}<th class="dr-num">Сума</th></tr>'
+
+    tot_cats: dict = {cid: {"qty": 0.0, "exch": 0.0} for cid in used_cats}
+    tot_sum   = 0.0
+    rows_html = ""
+
+    for rid in sorted(agg, key=lambda r: routes_map.get(r, Route()).sort_order if r in routes_map else 999):
+        rd    = agg[rid]
+        rname = routes_map[rid].name if rid in routes_map else "—"
+        cells = ""
+        for cid in used_cats:
+            q  = rd["cats"].get(cid, {}).get("qty",  0.0)
+            ex = rd["cats"].get(cid, {}).get("exch", 0.0)
+            tot_cats[cid]["qty"]  += q
+            tot_cats[cid]["exch"] += ex
+            cells += f'<td class="dr-num">{fmt(q) if q else "—"}</td>'
+            cells += f'<td class="dr-num">{fmt(ex) if ex else "—"}</td>'
+        tot_sum += rd["sum"]
+        rows_html += f'<tr><td>{rname}</td>{cells}<td class="dr-num dr-money">{fmt(rd["sum"])}</td></tr>'
+
+    tot_cells = "".join(
+        f'<td class="dr-num">{fmt(tot_cats[cid]["qty"])}</td>'
+        f'<td class="dr-num">{fmt(tot_cats[cid]["exch"])}</td>'
+        for cid in used_cats
+    )
+    rows_html += f'<tr class="dr-total"><td>Разом</td>{tot_cells}<td class="dr-num dr-money">{fmt(tot_sum)}</td></tr>'
+
+    return f'<table class="dr-table"><thead>{thead}</thead><tbody>{rows_html}</tbody></table>'
+
+
+def _dr_section3(db: Session, date: str) -> str:
+    """Секція 3: фінансовий підсумок дня."""
+    entries = db.query(Finance).filter(Finance.finance_date == date).all()
+    if not entries:
+        return "<p style='color:#888;font-size:9pt;'>— Фінансових операцій немає —</p>"
+
+    art_ids  = {e.article_id for e in entries if e.article_id}
+    arts_map = {a.id: a for a in db.query(FinanceArticle).filter(FinanceArticle.id.in_(art_ids)).all()} if art_ids else {}
+
+    by_article: dict[tuple, dict] = {}
+    for e in entries:
+        art      = arts_map.get(e.article_id) if e.article_id else None
+        nc       = art.needs_client if art else (1 if e.client_id else 0)
+        art_name = art.name if art else (e.finance_type or "Інше")
+        key      = (nc, e.article_id or e.finance_type)
+        if key not in by_article:
+            by_article[key] = {"name": art_name, "needs_client": nc, "total": 0.0}
+        by_article[key]["total"] = round(by_article[key]["total"] + e.amount * e.sign, 2)
+
+    client_rows = [(v["name"], v["total"]) for (nc, _), v in by_article.items() if nc == 1]
+    cash_rows   = [(v["name"], v["total"]) for (nc, _), v in by_article.items() if nc == 0]
+
+    def _rows_html(rows: list) -> str:
+        h = ""
+        for name, total in sorted(rows, key=lambda x: -abs(x[1])):
+            sign_cls = "dr-income" if total >= 0 else "dr-expense"
+            sign_chr = "+" if total >= 0 else "−"
+            h += (f'<tr><td>{name}</td>'
+                  f'<td class="dr-num {sign_cls}">{sign_chr}&nbsp;{fmt(abs(total))}&nbsp;грн</td></tr>')
+        return h
+
+    net_income = round(sum(e.amount * e.sign for e in entries), 2)
+    cash_total = round(sum(e.amount * e.sign for e in entries if e.client_id is None), 2)
+
+    client_html   = _rows_html(client_rows) if client_rows else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
+    cash_html     = _rows_html(cash_rows)   if cash_rows   else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
+    sign_cls      = "dr-income"  if net_income >= 0 else "dr-expense"
+    sign_chr      = "+"          if net_income >= 0 else "−"
+    cash_sign_cls = "dr-income"  if cash_total >= 0 else "dr-expense"
+
+    cash_row = (
+        f'<tr><td>Залишок в касі</td>'
+        f'<td class="dr-num {cash_sign_cls}">{fmt(cash_total)}&nbsp;грн</td></tr>'
+        if cash_rows else ""
+    )
+
+    return f"""
+  <div class="dr-fin-block">
+    <div class="dr-fin-title">Клієнтські операції</div>
+    <table class="dr-table dr-fin-table"><tbody>{client_html}</tbody></table>
+  </div>
+  <div class="dr-fin-block">
+    <div class="dr-fin-title">Касові операції</div>
+    <table class="dr-table dr-fin-table"><tbody>{cash_html}</tbody></table>
+  </div>
+  <table class="dr-table dr-fin-total-table">
+    <tbody>
+      <tr>
+        <td><strong>Чистий дохід за день</strong></td>
+        <td class="dr-num dr-money {sign_cls}"><strong>{sign_chr}&nbsp;{fmt(abs(net_income))}&nbsp;грн</strong></td>
+      </tr>
+      {cash_row}
+    </tbody>
+  </table>"""
+
+
+@router.get("/daily-report", response_class=HTMLResponse)
+def daily_report(date: str, db: Session = Depends(get_db)):
+    """Денний звіт пекарні: продукція, маршрути, фінанси."""
+    cfg         = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    s1 = _dr_section1(db, date)
+    s2 = _dr_section2(db, date)
+    s3 = _dr_section3(db, date)
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Денний звіт {date}</title>
+  {BASE_CSS}
+  <style>
+    @media print  {{ @page {{ size: A4 portrait; margin: 10mm 12mm; }} }}
+    @media screen {{ .dr-wrap {{ max-width: 760px; margin: 0 auto; padding: 16px; }} }}
+    .dr-header    {{ display:flex;justify-content:space-between;align-items:baseline;
+                     border-bottom:2px solid #1a3a5c;padding-bottom:6px;margin-bottom:14px; }}
+    .dr-title     {{ font-size:13pt;font-weight:bold;color:#1a3a5c; }}
+    .dr-date      {{ font-size:12pt;font-weight:bold; }}
+    .dr-section   {{ margin-bottom:18px; }}
+    .dr-section-title {{ font-size:10.5pt;font-weight:bold;background:#1a3a5c;color:#fff;
+                         padding:3px 8px;margin-bottom:6px;border-radius:3px; }}
+    .dr-cat-title {{ font-size:9.5pt;font-weight:bold;color:#1a3a5c;margin:8px 0 3px;
+                     border-left:3px solid #1a3a5c;padding-left:6px; }}
+    .dr-table     {{ width:100%;border-collapse:collapse;font-size:9pt;margin-bottom:6px; }}
+    .dr-table th  {{ background:#e8edf3;font-weight:bold;padding:4px 6px;
+                     border:1px solid #bcc6d4;text-align:left; }}
+    .dr-table td  {{ padding:3px 6px;border:1px solid #dde3ea; }}
+    .dr-table tr:nth-child(even) td {{ background:#f7f9fb; }}
+    .dr-num       {{ text-align:right;font-variant-numeric:tabular-nums; }}
+    .dr-money     {{ font-weight:bold; }}
+    .dr-total td  {{ background:#e8edf3!important;font-weight:bold;border-top:2px solid #9ab; }}
+    .dr-income    {{ color:#1a7a30; }}
+    .dr-expense   {{ color:#b00; }}
+    .dr-fin-block {{ margin-bottom:10px; }}
+    .dr-fin-title {{ font-size:9pt;font-weight:bold;color:#555;margin-bottom:3px; }}
+    .dr-fin-table       {{ width:60%;min-width:300px; }}
+    .dr-fin-total-table {{ width:60%;min-width:300px;margin-top:8px; }}
+    .dr-fin-total-table td {{ padding:4px 6px;border:1px solid #bcc6d4;background:#e8edf3; }}
+  </style>
+</head>
+<body>
+{PRINT_BTN}
+<div class="dr-wrap">
+  <div class="dr-header">
+    <div>
+      <div class="dr-title">{bakery_name}</div>
+      <div style="font-size:9pt;color:#555;margin-top:2px;">Денний звіт</div>
+    </div>
+    <div class="dr-date">{ua_date(date)}</div>
+  </div>
+
+  <div class="dr-section">
+    <div class="dr-section-title">1. ПРОДУКЦІЯ</div>
+    {s1}
+  </div>
+
+  <div class="dr-section">
+    <div class="dr-section-title">2. МАРШРУТИ</div>
+    {s2}
+  </div>
+
+  <div class="dr-section">
+    <div class="dr-section-title">3. ФІНАНСИ</div>
+    {s3}
+  </div>
 </div>
 </body>
 </html>"""
