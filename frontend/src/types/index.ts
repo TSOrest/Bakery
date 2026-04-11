@@ -148,6 +148,7 @@ export interface FinanceArticle {
   name: string
   direction: 'income' | 'expense'
   is_system: number
+  needs_client: number
 }
 
 export interface Finance {

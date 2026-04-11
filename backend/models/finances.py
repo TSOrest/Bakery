@@ -9,10 +9,11 @@ class FinanceArticle(Base):
     """Стаття фінансових операцій (редагована користувачем)."""
     __tablename__ = "finance_articles"
 
-    id        = Column(Integer, primary_key=True, autoincrement=True)
-    name      = Column(Text, nullable=False)
-    direction = Column(Text, nullable=False)   # 'income' | 'expense'
-    is_system = Column(Integer, default=0)     # 1 = системна (не видаляється)
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    name         = Column(Text, nullable=False)
+    direction    = Column(Text, nullable=False)   # 'income' | 'expense'
+    is_system    = Column(Integer, default=0)     # 1 = системна (не видаляється)
+    needs_client = Column(Integer, default=0)     # 1 = потребує прив'язки до клієнта
 
 
 class Finance(Base):

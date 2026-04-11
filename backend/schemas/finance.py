@@ -36,6 +36,7 @@ class FinanceArticleOut(BaseModel):
     name: str
     direction: str
     is_system: int
+    needs_client: int = 0
 
 
 # ── Фінансові операції ─────────────────────────────────────────────────────────

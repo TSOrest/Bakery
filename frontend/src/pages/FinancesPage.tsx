@@ -86,35 +86,54 @@ interface PaymentFormProps {
 }
 
 function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onClose }: PaymentFormProps) {
-  const [date,       setDate]       = useState(defaultDate)
-  const [articleId,  setArticleId]  = useState<number | null>(null)
+  const [date,        setDate]        = useState(defaultDate)
+  const [articleId,   setArticleId]   = useState<number | null>(null)
   const [selClientId, setSelClientId] = useState<number | null>(clientId ?? null)
-  const [amount,     setAmount]     = useState('')
-  const [notes,      setNotes]      = useState('')
-  const [saving,     setSaving]     = useState(false)
-  const [error,      setError]      = useState('')
-  const [articles,   setArticles]   = useState<FinanceArticle[]>([])
+  const [amount,      setAmount]      = useState('')
+  const [notes,       setNotes]       = useState('')
+  const [saving,      setSaving]      = useState(false)
+  const [error,       setError]       = useState('')
+  const [articles,    setArticles]    = useState<FinanceArticle[]>([])
+
+  // Якщо clientId переданий — одразу ставимо "Оплата" і не показуємо вибір статті
+  const isClientMode = !!clientId
 
   useEffect(() => {
     fetchFinanceArticles().then(list => {
       setArticles(list)
-      if (list.length > 0) setArticleId(list[0].id)
+      if (isClientMode) {
+        // Для клієнтської форми — шукаємо "Оплата" (income, needs_client=1)
+        const payment = list.find(a => a.needs_client && a.direction === 'income' && a.name === 'Оплата')
+        if (payment) setArticleId(payment.id)
+      } else {
+        // Загальна форма — перша загальна стаття (needs_client=0)
+        const first = list.find(a => !a.needs_client)
+        if (first) setArticleId(first.id)
+        else if (list.length > 0) setArticleId(list[0].id)
+      }
     })
-  }, [])
+  }, [isClientMode])
 
   const chosen = articles.find(a => a.id === articleId)
+  const needsClient = chosen ? chosen.needs_client === 1 : false
+
+  // Фільтруємо статті для загальної форми: без "Накладна" (автоматична)
+  const generalArticles = articles.filter(a => a.name !== 'Накладна')
+  const clientArticles  = generalArticles.filter(a => a.needs_client === 1)
+  const cashArticles    = generalArticles.filter(a => a.needs_client === 0)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const num = parseFloat(amount.replace(',', '.'))
     if (!num || num <= 0) { setError('Введіть суму > 0'); return }
     if (!chosen) { setError('Оберіть статтю операції'); return }
+    if (needsClient && !selClientId) { setError('Оберіть клієнта'); return }
     setSaving(true)
     setError('')
     try {
       await onSave({
         finance_date: date,
-        client_id:    selClientId ?? null,
+        client_id:    needsClient || isClientMode ? (selClientId ?? null) : null,
         finance_type: chosen.direction === 'income' ? 'payment' : 'invoice',
         article_id:   chosen.id,
         amount:       num,
@@ -129,24 +148,41 @@ function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onCl
     }
   }
 
-  const incomeArticles  = articles.filter(a => a.direction === 'income')
-  const expenseArticles = articles.filter(a => a.direction === 'expense')
-
   return (
     <div className={styles.modalOverlay} onClick={onClose}>
       <div className={styles.modal} onClick={e => e.stopPropagation()}>
         <div className={styles.modalHeader}>
-          <h3>Нова операція{clientName ? ` — ${clientName}` : ''}</h3>
+          <h3>{isClientMode ? `Оплата — ${clientName}` : 'Нова операція'}</h3>
           <button className={styles.closeBtn} onClick={onClose}>✕</button>
         </div>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label>Дата
             <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
           </label>
-          {!clientId && balances && (
+
+          {/* Загальна форма: спочатку вибір статті */}
+          {!isClientMode && (
+            <label>Стаття операції
+              <select value={articleId ?? ''} onChange={e => setArticleId(Number(e.target.value))}>
+                {clientArticles.length > 0 && (
+                  <optgroup label="Клієнтські операції">
+                    {clientArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </optgroup>
+                )}
+                {cashArticles.length > 0 && (
+                  <optgroup label="Касові операції">
+                    {cashArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+          )}
+
+          {/* Вибір клієнта: для загальної форми тільки якщо стаття клієнтська */}
+          {!isClientMode && needsClient && balances && (
             <label>Клієнт
-              <select value={selClientId ?? ''} onChange={e => setSelClientId(e.target.value ? Number(e.target.value) : null)}>
-                <option value="">— без клієнта —</option>
+              <select value={selClientId ?? ''} onChange={e => setSelClientId(e.target.value ? Number(e.target.value) : null)} required>
+                <option value="">— оберіть клієнта —</option>
                 {balances.map(b => (
                   <option key={b.client_id} value={b.client_id}>
                     {b.short_name ?? b.client_name}
@@ -155,25 +191,13 @@ function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onCl
               </select>
             </label>
           )}
-          <label>Стаття операції
-            <select value={articleId ?? ''} onChange={e => setArticleId(Number(e.target.value))}>
-              {incomeArticles.length > 0 && (
-                <optgroup label="Надходження (+)">
-                  {incomeArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </optgroup>
-              )}
-              {expenseArticles.length > 0 && (
-                <optgroup label="Витрати (−)">
-                  {expenseArticles.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </optgroup>
-              )}
-            </select>
-          </label>
-          {chosen && (
+
+          {chosen && !isClientMode && (
             <p style={{ margin: '-4px 0 6px', fontSize: '0.8rem', color: chosen.direction === 'income' ? '#27ae60' : '#e74c3c' }}>
               {chosen.direction === 'income' ? '+ надходження' : '− витрата'}
             </p>
           )}
+
           <label>Сума (грн)
             <input
               type="number" min="0.01" step="0.01" autoFocus
