@@ -1105,10 +1105,31 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
 
 def _dr_section1(db: Session, date: str) -> str:
     """Секція 1: продукція — замовлено/спечено/обмін/магазин по категоріях."""
+    # Замовлено: з orders напряму (всі клієнти крім магазину/системних)
+    SYSTEM_KINDS = ("shop", "writeoff", "ration", "underbaked")
+    ordered_rows = (
+        db.query(Order.product_id, func.sum(Order.qty).label("ord"))
+        .join(Client, Order.client_id == Client.id)
+        .filter(
+            Order.order_date == date,
+            Order.origin_id.is_(None),
+            Order.parent_order_id.is_(None),
+            Order.exchange_type == "none",
+            Order.price_override.is_(None),
+            Client.client_kind.notin_(SYSTEM_KINDS),
+        )
+        .group_by(Order.product_id)
+        .all()
+    )
+    ordered: dict[int, float] = {r.product_id: (r.ord or 0.0) for r in ordered_rows}
+
+    # Спечено: з baking_tasks (якщо завдання не генерувались — буде порожньо)
     tasks = {
         bt.product_id: bt
         for bt in db.query(BakingTask).filter(BakingTask.task_date == date).all()
     }
+
+    # Обмін: exchange_qty з orders
     exchange_rows = (
         db.query(Order.product_id, func.sum(Order.exchange_qty).label("exc"))
         .filter(Order.order_date == date, Order.exchange_type != "none")
@@ -1117,6 +1138,7 @@ def _dr_section1(db: Session, date: str) -> str:
     )
     exchanges: dict[int, float] = {r.product_id: (r.exc or 0.0) for r in exchange_rows}
 
+    # Магазин: qty orders де client_kind='shop'
     shop_rows = (
         db.query(Order.product_id, func.sum(Order.qty).label("sq"))
         .join(Client, Order.client_id == Client.id)
@@ -1126,7 +1148,7 @@ def _dr_section1(db: Session, date: str) -> str:
     )
     to_shop: dict[int, float] = {r.product_id: (r.sq or 0.0) for r in shop_rows}
 
-    all_pids = set(tasks) | set(exchanges) | set(to_shop)
+    all_pids = set(ordered) | set(tasks) | set(exchanges) | set(to_shop)
     if not all_pids:
         return "<p style='color:#888;font-size:9pt;'>— Даних про продукцію немає —</p>"
 
@@ -1151,16 +1173,16 @@ def _dr_section1(db: Session, date: str) -> str:
         rows_html = ""
         for pid in pids:
             bt      = tasks.get(pid)
-            ordered = bt.ordered_qty if bt else 0.0
-            baked   = (bt.baked_qty  if bt and bt.baked_qty is not None else 0.0)
+            ord_qty = ordered.get(pid, 0.0)
+            baked   = (bt.baked_qty if bt and bt.baked_qty is not None else 0.0)
             exc     = exchanges.get(pid, 0.0)
             shop    = to_shop.get(pid, 0.0)
-            tot_ord += ordered; tot_bak += baked; tot_exc += exc; tot_shop += shop
+            tot_ord += ord_qty; tot_bak += baked; tot_exc += exc; tot_shop += shop
             pname   = products_map[pid].name
             rows_html += f"""
       <tr>
         <td>{pname}</td>
-        <td class="dr-num">{fmt(ordered) if ordered else "—"}</td>
+        <td class="dr-num">{fmt(ord_qty) if ord_qty else "—"}</td>
         <td class="dr-num">{fmt(baked)   if baked   else "—"}</td>
         <td class="dr-num">{fmt(exc)     if exc     else "—"}</td>
         <td class="dr-num">{fmt(shop)    if shop    else "—"}</td>
@@ -1268,6 +1290,15 @@ def _dr_section3(db: Session, date: str) -> str:
     art_ids  = {e.article_id for e in entries if e.article_id}
     arts_map = {a.id: a for a in db.query(FinanceArticle).filter(FinanceArticle.id.in_(art_ids)).all()} if art_ids else {}
 
+    def _is_invoice(e: Finance) -> bool:
+        """Повертає True якщо запис є накладною (бухгалтерський, не готівковий)."""
+        if e.finance_type == "invoice":
+            return True
+        if e.article_id:
+            art = arts_map.get(e.article_id)
+            return bool(art and art.name == "Накладна")
+        return False
+
     by_article: dict[tuple, dict] = {}
     for e in entries:
         art      = arts_map.get(e.article_id) if e.article_id else None
@@ -1290,38 +1321,43 @@ def _dr_section3(db: Session, date: str) -> str:
                   f'<td class="dr-num {sign_cls}">{sign_chr}&nbsp;{fmt(abs(total))}&nbsp;грн</td></tr>')
         return h
 
-    net_income = round(sum(e.amount * e.sign for e in entries), 2)
-    cash_total = round(sum(e.amount * e.sign for e in entries if e.client_id is None), 2)
+    # Борг клієнтів = сума клієнтських операцій (накладні мінус оплати)
+    client_net    = round(sum(t for _, t in client_rows), 2)
+    # Залишок в касі = всі надходження (оплати) мінус касові витрати (без накладних)
+    cash_balance  = round(sum(e.amount * e.sign for e in entries if not _is_invoice(e)), 2)
 
     client_html   = _rows_html(client_rows) if client_rows else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
     cash_html     = _rows_html(cash_rows)   if cash_rows   else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
-    sign_cls      = "dr-income"  if net_income >= 0 else "dr-expense"
-    sign_chr      = "+"          if net_income >= 0 else "−"
-    cash_sign_cls = "dr-income"  if cash_total >= 0 else "dr-expense"
+
+    debt_cls  = "dr-income"  if client_net >= 0 else "dr-expense"
+    debt_chr  = "+"          if client_net >= 0 else "−"
+    debt_label = "Переплата клієнтів" if client_net > 0 else "Борг клієнтів"
+
+    cash_sign_cls = "dr-income"  if cash_balance >= 0 else "dr-expense"
+
+    debt_row = (
+        f'<tr class="dr-subtotal">'
+        f'<td><em>{debt_label}</em></td>'
+        f'<td class="dr-num {debt_cls}"><em>{debt_chr}&nbsp;{fmt(abs(client_net))}&nbsp;грн</em></td>'
+        f'</tr>'
+    )
 
     cash_row = (
-        f'<tr><td>Залишок в касі</td>'
-        f'<td class="dr-num {cash_sign_cls}">{fmt(cash_total)}&nbsp;грн</td></tr>'
-        if cash_rows else ""
-    )
+        f'<tr><td><strong>Залишок в касі</strong></td>'
+        f'<td class="dr-num dr-money {cash_sign_cls}"><strong>{fmt(cash_balance)}&nbsp;грн</strong></td></tr>'
+    ) if (client_rows or cash_rows) else ""
 
     return f"""
   <div class="dr-fin-block">
     <div class="dr-fin-title">Клієнтські операції</div>
-    <table class="dr-table dr-fin-table"><tbody>{client_html}</tbody></table>
+    <table class="dr-table dr-fin-table"><tbody>{client_html}{debt_row}</tbody></table>
   </div>
   <div class="dr-fin-block">
     <div class="dr-fin-title">Касові операції</div>
     <table class="dr-table dr-fin-table"><tbody>{cash_html}</tbody></table>
   </div>
   <table class="dr-table dr-fin-total-table">
-    <tbody>
-      <tr>
-        <td><strong>Чистий дохід за день</strong></td>
-        <td class="dr-num dr-money {sign_cls}"><strong>{sign_chr}&nbsp;{fmt(abs(net_income))}&nbsp;грн</strong></td>
-      </tr>
-      {cash_row}
-    </tbody>
+    <tbody>{cash_row}</tbody>
   </table>"""
 
 
@@ -1368,6 +1404,7 @@ def daily_report(date: str, db: Session = Depends(get_db)):
     .dr-fin-table       {{ width:60%;min-width:300px; }}
     .dr-fin-total-table {{ width:60%;min-width:300px;margin-top:8px; }}
     .dr-fin-total-table td {{ padding:4px 6px;border:1px solid #bcc6d4;background:#e8edf3; }}
+    .dr-subtotal td {{ background:#f5f0e8!important;border-top:1px dashed #bbb;font-size:8.5pt; }}
   </style>
 </head>
 <body>
