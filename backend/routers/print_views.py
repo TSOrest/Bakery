@@ -1129,10 +1129,17 @@ def _dr_section1(db: Session, date: str) -> str:
         for bt in db.query(BakingTask).filter(BakingTask.task_date == date).all()
     }
 
-    # Обмін: exchange_qty з orders
+    # Обмін: qty з orders де exchange_type != 'none'
+    # (exchange_qty не завжди заповнений — використовуємо qty доставленого товару)
     exchange_rows = (
-        db.query(Order.product_id, func.sum(Order.exchange_qty).label("exc"))
-        .filter(Order.order_date == date, Order.exchange_type != "none")
+        db.query(Order.product_id, func.sum(Order.qty).label("exc"))
+        .join(Client, Order.client_id == Client.id)
+        .filter(
+            Order.order_date == date,
+            Order.exchange_type != "none",
+            Order.origin_id.is_(None),
+            Client.client_kind.notin_(SYSTEM_KINDS),
+        )
         .group_by(Order.product_id)
         .all()
     )
@@ -1174,7 +1181,7 @@ def _dr_section1(db: Session, date: str) -> str:
         for pid in pids:
             bt      = tasks.get(pid)
             ord_qty = ordered.get(pid, 0.0)
-            baked   = (bt.baked_qty if bt and bt.baked_qty is not None else 0.0)
+            baked   = (bt.baked_qty if bt and bt.baked_qty is not None else ord_qty)
             exc     = exchanges.get(pid, 0.0)
             shop    = to_shop.get(pid, 0.0)
             tot_ord += ord_qty; tot_bak += baked; tot_exc += exc; tot_shop += shop
@@ -1211,7 +1218,7 @@ def _dr_section1(db: Session, date: str) -> str:
 
 
 def _dr_section2(db: Session, date: str) -> str:
-    """Секція 2: агрегація по маршрутах із накладних."""
+    """Секція 2: агрегація по маршрутах із накладних + обміни з orders."""
     all_cats = {c.id: c for c in db.query(Category).filter(Category.is_baked == 1).all()}
     invoices_list = (
         db.query(Invoice)
@@ -1236,11 +1243,42 @@ def _dr_section2(db: Session, date: str) -> str:
             if cat_id and cat_id not in all_cats:
                 cat_id = None
             agg[rid]["cats"].setdefault(cat_id, {"qty": 0.0, "exch": 0.0})
-            if ln.is_exchange:
-                agg[rid]["cats"][cat_id]["exch"] += ln.qty
-            else:
-                agg[rid]["cats"][cat_id]["qty"]  += ln.qty
-                agg[rid]["sum"] += ln.sum
+            # is_exchange=1 рядки — артефакт імпорту: в реальних даних не заповнені.
+            # Обміни читаємо окремо з orders нижче.
+            agg[rid]["cats"][cat_id]["qty"] += ln.qty
+            agg[rid]["sum"] += ln.sum
+
+    # Обміни: з orders де exchange_type != 'none', групуємо по route клієнта
+    SYSTEM_KINDS = ("shop", "writeoff", "ration", "underbaked")
+    exch_order_rows = (
+        db.query(
+            Client.route_id.label("rid"),
+            Order.product_id,
+            func.sum(Order.qty).label("exc"),
+        )
+        .join(Client, Order.client_id == Client.id)
+        .filter(
+            Order.order_date == date,
+            Order.exchange_type != "none",
+            Order.origin_id.is_(None),
+            Client.client_kind.notin_(SYSTEM_KINDS),
+        )
+        .group_by(Client.route_id, Order.product_id)
+        .all()
+    )
+    # Завантажуємо продукти обмінів яких може не бути в products_map
+    exch_pids = {r.product_id for r in exch_order_rows} - set(products_map)
+    if exch_pids:
+        products_map.update({p.id: p for p in db.query(Product).filter(Product.id.in_(exch_pids)).all()})
+    for row in exch_order_rows:
+        rid    = row.rid or 0
+        prod   = products_map.get(row.product_id)
+        cat_id = prod.category_id if prod else None
+        if cat_id and cat_id not in all_cats:
+            cat_id = None
+        agg.setdefault(rid, {"sum": 0.0, "cats": {}})
+        agg[rid]["cats"].setdefault(cat_id, {"qty": 0.0, "exch": 0.0})
+        agg[rid]["cats"][cat_id]["exch"] += (row.exc or 0.0)
 
     used_cats = sorted(
         {cid for rd in agg.values() for cid in rd["cats"] if cid and cid in all_cats},
@@ -1283,21 +1321,43 @@ def _dr_section2(db: Session, date: str) -> str:
 
 def _dr_section3(db: Session, date: str) -> str:
     """Секція 3: фінансовий підсумок дня."""
+    # Завантажуємо всі статті — потрібні і для сьогоднішніх записів,
+    # і для коректного виключення "Накладна" з історичного підрахунку каси.
+    all_arts: dict[int, FinanceArticle] = {a.id: a for a in db.query(FinanceArticle).all()}
+    invoice_art_ids = {aid for aid, a in all_arts.items() if a.name == "Накладна"}
+
+    def _is_invoice_entry(e: Finance) -> bool:
+        """True якщо запис є бухгалтерською накладною (не рухом готівки)."""
+        if e.article_id:
+            return e.article_id in invoice_art_ids
+        return False
+
+    # ── Залишок в касі на початок дня (всі не-накладні до цієї дати) ──────────
+    prev_q = db.query(func.sum(Finance.amount * Finance.sign)).filter(
+        Finance.finance_date < date,
+    )
+    if invoice_art_ids:
+        prev_q = prev_q.filter(
+            (Finance.article_id.is_(None)) | Finance.article_id.notin_(invoice_art_ids)
+        )
+    prev_balance = round((prev_q.scalar() or 0.0), 2)
+
+    # ── Записи поточного дня ───────────────────────────────────────────────────
     entries = db.query(Finance).filter(Finance.finance_date == date).all()
+
     if not entries:
+        prev_cls = "dr-income" if prev_balance >= 0 else "dr-expense"
+        prev_row = (
+            f'<tr><td>Залишок на початок дня</td>'
+            f'<td class="dr-num {prev_cls} dr-money">{fmt(prev_balance)}&nbsp;грн</td></tr>'
+            f'<tr><td><strong>Залишок в касі</strong></td>'
+            f'<td class="dr-num {prev_cls} dr-money"><strong>{fmt(prev_balance)}&nbsp;грн</strong></td></tr>'
+        ) if prev_balance else ""
+        if prev_row:
+            return f'<table class="dr-table dr-fin-total-table"><tbody>{prev_row}</tbody></table>'
         return "<p style='color:#888;font-size:9pt;'>— Фінансових операцій немає —</p>"
 
-    art_ids  = {e.article_id for e in entries if e.article_id}
-    arts_map = {a.id: a for a in db.query(FinanceArticle).filter(FinanceArticle.id.in_(art_ids)).all()} if art_ids else {}
-
-    def _is_invoice(e: Finance) -> bool:
-        """Повертає True якщо запис є накладною (бухгалтерський, не готівковий)."""
-        if e.finance_type == "invoice":
-            return True
-        if e.article_id:
-            art = arts_map.get(e.article_id)
-            return bool(art and art.name == "Накладна")
-        return False
+    arts_map = all_arts  # псевдонім для лаконічності нижче
 
     by_article: dict[tuple, dict] = {}
     for e in entries:
@@ -1321,20 +1381,44 @@ def _dr_section3(db: Session, date: str) -> str:
                   f'<td class="dr-num {sign_cls}">{sign_chr}&nbsp;{fmt(abs(total))}&nbsp;грн</td></tr>')
         return h
 
-    # Борг клієнтів = сума клієнтських операцій (накладні мінус оплати)
-    client_net    = round(sum(t for _, t in client_rows), 2)
-    # Залишок в касі = всі надходження (оплати) мінус касові витрати (без накладних)
-    cash_balance  = round(sum(e.amount * e.sign for e in entries if not _is_invoice(e)), 2)
+    # Борг клієнтів = сума клієнтських операцій дня (накладні мінус оплати)
+    client_net = round(sum(t for _, t in client_rows), 2)
 
-    client_html   = _rows_html(client_rows) if client_rows else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
-    cash_html     = _rows_html(cash_rows)   if cash_rows   else "<tr><td colspan='2' style='color:#888'>—</td></tr>"
+    # Рух готівки за день (всі не-накладні)
+    today_cash_flow = round(sum(e.amount * e.sign for e in entries if not _is_invoice_entry(e)), 2)
 
-    debt_cls  = "dr-income"  if client_net >= 0 else "dr-expense"
-    debt_chr  = "+"          if client_net >= 0 else "−"
+    # Підсумковий залишок в касі
+    cash_balance = round(prev_balance + today_cash_flow, 2)
+
+    # ── Сортування рядків ─────────────────────────────────────────────────────
+    def _client_order(name: str) -> int:
+        n = name.lower()
+        if "накладна" in n:   return 0
+        if "оплата"   in n:   return 1
+        return 2  # корекція, списання, інші
+
+    def _cash_order(name: str) -> int:
+        if "виведення" in name.lower():  return 99  # завжди останнє
+        return 0
+
+    client_sorted = sorted(client_rows, key=lambda x: (_client_order(x[0]), -abs(x[1])))
+    cash_sorted   = sorted(cash_rows,   key=lambda x: (_cash_order(x[0]),   -abs(x[1])))
+
+    def _row(name: str, total: float, bold: bool = False) -> str:
+        sign_cls = "dr-income" if total >= 0 else "dr-expense"
+        sign_chr = "+" if total >= 0 else "−"
+        n = f"<strong>{name}</strong>" if bold else name
+        v = f"<strong>{fmt(abs(total))}</strong>" if bold else fmt(abs(total))
+        return (f'<tr><td>{n}</td>'
+                f'<td class="dr-num {sign_cls}">{sign_chr}&nbsp;{v}&nbsp;грн</td></tr>')
+
+    client_html = "".join(_row(n, t) for n, t in client_sorted) or "<tr><td colspan='2' style='color:#888'>—</td></tr>"
+    cash_html   = "".join(_row(n, t) for n, t in cash_sorted)   or "<tr><td colspan='2' style='color:#888'>—</td></tr>"
+
+    # ── Рядок борг/переплата (3.2 підсумок) ───────────────────────────────────
+    debt_cls   = "dr-income" if client_net >= 0 else "dr-expense"
+    debt_chr   = "+"         if client_net >= 0 else "−"
     debt_label = "Переплата клієнтів" if client_net > 0 else "Борг клієнтів"
-
-    cash_sign_cls = "dr-income"  if cash_balance >= 0 else "dr-expense"
-
     debt_row = (
         f'<tr class="dr-subtotal">'
         f'<td><em>{debt_label}</em></td>'
@@ -1342,12 +1426,29 @@ def _dr_section3(db: Session, date: str) -> str:
         f'</tr>'
     )
 
-    cash_row = (
+    # ── 3.1 Залишок на початок дня ────────────────────────────────────────────
+    prev_cls  = "dr-income" if prev_balance >= 0 else "dr-expense"
+    prev_chr  = "+"         if prev_balance >= 0 else "−"
+    prev_block = (
+        f'<table class="dr-table dr-fin-total-table" style="margin-bottom:10px;">'
+        f'<tbody>'
+        f'<tr><td>Залишок на початок дня</td>'
+        f'<td class="dr-num dr-money {prev_cls}">{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</td></tr>'
+        f'</tbody></table>'
+    )
+
+    # ── 3.4 Залишок в касі ────────────────────────────────────────────────────
+    bal_cls = "dr-income" if cash_balance >= 0 else "dr-expense"
+    bal_block = (
+        f'<table class="dr-table dr-fin-total-table">'
+        f'<tbody>'
         f'<tr><td><strong>Залишок в касі</strong></td>'
-        f'<td class="dr-num dr-money {cash_sign_cls}"><strong>{fmt(cash_balance)}&nbsp;грн</strong></td></tr>'
-    ) if (client_rows or cash_rows) else ""
+        f'<td class="dr-num dr-money {bal_cls}"><strong>{fmt(cash_balance)}&nbsp;грн</strong></td></tr>'
+        f'</tbody></table>'
+    )
 
     return f"""
+  {prev_block}
   <div class="dr-fin-block">
     <div class="dr-fin-title">Клієнтські операції</div>
     <table class="dr-table dr-fin-table"><tbody>{client_html}{debt_row}</tbody></table>
@@ -1356,9 +1457,7 @@ def _dr_section3(db: Session, date: str) -> str:
     <div class="dr-fin-title">Касові операції</div>
     <table class="dr-table dr-fin-table"><tbody>{cash_html}</tbody></table>
   </div>
-  <table class="dr-table dr-fin-total-table">
-    <tbody>{cash_row}</tbody>
-  </table>"""
+  {bal_block}"""
 
 
 @router.get("/daily-report", response_class=HTMLResponse)
