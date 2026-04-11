@@ -23,11 +23,13 @@ FINANCE_LABELS = {
 class FinanceArticleCreate(BaseModel):
     name: str
     direction: Literal["income", "expense"]
+    needs_client: int = 0
 
 
 class FinanceArticleUpdate(BaseModel):
     name: Optional[str] = None
     direction: Optional[Literal["income", "expense"]] = None
+    needs_client: Optional[int] = None
 
 
 class FinanceArticleOut(BaseModel):

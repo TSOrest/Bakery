@@ -18,7 +18,7 @@ def list_articles(db: Session = Depends(get_db)):
 
 @router.post("/", response_model=FinanceArticleOut, status_code=201)
 def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db)):
-    article = FinanceArticle(name=data.name, direction=data.direction, is_system=0)
+    article = FinanceArticle(name=data.name, direction=data.direction, is_system=0, needs_client=data.needs_client)
     db.add(article)
     db.commit()
     db.refresh(article)
