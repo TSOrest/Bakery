@@ -49,26 +49,38 @@ ROOT = Path(__file__).parent
 
 
 def _resolve_data_dir() -> Path:
-    """Визначає DATA_DIR: env → run-server.ps1 → ROOT.
-    run-tray.ps1 не виставляє BAKERY_DATA_DIR, тому читаємо зі згенерованого
-    scripts/run-server.ps1, де install-service.ps1 прописує правильний шлях.
+    """Визначає DATA_DIR за пріоритетом:
+    1. env BAKERY_DATA_DIR (виставляється run-server.ps1 / run-tray.ps1)
+    2. %ProgramData%\\Bakery — стандартний продакшн-шлях інсталятора
+    3. Парсинг run-server.ps1 (у DATA_DIR\scripts або ROOT\scripts)
+    4. ROOT — dev-середовище (всі файли в одній папці)
     """
     from_env = os.environ.get("BAKERY_DATA_DIR", "")
     if from_env:
         return Path(from_env)
+
+    # Стандартне розташування продакшн-інсталяції
+    program_data = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+    std_data = program_data / "Bakery"
+    if (std_data / "bakery.db").exists():
+        return std_data
+
+    # Парсимо згенерований run-server.ps1 (може бути в DATA або ROOT)
     import re
-    runner = ROOT / "scripts" / "run-server.ps1"
-    if runner.exists():
-        try:
-            for line in runner.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
-                m = re.match(r"\$env:BAKERY_DATA_DIR\s*=\s*'(.+)'", line.strip())
-                if m:
-                    p = Path(m.group(1))
-                    if p.exists():
-                        return p
-        except Exception:
-            pass
-    return ROOT
+    for runner in [std_data / "scripts" / "run-server.ps1",
+                   ROOT / "scripts" / "run-server.ps1"]:
+        if runner.exists():
+            try:
+                for line in runner.read_text(encoding="utf-8-sig", errors="ignore").splitlines():
+                    m = re.match(r"\$env:BAKERY_DATA_DIR\s*=\s*'(.+)'", line.strip())
+                    if m:
+                        p = Path(m.group(1))
+                        if p.exists():
+                            return p
+            except Exception:
+                pass
+
+    return ROOT  # dev: все в одній папці
 
 
 DATA_DIR   = _resolve_data_dir()
