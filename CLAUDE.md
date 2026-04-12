@@ -692,8 +692,17 @@ INSERT INTO settings VALUES
   - `_is_invoice_entry()`: перевіряє тільки назву статті "Накладна" (не `finance_type` — у імпортованих даних касові статті мають `finance_type='invoice'`)
 - [x] Вкладка "Звіти" (`/reports`, `ReportsPage.tsx`): датепікер + кнопка "Відкрити звіт PDF" → нова вкладка
 
+### ✅ Міграція з .accdb
+- [x] `backend/routers/import_accdb.py` — ендпоінти: upload, preview, context, run, status, result
+- [x] `backend/services/import_accdb.py` (~1500 рядків) — повний імпорт:
+  - читання .accdb через PowerShell 32-bit OleDb (ACE driver) або pyodbc як fallback
+  - preview: перші N рядків кожної таблиці, автовизначення маппінгу колонок
+  - import: одиниці → маршрути → вироби → клієнти → фінансові статті → ціни → замовлення → накладні → фінансові операції → звірка балансів → залишки магазину
+  - прогрес в реальному часі (SSE або polling `/import/status`)
+  - файл зберігається в `DATA_DIR/tmp/` і автовидаляється через 24 год
+- [x] `frontend/src/api/importAccdb.ts` + UI сторінка імпорту в AdminPage
+
 ### ⬜ Фаза 4 — Розширення
-- [ ] Міграція з .accdb
 - [ ] Розширені звіти (аналітика, порівняння по тижнях/місяцях)
 - [x] Архівування, автобекапи (реалізовано в tray.py + UI налаштувань)
 
