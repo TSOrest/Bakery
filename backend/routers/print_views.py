@@ -1535,3 +1535,519 @@ def daily_report(date: str, db: Session = Depends(get_db)):
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Загальний CSS для додаткових звітів (боргова, місячний, виписка)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_REPORT_CSS = """
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; font-size: 9pt; color: #222; margin: 0; }
+  @media screen { .rpt-wrap { max-width: 820px; margin: 0 auto; padding: 16px; } }
+  @media print  { @page { size: A4 portrait; margin: 10mm 12mm; } }
+  .rpt-header { display:flex;justify-content:space-between;align-items:baseline;
+                border-bottom:2px solid #1a3a5c;padding-bottom:6px;margin-bottom:14px; }
+  .rpt-title  { font-size:13pt;font-weight:bold;color:#1a3a5c; }
+  .rpt-sub    { font-size:9pt;color:#555;margin-top:2px; }
+  .rpt-date   { font-size:11pt;font-weight:bold; }
+  .rpt-section { margin-bottom:18px; }
+  .rpt-stitle { font-size:10.5pt;font-weight:bold;background:#1a3a5c;color:#fff;
+                padding:3px 8px;margin-bottom:6px;border-radius:3px; }
+  table.rpt   { width:100%;border-collapse:collapse;font-size:9pt;margin-bottom:4px; }
+  table.rpt th { background:#e8edf3;font-weight:bold;padding:4px 6px;
+                 border:1px solid #bcc6d4;text-align:left; }
+  table.rpt td { padding:3px 6px;border:1px solid #dde3ea; }
+  table.rpt tbody tr:nth-child(even) td { background:#f7f9fb; }
+  .r    { text-align:right;font-variant-numeric:tabular-nums; }
+  .c    { text-align:center; }
+  .rh td   { background:#d4dbe7!important;font-weight:bold;font-size:9.5pt; }
+  .rsub td { background:#eef1f7!important;font-style:italic;font-size:8.5pt; }
+  .rtot td { background:#e8edf3!important;font-weight:bold;border-top:2px solid #9ab; }
+  .rcat td { background:#f0f4fa!important;font-weight:bold;color:#1a3a5c; }
+  .indent  { padding-left:18px!important; }
+  .addr    { color:#666;font-size:8.5pt; }
+  .green   { color:#1a7a30; }
+  .red     { color:#b00; }
+  .muted   { color:#888; }
+  .no-print { }
+  @media print { .no-print { display:none!important; } }
+</style>"""
+
+
+# ─── Боргова відомість ────────────────────────────────────────────────────────
+
+@router.get("/debts", response_class=HTMLResponse)
+def debts_report(date: str, db: Session = Depends(get_db)):
+    """Боргова відомість: стан розрахунків з клієнтами станом на дату."""
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    bal_rows = (
+        db.query(Finance.client_id,
+                 func.sum(Finance.amount * Finance.sign).label("bal"))
+        .filter(Finance.client_id.isnot(None), Finance.finance_date <= date)
+        .group_by(Finance.client_id)
+        .all()
+    )
+    balances: dict[int, float] = {r.client_id: float(r.bal or 0) for r in bal_rows}
+
+    active_ids = {cid for cid, b in balances.items() if abs(b) > 0.005}
+    if not active_ids:
+        return HTMLResponse(content=f"""<!DOCTYPE html><html lang="uk">
+<head><meta charset="UTF-8"><title>Боргова відомість</title>{_REPORT_CSS}</head>
+<body>{PRINT_BTN}<div class="rpt-wrap">
+<div class="rpt-header">
+  <div><div class="rpt-title">{bakery_name}</div>
+  <div class="rpt-sub">Боргова відомість</div></div>
+  <div class="rpt-date">Станом на {ua_date(date)}</div>
+</div>
+<p class="muted">— Заборгованостей і переплат не виявлено —</p>
+</div></body></html>""")
+
+    clients  = db.query(Client).filter(Client.id.in_(active_ids)).all()
+    routes   = {r.id: r for r in db.query(Route).all()}
+
+    by_route: dict[int | None, list] = {}
+    for c in clients:
+        by_route.setdefault(c.route_id, []).append(c)
+    sorted_rids = sorted(
+        by_route.keys(),
+        key=lambda rid: routes[rid].sort_order if rid and rid in routes else 999,
+    )
+
+    rows_html = ""
+    grand_debt = grand_credit = 0.0
+    for rid in sorted_rids:
+        rname    = routes[rid].name if rid and rid in routes else "Без маршруту"
+        rclients = sorted(by_route[rid], key=lambda c: (c.client_group or "", c.full_name))
+        r_debt   = sum(min(0.0, balances.get(c.id, 0)) for c in rclients)
+        r_cred   = sum(max(0.0, balances.get(c.id, 0)) for c in rclients)
+        grand_debt   += r_debt
+        grand_credit += r_cred
+        rows_html += (
+            f'<tr class="rh"><td colspan="2">{rname}</td>'
+            f'<td class="r red">{fmt(abs(r_debt)) if r_debt < -0.005 else "—"}</td>'
+            f'<td class="r green">{fmt(r_cred) if r_cred > 0.005 else "—"}</td></tr>'
+        )
+        for c in rclients:
+            bal  = balances.get(c.id, 0.0)
+            name = c.short_name or c.full_name
+            if bal < -0.005:
+                dv, cv, dcls = fmt(abs(bal)), "", " red"
+            else:
+                dv, cv, dcls = "", fmt(bal), ""
+            rows_html += (
+                f'<tr><td class="indent">{name}</td>'
+                f'<td class="addr">{c.address or ""}</td>'
+                f'<td class="r{dcls}">{dv}</td>'
+                f'<td class="r green">{cv}</td></tr>'
+            )
+
+    net      = grand_debt + grand_credit
+    net_cls  = "red" if net < -0.005 else ("green" if net > 0.005 else "")
+    net_sign = "−"   if net < -0.005 else "+"
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Боргова відомість {date}</title>
+  {_REPORT_CSS}
+</head>
+<body>
+{PRINT_BTN}
+<div class="rpt-wrap">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">{bakery_name}</div>
+      <div class="rpt-sub">Боргова відомість</div>
+    </div>
+    <div class="rpt-date">Станом на {ua_date(date)}</div>
+  </div>
+  <table class="rpt">
+    <thead>
+      <tr>
+        <th>Клієнт</th><th>Адреса</th>
+        <th class="r" style="width:120px">Борг, грн</th>
+        <th class="r" style="width:120px">Переплата, грн</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows_html}
+      <tr class="rtot">
+        <td colspan="2"><strong>Разом</strong></td>
+        <td class="r red"><strong>{fmt(abs(grand_debt)) if grand_debt < -0.005 else "0,00"}</strong></td>
+        <td class="r green"><strong>{fmt(grand_credit) if grand_credit > 0.005 else "0,00"}</strong></td>
+      </tr>
+      <tr class="rtot">
+        <td colspan="2"><strong>Нетто (переплата − борг)</strong></td>
+        <td colspan="2" class="r {net_cls}">
+          <strong>{net_sign}&nbsp;{fmt(abs(net))}&nbsp;грн</strong>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+# ─── Місячний звіт продажів ───────────────────────────────────────────────────
+
+@router.get("/monthly-sales", response_class=HTMLResponse)
+def monthly_sales_report(year: int, month: int, db: Session = Depends(get_db)):
+    """Місячний звіт: продажі по виробах, маршрутах і клієнтах."""
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+    month_str   = f"{year}-{month:02d}"
+    month_label = f"{MONTHS_UK[month].capitalize()} {year}"
+
+    invoices_m = (
+        db.query(Invoice)
+        .filter(
+            func.strftime("%Y-%m", Invoice.invoice_date) == month_str,
+            Invoice.status != "cancelled",
+        )
+        .all()
+    )
+    if not invoices_m:
+        return HTMLResponse(content=f"""<!DOCTYPE html><html lang="uk">
+<head><meta charset="UTF-8"><title>Місячний звіт {month_label}</title>{_REPORT_CSS}</head>
+<body>{PRINT_BTN}<div class="rpt-wrap">
+<div class="rpt-header">
+  <div><div class="rpt-title">{bakery_name}</div>
+  <div class="rpt-sub">Місячний звіт продажів</div></div>
+  <div class="rpt-date">{month_label}</div>
+</div>
+<p class="muted">— Накладних за цей місяць немає —</p>
+</div></body></html>""")
+
+    all_cats     = {c.id: c for c in db.query(Category).all()}
+    all_products = {p.id: p for p in db.query(Product).all()}
+    all_routes   = {r.id: r for r in db.query(Route).all()}
+    all_clients  = {c.id: c for c in db.query(Client).all()}
+    inv_ids      = [inv.id for inv in invoices_m]
+
+    lines = (
+        db.query(InvoiceLine)
+        .filter(InvoiceLine.invoice_id.in_(inv_ids), InvoiceLine.is_exchange == 0)
+        .all()
+    )
+
+    # ── Секція 1: по виробах ─────────────────────────────────────────────────
+    prod_agg: dict[int, dict] = {}
+    for ln in lines:
+        prod_agg.setdefault(ln.product_id, {"qty": 0.0, "sum": 0.0})
+        prod_agg[ln.product_id]["qty"] += ln.qty
+        prod_agg[ln.product_id]["sum"] += ln.sum
+
+    cat_groups: dict[int | None, list] = {}
+    for pid, agg in prod_agg.items():
+        p   = all_products.get(pid)
+        cid = p.category_id if p else None
+        cat_groups.setdefault(cid, []).append((pid, agg, p))
+
+    products_html = ""
+    grand_qty = grand_sum_p = 0.0
+    for cid in sorted(cat_groups, key=lambda c: all_cats[c].sort_order if c and c in all_cats else 999):
+        cat_name = all_cats[cid].name if cid and cid in all_cats else "Без категорії"
+        group    = sorted(cat_groups[cid], key=lambda x: all_products[x[0]].name if x[0] in all_products else "")
+        cat_qty = cat_sum = 0.0
+        for pid, agg, p in group:
+            pname  = p.name if p else f"#{pid}"
+            unit   = p.unit.name if p and p.unit else "шт"
+            products_html += (
+                f'<tr><td class="indent">{pname}</td>'
+                f'<td class="c">{unit}</td>'
+                f'<td class="r">{agg["qty"]:g}</td>'
+                f'<td class="r">{fmt(agg["sum"])}</td></tr>'
+            )
+            cat_qty += agg["qty"]; cat_sum += agg["sum"]
+        grand_qty += cat_qty; grand_sum_p += cat_sum
+        products_html += (
+            f'<tr class="rcat"><td>{cat_name} — разом</td>'
+            f'<td></td><td class="r">{cat_qty:g}</td>'
+            f'<td class="r">{fmt(cat_sum)}</td></tr>'
+        )
+
+    # ── Секція 2: по маршрутах ───────────────────────────────────────────────
+    route_agg: dict[int | None, dict] = {}
+    for inv in invoices_m:
+        route_agg.setdefault(inv.route_id, {"cnt": 0, "sum": 0.0})
+        route_agg[inv.route_id]["cnt"] += 1
+        route_agg[inv.route_id]["sum"] += inv.total_sum
+
+    routes_html = ""
+    for rid in sorted(route_agg, key=lambda r: all_routes[r].sort_order if r and r in all_routes else 999):
+        rname = all_routes[rid].name if rid and rid in all_routes else "Без маршруту"
+        ragg  = route_agg[rid]
+        routes_html += (
+            f'<tr><td>{rname}</td>'
+            f'<td class="c">{ragg["cnt"]}</td>'
+            f'<td class="r">{fmt(ragg["sum"])}</td></tr>'
+        )
+    grand_cnt   = sum(r["cnt"] for r in route_agg.values())
+    grand_sum_r = sum(r["sum"] for r in route_agg.values())
+
+    # ── Секція 3: топ клієнти ────────────────────────────────────────────────
+    client_agg: dict[int, dict] = {}
+    for inv in invoices_m:
+        client_agg.setdefault(inv.client_id, {"cnt": 0, "sum": 0.0})
+        client_agg[inv.client_id]["cnt"] += 1
+        client_agg[inv.client_id]["sum"] += inv.total_sum
+
+    clients_html = ""
+    for cid, cagg in sorted(client_agg.items(), key=lambda x: -x[1]["sum"])[:15]:
+        c     = all_clients.get(cid)
+        cname = (c.short_name or c.full_name) if c else f"#{cid}"
+        rname = all_routes[c.route_id].name if c and c.route_id and c.route_id in all_routes else "—"
+        clients_html += (
+            f'<tr><td>{cname}</td><td class="muted">{rname}</td>'
+            f'<td class="c">{cagg["cnt"]}</td>'
+            f'<td class="r">{fmt(cagg["sum"])}</td></tr>'
+        )
+
+    unique_days = len({inv.invoice_date for inv in invoices_m})
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Місячний звіт {month_label}</title>
+  {_REPORT_CSS}
+</head>
+<body>
+{PRINT_BTN}
+<div class="rpt-wrap">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">{bakery_name}</div>
+      <div class="rpt-sub">Місячний звіт продажів</div>
+    </div>
+    <div class="rpt-date">{month_label}</div>
+  </div>
+
+  <div style="font-size:8.5pt;color:#555;margin-bottom:14px;">
+    Накладних: <b>{grand_cnt}</b> &nbsp;·&nbsp;
+    Днів з відвантаженням: <b>{unique_days}</b> &nbsp;·&nbsp;
+    Загальна сума: <b>{fmt(grand_sum_r)} грн</b>
+  </div>
+
+  <div class="rpt-section">
+    <div class="rpt-stitle">1. ПРОДУКЦІЯ</div>
+    <table class="rpt">
+      <thead>
+        <tr>
+          <th>Виріб</th>
+          <th class="c" style="width:50px">Од.</th>
+          <th class="r" style="width:90px">Кількість</th>
+          <th class="r" style="width:120px">Сума, грн</th>
+        </tr>
+      </thead>
+      <tbody>
+        {products_html}
+        <tr class="rtot">
+          <td colspan="2"><strong>Разом</strong></td>
+          <td class="r"><strong>{grand_qty:g}</strong></td>
+          <td class="r"><strong>{fmt(grand_sum_p)}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rpt-section">
+    <div class="rpt-stitle">2. МАРШРУТИ</div>
+    <table class="rpt">
+      <thead>
+        <tr>
+          <th>Маршрут</th>
+          <th class="c" style="width:90px">Накладних</th>
+          <th class="r" style="width:130px">Сума, грн</th>
+        </tr>
+      </thead>
+      <tbody>
+        {routes_html}
+        <tr class="rtot">
+          <td><strong>Разом</strong></td>
+          <td class="c"><strong>{grand_cnt}</strong></td>
+          <td class="r"><strong>{fmt(grand_sum_r)}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rpt-section">
+    <div class="rpt-stitle">3. ТОП КЛІЄНТИ</div>
+    <table class="rpt">
+      <thead>
+        <tr>
+          <th>Клієнт</th>
+          <th>Маршрут</th>
+          <th class="c" style="width:80px">Накладних</th>
+          <th class="r" style="width:130px">Сума, грн</th>
+        </tr>
+      </thead>
+      <tbody>{clients_html}</tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+# ─── Виписка по клієнту ───────────────────────────────────────────────────────
+
+@router.get("/client-statement", response_class=HTMLResponse)
+def client_statement(
+    client_id: int,
+    from_date: str,
+    to_date: str,
+    db: Session = Depends(get_db),
+):
+    """Виписка по клієнту: хронологія операцій з рухом балансу за період."""
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+
+    client_name = client.short_name or client.full_name
+    art_map = {a.id: a for a in db.query(FinanceArticle).all()}
+
+    # Відкриваючий залишок
+    open_finances = (
+        db.query(Finance)
+        .filter(Finance.client_id == client_id, Finance.finance_date < from_date)
+        .all()
+    )
+    opening_balance = sum(f.amount * f.sign for f in open_finances)
+
+    # Операції за період
+    period_finances = (
+        db.query(Finance)
+        .filter(
+            Finance.client_id == client_id,
+            Finance.finance_date >= from_date,
+            Finance.finance_date <= to_date,
+        )
+        .order_by(Finance.finance_date, Finance.id)
+        .all()
+    )
+
+    rows_html = ""
+    running = opening_balance
+    total_debit = total_credit = 0.0
+
+    for f in period_finances:
+        art    = art_map.get(f.article_id)
+        aname  = art.name if art else (f.finance_type or "—")
+        amount = f.amount * f.sign
+        running += amount
+
+        if amount < 0:
+            dv, cv, acls = fmt(abs(amount)), "", "red"
+            total_debit += abs(amount)
+        else:
+            dv, cv, acls = "", fmt(amount), "green"
+            total_credit += amount
+
+        bal_cls  = "red" if running < -0.005 else ("green" if running > 0.005 else "")
+        bal_sign = "−" if running < -0.005 else ""
+        notes_span = (
+            f'<br><span class="muted" style="font-size:8pt;">{f.notes}</span>'
+            if f.notes else ""
+        )
+        rows_html += (
+            f'<tr><td class="c">{f.finance_date}</td>'
+            f'<td>{aname}{notes_span}</td>'
+            f'<td class="r red">{dv}</td>'
+            f'<td class="r green">{cv}</td>'
+            f'<td class="r {bal_cls}">{bal_sign}{fmt(abs(running))}</td></tr>'
+        )
+
+    closing_balance = running
+    ob_cls  = "red" if opening_balance < -0.005 else ("green" if opening_balance > 0.005 else "")
+    cb_cls  = "red" if closing_balance < -0.005 else ("green" if closing_balance > 0.005 else "")
+    ob_sign = "−" if opening_balance < -0.005 else "+"
+    cb_sign = "−" if closing_balance < -0.005 else "+"
+
+    empty_msg = (
+        "" if rows_html else
+        '<tr><td colspan="5" class="muted" style="text-align:center;padding:10px;">'
+        '— Операцій за цей період немає —</td></tr>'
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Виписка {client_name}</title>
+  {_REPORT_CSS}
+</head>
+<body>
+{PRINT_BTN}
+<div class="rpt-wrap">
+  <div class="rpt-header">
+    <div>
+      <div class="rpt-title">{bakery_name}</div>
+      <div class="rpt-sub">Виписка по клієнту</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="rpt-date">{client_name}</div>
+      <div style="font-size:9pt;color:#555;margin-top:2px;">
+        {ua_date(from_date)} — {ua_date(to_date)}
+      </div>
+    </div>
+  </div>
+
+  <table class="rpt" style="margin-bottom:2px;">
+    <tbody>
+      <tr class="rsub">
+        <td colspan="4">Залишок на початок періоду ({ua_date(from_date)})</td>
+        <td class="r {ob_cls}">{ob_sign}&nbsp;{fmt(abs(opening_balance))}&nbsp;грн</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="rpt">
+    <thead>
+      <tr>
+        <th class="c" style="width:85px">Дата</th>
+        <th>Стаття</th>
+        <th class="r" style="width:100px">Борг, грн</th>
+        <th class="r" style="width:100px">Оплата, грн</th>
+        <th class="r" style="width:110px">Залишок, грн</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows_html}{empty_msg}
+      <tr class="rtot">
+        <td colspan="2"><strong>Оборот за період</strong></td>
+        <td class="r red"><strong>{fmt(total_debit)}</strong></td>
+        <td class="r green"><strong>{fmt(total_credit)}</strong></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="rpt" style="margin-top:4px;">
+    <tbody>
+      <tr class="rtot">
+        <td colspan="4">
+          <strong>Залишок на кінець періоду ({ua_date(to_date)})</strong>
+        </td>
+        <td class="r {cb_cls}">
+          <strong>{cb_sign}&nbsp;{fmt(abs(closing_balance))}&nbsp;грн</strong>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
