@@ -38,8 +38,15 @@ bakery/
 │   ├── schema.sql         ← повна схема SQLite
 │   └── migrations/        ← зміни схеми
 ├── scripts/
-│   ├── install.sh         ← одна команда встановлення
-│   └── migrate_accdb.py   ← міграція зі старої бази
+│   ├── install-service.ps1  ← реєстрація Task Scheduler задач + firewall
+│   ├── update.ps1           ← оновлення через GitHub tag
+│   ├── rollback.ps1         ← відкат до попередньої версії
+│   ├── run-tray.ps1         ← dev-версія watchdog (prod генерується в ProgramData)
+│   └── notify.ps1           ← WinRT toast через PowerShell
+├── dev/                     ← dev-інструменти, gitignored, не потрапляють клієнту
+│   ├── release.ps1          ← автоматизований реліз на GitHub
+│   ├── create-installer.ps1 ← генерує Bakery-Setup.ps1 з вбудованими токенами
+│   └── generate_demo_db.py  ← генерація демо-бази даних
 └── tests/
     ├── test_api.py
     └── test_services.py
@@ -540,18 +547,27 @@ INSERT INTO settings VALUES
   - `_poll_internet` thread (кожні 30 сек): моніторить з'єднання, нотифікує при втраті/відновленні
   - PowerShell WinRT toast (`scripts/notify.ps1`) — надійний, зберігається у центрі сповіщень
   - `action_logs`: попереджає і пропонує очистити якщо лог > 10 MB
+  - `_resolve_data_dir()`: автовизначення DATA_DIR (env → `%ProgramData%\Bakery\bakery.db` → парсинг run-server.ps1 → fallback ROOT); вирішує проблему коли трей запущений без `BAKERY_DATA_DIR`
+  - `_poll_flags()` thread (кожні 2 сек): обробляє flag-файли від frontend — `RESTORE_REQUESTED`, `DEMO_ENTER_REQUESTED`, `DEMO_EXIT_REQUESTED`; окремий від `_poll_backup()` (60 сек) для швидкої реакції (≤2 сек)
+  - `_notified_version`: balloon про нову версію надсилається лише один раз на версію, не повторюється щогодини
+  - `action_install_update` запускається в окремому `threading.Thread` (як `action_rollback`) — інакше `MessageBoxW` блокує pystray event thread і кнопки діалогу не реагують
 - [x] Система оновлень та відкату через GitHub:
   - `VERSION` файл + git-теги (`v1.0.0`, `v1.1.0`, …)
-  - автоперевірка GitHub API раз на годину
+  - автоперевірка GitHub API раз на годину (balloon тільки при першому виявленні нової версії)
   - `update.bat` / `rollback.bat` — оновлення з відкатом
-  - `update.ps1`: зупинка → git checkout → pip + npm build → рестарт → трей
+  - `update.ps1`: зупинка → git checkout → очищення `logs/` і `dev/` з ROOT → pip + npm build → рестарт → регенерація `run-server.ps1` і `run-tray.ps1` в ProgramData → трей
   - `rollback.ps1`: приймає `-TargetTag`; якщо не вказаний — читає `PREVIOUS_VERSION`
   - вибір версії відкату через PowerShell `Out-GridView` (список локальних git-тегів)
   - автоматичний бекап `bakery.db` перед оновленням і відкатом (`bakery.db.bak-VERSION-TIMESTAMP`)
 - [x] Dev-режим: `start-dev.bat` (uvicorn --reload + Vite HMR)
-- [x] `scripts/release.ps1` — автоматизований реліз: оновлює `VERSION`, комітить, пушить, створює GitHub Release через REST API
-- [x] `scripts/create-installer.ps1` — генерує `Bakery-Setup.ps1` з вбудованими токенами (git clone + install + write ISSUES_TOKEN до БД)
+- [x] `dev/release.ps1` — автоматизований реліз: оновлює `VERSION`, комітить, пушить, створює GitHub Release через REST API (gitignored, тільки для розробника)
+- [x] `dev/create-installer.ps1` — генерує `Bakery-Setup.ps1` з вбудованими токенами (git clone + install + write ISSUES_TOKEN до БД); файл gitignored щоб токени не потрапили в репо
 - [x] Система звернень (Issues): `backend/routers/issues.py` проксує GitHub Issues API; `IssuesWidget.tsx` — плаваюча кнопка 💬 на всіх сторінках; токен зберігається в БД, ніколи не потрапляє у браузер
+- [x] Бекап та відновлення бази:
+  - автобекап щодня при старті трею (`_poll_backup` thread, 60 сек)
+  - ручний бекап і відновлення через UI налаштувань
+  - відновлення: API записує `RESTORE_REQUESTED` (JSON з path і параметрами) → `_poll_flags()` підхоплює за ≤2 сек → тре зупиняє сервер, копіює БД через `sqlite3.connect(...).backup()`, перезапускає
+  - міграція БД при першому встановленні: якщо в ProgramData немає `bakery.db` — копіюється з ROOT
 
 ### ✅ Фаза 3 — Фінанси та аналітика
 - [x] Фінансовий модуль (баланси клієнтів, рух коштів, журнал операцій)
@@ -666,10 +682,20 @@ INSERT INTO settings VALUES
   - Потрібно реалізувати: вибір конкретного маршруту, автододавання рядка до замовлень або рух у `movements` (тип `in`, route_id заповнений)
   - Узгодити з `daily_balances` і відображенням у вкладці Маршрути
 
+### ✅ Денний звіт пекарні (PDF A4)
+- [x] `GET /api/v1/print/daily-report?date=YYYY-MM-DD` → HTML (HTMLResponse, без авторизації як усі `/print/`)
+- [x] Секція 1 — Продукція: хліб і булки окремо; колонки Замовлено / Спечено / Обмін / Магазин
+  - Спечено: fallback на Замовлено якщо baking_tasks відсутні
+  - Обмін: береться з `orders.qty` де `exchange_type != 'none'` (не з `exchange_qty` — у імпортованих даних він завжди 0)
+- [x] Секція 2 — Маршрути: по кожному маршруту хліб/булки/обмін/сума; обмін з `orders`, не з `invoice_lines.is_exchange`
+- [x] Секція 3 — Фінанси: 3.1 Залишок на початок дня (накопичений з попередніх днів) → 3.2 Клієнтські операції (Накладна першою) → 3.3 Касові операції → 3.4 Залишок в касі
+  - `_is_invoice_entry()`: перевіряє тільки назву статті "Накладна" (не `finance_type` — у імпортованих даних касові статті мають `finance_type='invoice'`)
+- [x] Вкладка "Звіти" (`/reports`, `ReportsPage.tsx`): датепікер + кнопка "Відкрити звіт PDF" → нова вкладка
+
 ### ⬜ Фаза 4 — Розширення
 - [ ] Міграція з .accdb
-- [ ] Розширені звіти
-- [x] Архівування, автобекапи
+- [ ] Розширені звіти (аналітика, порівняння по тижнях/місяцях)
+- [x] Архівування, автобекапи (реалізовано в tray.py + UI налаштувань)
 
 ---
 
@@ -687,23 +713,56 @@ INSERT INTO settings VALUES
 
 ## Архітектура продакшн-розгортання
 
+### Дві папки PROD
+
+| Папка | Призначення |
+|-------|-------------|
+| `C:\Program Files\Bakery\` | Код застосунку (git clone) |
+| `C:\ProgramData\Bakery\` | Дані: `bakery.db`, `logs/`, `scripts/` |
+
+**Змінна оточення** `BAKERY_DATA_DIR=C:\ProgramData\Bakery` встановлюється в згенерованих скриптах і читається backend та tray.py для визначення де шукати БД і логи.
+
+**Згенеровані скрипти** (НЕ в git, створюються `install-service.ps1` і `update.ps1`):
+- `C:\ProgramData\Bakery\scripts\run-server.ps1` — запуск uvicorn з hardcoded шляхами
+- `C:\ProgramData\Bakery\scripts\run-tray.ps1` — watchdog для tray.py
+
+`scripts/run-tray.ps1` у репо — статична dev-версія (без `BAKERY_DATA_DIR`), tray.py знаходить DATA_DIR через `_resolve_data_dir()`.
+
 ```
+C:\Program Files\Bakery\          ← git clone, код
+C:\ProgramData\Bakery\
+    ├── bakery.db                  ← база даних
+    ├── logs/bakery.log            ← лог сервера
+    └── scripts/
+            ├── run-server.ps1    ← згенерований install/update
+            └── run-tray.ps1      ← згенерований install/update
+
 Windows Task Scheduler → BakeryApp (AtLogon, перезапуск 5×/хв)
-    └── scripts/run-server.ps1
-            ├── вбиває orphan-процеси uvicorn перед стартом (fix порту 8000)
+    └── C:\ProgramData\Bakery\scripts\run-server.ps1
+            ├── встановлює BAKERY_DATA_DIR
+            ├── вбиває orphan-процеси uvicorn (fix порту 8000)
             └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
                     ├── /api/v1/...     FastAPI роутери
                     └── /*              frontend/dist (React SPA, StaticFiles)
 
 Windows Task Scheduler → BakeryTray (AtLogon)
-    └── tray.py (pythonw — без вікна)
-            ├── моніторить /api/health кожні 5 сек
-            ├── перевіряє GitHub tags раз на годину
-            └── керує Task Scheduler задачами (BakeryApp, BakeryTray)
+    └── C:\ProgramData\Bakery\scripts\run-tray.ps1  (watchdog)
+            └── pythonw C:\Program Files\Bakery\tray.py
+                    ├── _resolve_data_dir() → C:\ProgramData\Bakery
+                    ├── моніторить /api/health кожні 5 сек
+                    ├── _poll_flags() кожні 2 сек — RESTORE/DEMO flags
+                    ├── перевіряє GitHub tags раз на годину
+                    └── керує Task Scheduler задачами (BakeryApp, BakeryTray)
 ```
 
 **Важливо:** `frontend/dist` будується при `install-service.bat` і `update.bat`.
 У git не зберігається (`.gitignore`). При dev-режимі — Vite на порту 5173.
+
+**Dev-інструменти** (`dev/`, gitignored, не потрапляють клієнту):
+- `dev/release.ps1` — реліз на GitHub
+- `dev/create-installer.ps1` — генерує інсталятор з токенами
+- `dev/generate_demo_db.py` — демо-база
+- `Bakery-Setup.ps1` / `scripts/Bakery-Setup.ps1` — gitignored (містять OAuth токени)
 
 ## Стиль коду
 - Python: PEP8, type hints скрізь, docstrings для сервісів
