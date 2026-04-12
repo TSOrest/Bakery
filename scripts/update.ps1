@@ -119,6 +119,10 @@ if ($LASTEXITCODE -ne 0) {
 # Update VERSION file (checkout may have overwritten it)
 Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $TargetTag -Encoding UTF8
 
+# Видаляємо dev-артефакти і логи з папки коду (якщо раптом потрапили після checkout)
+Remove-Item -Path (Join-Path $ROOT 'logs') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $ROOT 'dev')  -Recurse -Force -ErrorAction SilentlyContinue
+
 # Install new Python dependencies
 Write-Log 'Installing Python dependencies...'
 & $pip install -r (Join-Path $ROOT 'backend\requirements.txt') --quiet

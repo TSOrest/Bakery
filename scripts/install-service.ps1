@@ -12,11 +12,10 @@ if (-not (Test-Path $python)) {
     Read-Host 'Press Enter'; exit 1
 }
 
-# Create logs directory
-$logsDir = Join-Path $ROOT 'logs'
-if (-not (Test-Path $logsDir)) {
-    New-Item -ItemType Directory -Path $logsDir | Out-Null
-}
+# Logs та dev-файли — тільки в DATA_DIR, не в папці коду
+# Видаляємо артефакти якщо вони потрапили в ROOT
+Remove-Item -Path (Join-Path $ROOT 'logs') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $ROOT 'dev')  -Recurse -Force -ErrorAction SilentlyContinue
 
 # Build frontend
 $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source

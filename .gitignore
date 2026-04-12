@@ -9,9 +9,9 @@ __pycache__/
 .env
 
 # Generated distributable installer (contains embedded tokens — never commit)
-# Template lives in scripts/Bakery-Setup.ps1 and IS committed
 /Bakery-Setup.ps1
 /Bakery-Setup.bat
+scripts/Bakery-Setup.ps1
 bakery.db.bak-*
 DEV.md
 null
