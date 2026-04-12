@@ -89,18 +89,18 @@ rollback.bat     ← повертає попередню версію
 ## Структура проекту
 
 ```
-Пекарня 2/
+C:\Program Files\Bakery\         ← код (git clone)
 ├── backend/
 │   ├── main.py            ← FastAPI app + роздача фронтенду
 │   ├── database.py        ← SQLite + SQLAlchemy session
-│   ├── models/            ← ORM-моделі (18 таблиць)
+│   ├── models/            ← ORM-моделі
 │   ├── routers/           ← API ендпоінти
 │   ├── schemas/           ← Pydantic схеми
 │   ├── services/          ← бізнес-логіка
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       ├── pages/         ← 6 вкладок застосунку
+│       ├── pages/         ← вкладки застосунку
 │       ├── components/    ← Layout, спільні компоненти
 │       ├── api/           ← fetch-обгортки
 │       ├── context/       ← AuthContext, DateContext
@@ -110,27 +110,26 @@ rollback.bat     ← повертає попередню версію
 │   └── migrations/
 ├── scripts/
 │   ├── install-service.ps1  ← Task Scheduler + трей
-│   ├── uninstall-service.ps1
-│   ├── start.ps1
-│   ├── stop.ps1
-│   ├── start-dev.ps1
 │   ├── update.ps1           ← git checkout + rebuild + restart
-│   └── rollback.ps1
-├── logs/
-│   ├── bakery.log           ← лог сервера (uvicorn)
-│   └── tray_crash.log       ← лог помилок трею
+│   ├── rollback.ps1
+│   └── notify.ps1           ← WinRT toast
+├── dev/                     ← dev-інструменти (gitignored, не встановлюються клієнту)
+│   ├── release.ps1          ← автоматизований реліз на GitHub
+│   └── create-installer.ps1 ← генерація Bakery-Setup.ps1 з токенами
 ├── tray.py                  ← системний трей (pystray)
 ├── VERSION                  ← поточна версія (напр. v1.0.0)
-├── PREVIOUS_VERSION         ← попередня версія (після оновлення)
 ├── install.bat
 ├── install-service.bat
-├── uninstall-service.bat
-├── start.bat
-├── stop.bat
-├── start-dev.bat
-├── tray.bat
-├── update.bat
-└── rollback.bat
+├── start.bat · stop.bat · start-dev.bat · tray.bat
+├── update.bat · rollback.bat
+└── CLAUDE.md                ← технічна документація для розробника
+
+C:\ProgramData\Bakery\           ← дані (не в git, зберігаються між оновленнями)
+├── bakery.db                    ← база даних
+├── logs/bakery.log              ← лог сервера (uvicorn)
+└── scripts/
+    ├── run-server.ps1           ← згенерований install/update, встановлює BAKERY_DATA_DIR
+    └── run-tray.ps1             ← згенерований watchdog для tray.py
 ```
 
 ---
@@ -144,7 +143,8 @@ rollback.bat     ← повертає попередню версію
 | Маршрути | `/routes` | Накладні + переміщення після повернення водія |
 | Магазин | `/shop` | Щоденна звірка, несвіжий товар, група ІНШЕ |
 | Фінанси | `/finances` | Баланси клієнтів, рух коштів |
-| Довідники | `/admin` | Вироби, клієнти, ціни, маршрути, налаштування, права ролей |
+| Звіти | `/reports` | Денний звіт пекарні (PDF A4) |
+| Довідники | `/admin` | Вироби, клієнти, ціни, маршрути, налаштування, права ролей, імпорт |
 
 ---
 
@@ -167,6 +167,9 @@ rollback.bat     ← повертає попередню версію
     /bot/              pending-orders · orders/{id}/verify · broadcast-reminder
                        broadcast-deadline · order-status · clients/{id}/bot-users
     /invoices/locked-clients   GET — client_ids з накладними на дату
+    /import/           GET /db-status · GET /driver-check · POST /upload
+                       GET /context · POST /run · GET /status · GET /result
+    /print/            GET /invoices/{id} · GET /baking-task · GET /daily-report
 ```
 
 ---
@@ -240,6 +243,49 @@ rollback.bat     ← повертає попередню версію
 
 ---
 
+## Денний звіт пекарні (PDF A4)
+
+Вкладка **Звіти** (`/reports`) → оберіть дату → «Відкрити звіт PDF» → новий PDF у браузері.
+
+Звіт містить три секції:
+
+| Секція | Вміст |
+|--------|-------|
+| Продукція | Хліб і булки: Замовлено / Спечено / Обмін / Магазин |
+| Маршрути | По кожному маршруту: хліб, булки, обмін, сума |
+| Фінанси | Залишок каси на початок дня → клієнтські операції → касові операції → залишок каси |
+
+---
+
+## Імпорт з Microsoft Access (.accdb)
+
+Вкладка **Довідники → Імпорт** дозволяє перенести дані зі старої бази Access.
+
+**Процес:**
+1. Перевірте наявність драйвера ACE *(кнопка «Перевірити драйвер»)*
+2. Завантажте файл `.accdb`
+3. Перегляньте попередній перегляд таблиць і налаштуйте маппінг
+4. Натисніть «Запустити імпорт» — прогрес відображається в реальному часі
+
+**Що імпортується:** одиниці виміру → маршрути → вироби → клієнти → ціни → замовлення → накладні → фінансові операції → залишки магазину
+
+> Вимога: **Microsoft Access Database Engine 2016 Redistributable (32-bit)**
+> ([завантажити з microsoft.com](https://www.microsoft.com/en-us/download/details.aspx?id=54920))
+
+---
+
+## Бекап та відновлення бази даних
+
+Вкладка **Довідники → Налаштування → Бекапи**.
+
+- **Ручний бекап** — створює `bakery.db.bak-VERSION-TIMESTAMP` в `C:\ProgramData\Bakery\`
+- **Авто-бекап** — щодня при старті трею (якщо ще не робився сьогодні)
+- **Відновлення** — оберіть файл бекапу → «Відновити»: трей зупиняє сервер, замінює БД, перезапускає. Час реакції ≤ 2 сек.
+
+Бекап також створюється **автоматично** перед кожним оновленням і відкатом версії.
+
+---
+
 ## Встановлення у клієнта (інсталятор)
 
 **На стороні розробника** — генерація одноразового інсталятора:
@@ -249,11 +295,11 @@ rollback.bat     ← повертає попередню версію
 #   DEPLOY_TOKEN  — Contents: Read (для git clone)
 #   ISSUES_TOKEN  — Issues: Read + Write (для системи звернень)
 
-powershell scripts/create-installer.ps1 -DeployToken "github_pat_..." -IssuesToken "github_pat_..."
+powershell dev/create-installer.ps1 -DeployToken "github_pat_..." -IssuesToken "github_pat_..."
 # Генерує файл Bakery-Setup.ps1 (не зберігається в git)
 ```
 
-> `scripts/create-installer.ps1` виключено з git (`.gitignore`) — містить секрети OAuth App.
+> `dev/create-installer.ps1` знаходиться у папці `dev/` (gitignored) — не потрапляє до клієнтів і в репозиторій.
 
 **На стороні клієнта** — запустити `Bakery-Setup.ps1`:
 
@@ -278,7 +324,7 @@ git add VERSION && git commit -m "feat: ..."
 git push origin master
 
 # 2. Створити GitHub Release (тег + release notes — показуються у трею)
-powershell scripts/release.ps1 -Tag v1.2.0 -Title "v1.2.0 — назва" -Notes "- Зміна 1`n- Зміна 2"
+powershell dev/release.ps1 -Tag v1.2.0 -Notes "- Зміна 1`n- Зміна 2"
 ```
 
 На стороні клієнта: трей перевіряє нову версію раз на годину,
@@ -294,18 +340,26 @@ powershell scripts/release.ps1 -Tag v1.2.0 -Title "v1.2.0 — назва" -Notes
 
 ```
 Windows Task Scheduler
-    ├── BakeryApp (AtLogon, автоперезапуск 5×)
-    │       └── scripts/run-server.ps1
+    ├── BakeryApp (AtLogon, автоперезапуск 5×/хв)
+    │       └── C:\ProgramData\Bakery\scripts\run-server.ps1
+    │               ├── встановлює BAKERY_DATA_DIR=C:\ProgramData\Bakery
+    │               ├── вбиває orphan uvicorn (fix port 8000 conflict)
     │               └── uvicorn backend.main:app --host 0.0.0.0 --port 8000
     │                       ├── /api/v1/...          (FastAPI роутери)
     │                       └── /*                   (frontend/dist — React SPA)
     └── BakeryTray (AtLogon)
-            └── scripts/run-tray.ps1  (watchdog — нескінченний цикл)
-                    └── tray.py (pythonw, без вікна) — перезапускається через 5 сек після виходу
+            └── C:\ProgramData\Bakery\scripts\run-tray.ps1  (watchdog)
+                    └── tray.py (pythonw, без вікна) — перезапускається через 5 сек
+                            ├── _resolve_data_dir() → C:\ProgramData\Bakery
                             ├── моніторить сервер (кожні 5 сек)
+                            ├── опрацьовує flag-файли restore/demo (кожні 2 сек)
                             ├── моніторить інтернет (кожні 30 сек)
-                            └── перевіряє оновлення (раз на годину)
+                            └── перевіряє оновлення (раз на годину, balloon один раз)
 ```
+
+> `run-server.ps1` і `run-tray.ps1` в `C:\ProgramData\Bakery\scripts\` **не зберігаються в git** —
+> вони генеруються при `install-service.bat` і `update.bat` з hardcoded шляхами до поточного
+> розташування коду.
 
 ---
 
@@ -334,5 +388,6 @@ backend/venv/Scripts/pytest tests/ -v
 
 | Файл | Вміст |
 |------|-------|
-| `logs/bakery.log` | вивід uvicorn (INFO/ERROR) |
-| `logs/tray_crash.log` | помилки запуску трею |
+| `C:\ProgramData\Bakery\logs\bakery.log` | вивід uvicorn (INFO/ERROR) |
+
+Перегляд логів — меню трею → «Переглянути логи» *(пропонує очистити якщо > 10 MB)*.
