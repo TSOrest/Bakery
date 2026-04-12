@@ -352,6 +352,7 @@ _latest_version:    str   = ""      # non-empty = newer version available
 _update_lock               = threading.Lock()
 _local_tags:        list  = []      # cached at startup; changes only after update/rollback (restarts tray)
 _last_backup_date:  str   = ""      # YYYY-MM-DD, захист від подвійного бекапу в один день
+_notified_version:  str   = ""      # остання версія про яку вже надіслано balloon (без повторів)
 
 
 # ── Windows helpers ────────────────────────────────────────────────────────────
@@ -524,7 +525,7 @@ def action_check_update(icon, _item=None) -> None:
 
 
 def _do_check_update(icon, show_if_none: bool = False) -> None:
-    global _latest_version
+    global _latest_version, _notified_version
     current = _read_version()
 
     if not _internet_up:
@@ -548,7 +549,9 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
                 f"Натисніть 'Встановити оновлення' у меню треї.",
                 0,
             )
-        else:
+        elif _notified_version != latest:
+            # balloon лише якщо ще не сповіщали про цю версію
+            _notified_version = latest
             _notify(icon, "Bakery — оновлення",
                     f"Доступна нова версія {latest}. Відкрийте меню треї.")
     elif show_if_none:
@@ -738,7 +741,10 @@ def _build_menu(up: bool) -> pystray.Menu:
         f"Встановити оновлення ({_latest_version})" if has_upd
         else "Перевірити оновлення"
     )
-    update_action = action_install_update if has_upd else action_check_update
+    update_action = (
+        (lambda i, _: threading.Thread(target=action_install_update, args=(i,), daemon=True).start())
+        if has_upd else action_check_update
+    )
 
     open_submenu = pystray.Menu(
         pystray.MenuItem("Замовлення", lambda i, _: webbrowser.open(APP_URL + "/orders")),
