@@ -55,13 +55,15 @@ export default function ReportsPage() {
   const [stmtTo, setStmtTo] = useState(workDate)
 
   useEffect(() => {
-    fetch('/api/v1/clients?is_active=true')
+    fetch('/api/v1/clients')
       .then(r => r.json())
-      .then((data: { id: number; full_name: string; short_name?: string }[]) => {
-        const opts = (data || []).map(c => ({
-          id: c.id,
-          name: c.short_name || c.full_name,
-        }))
+      .then((data: { id: number; full_name: string; short_name?: string; client_kind: string }[]) => {
+        const opts = (data || [])
+          .filter(c => c.client_kind === 'customer')
+          .map(c => ({
+            id: c.id,
+            name: c.short_name || c.full_name,
+          }))
         setClients(opts)
         if (opts.length > 0 && !clientId) setClientId(String(opts[0].id))
       })
