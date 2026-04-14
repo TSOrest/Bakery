@@ -105,13 +105,20 @@ def internal_kpi(date: str, db: Session = Depends(get_db)):
     """KPI-картки для внутрішніх клієнтів: магазин, пайок, списання."""
     from backend.models.orders import Order
 
-    # Розподіл надлишків зберігається як orders з origin_id=0
-    surplus_orders = db.query(Order).filter(
+    # Системні клієнти (пайок, списання, магазин)
+    system_clients: dict[int, Client] = {
+        c.id: c for c in db.query(Client).filter(
+            Client.client_kind.in_(["ration", "writeoff", "shop"])
+        ).all()
+    }
+
+    # Замовлення для системних клієнтів за дату (будь-який origin_id)
+    system_orders = db.query(Order).filter(
         Order.order_date == date,
-        Order.origin_id == 0,
+        Order.client_id.in_(list(system_clients.keys())),
     ).all()
 
-    product_ids = {o.product_id for o in surplus_orders}
+    product_ids = {o.product_id for o in system_orders}
     price_map: dict[int, float] = {
         pid: get_price(db, pid, None, date)
         for pid in product_ids
@@ -120,8 +127,8 @@ def internal_kpi(date: str, db: Session = Depends(get_db)):
     ration_amount = 0.0
     writeoff_amount = 0.0
     shop_received = 0.0
-    for o in surplus_orders:
-        client = db.get(Client, o.client_id)
+    for o in system_orders:
+        client = system_clients.get(o.client_id)
         if not client:
             continue
         amount = o.qty * price_map.get(o.product_id, 0.0)
@@ -132,16 +139,24 @@ def internal_kpi(date: str, db: Session = Depends(get_db)):
         elif client.client_kind == 'shop':
             shop_received += amount
 
+    # Фінансові списання за дату (магазин, стаття "Списання")
+    writeoff_article = db.query(FinanceArticle).filter(
+        FinanceArticle.name == 'Списання'
+    ).first()
+    if writeoff_article:
+        writeoff_amount += sum(
+            f.amount for f in db.query(Finance).filter(
+                Finance.finance_date == date,
+                Finance.article_id == writeoff_article.id,
+            ).all()
+        )
+
     # Магазин — залишок зі shop_counts (entered_balance × price)
     shop_counts = db.query(ShopCount).filter(ShopCount.count_date == date).all()
     stock_value = sum((sc.entered_balance or 0) * (sc.price or 0) for sc in shop_counts)
 
-    # Магазин — виручка (платежі від клієнтів типу shop за дату)
-    shop_ids = [
-        c.id for c in db.query(Client).filter(
-            Client.client_kind == "shop", Client.is_active == 1
-        ).all()
-    ]
+    # Магазин — виручка (оплати від клієнтів типу shop за дату)
+    shop_ids = [c_id for c_id, c in system_clients.items() if c.client_kind == 'shop']
     revenue = 0.0
     if shop_ids:
         revenue = sum(

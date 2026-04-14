@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
 
 function localDateISO(d: Date): string {
@@ -55,9 +56,8 @@ export default function ReportsPage() {
   const [stmtTo, setStmtTo] = useState(workDate)
 
   useEffect(() => {
-    fetch('/api/v1/clients')
-      .then(r => r.json())
-      .then((data: { id: number; full_name: string; short_name?: string; client_kind: string }[]) => {
+    api.get<{ id: number; full_name: string; short_name?: string; client_kind: string }[]>('/clients/?active_only=false')
+      .then(data => {
         const opts = (data || [])
           .filter(c => c.client_kind === 'customer')
           .map(c => ({

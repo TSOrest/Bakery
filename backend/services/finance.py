@@ -21,14 +21,14 @@ def get_client_balance(db: Session, client_id: int, as_of: Optional[str] = None)
 
 
 def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBalance]:
-    """Баланси всіх активних клієнтів станом на дату as_of.
+    """Баланси всіх клієнтів (включно з деактивованими) станом на дату as_of.
+    Деактивований клієнт може мати борг — він повинен відображатись у фінзвіті.
     Один GROUP BY запит замість 3 запитів на кожного клієнта.
     """
     from backend.models.references import Route
 
     clients = (
         db.query(Client)
-        .filter(Client.is_active == 1)
         .order_by(Client.full_name)
         .all()
     )

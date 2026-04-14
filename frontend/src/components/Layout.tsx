@@ -48,7 +48,6 @@ export default function Layout() {
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
     { path: '/shop',     label: 'Магазин',    key: 'shop'     },
     { path: '/finances', label: 'Фінанси',    key: 'finances' },
-    { path: '/reports',  label: 'Звіти',      key: 'reports'  },
     { path: '/admin',     label: 'Налаштування', key: 'admin'   },
   ]
 
@@ -65,9 +64,10 @@ export default function Layout() {
     : (permissions[role] ?? FALLBACK[role] ?? []) as string[]
   const visibleTabs = ALL_TABS.filter((t) => {
     if (t.key === 'admin') {
-      // Показувати Довідники якщо є 'admin' АБО будь-який 'admin_*' дозвіл
       return allowed.includes('admin') || allowed.some(k => k.startsWith('admin_'))
     }
+    // Фінанси показуємо якщо є 'finances' АБО 'reports' (звіти тепер всередині)
+    if (t.key === 'finances') return allowed.includes('finances') || allowed.includes('reports')
     return allowed.includes(t.key)
   })
 

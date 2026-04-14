@@ -144,8 +144,8 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     setPrices({})
     Promise.all([
       api.get<Route[]>('/routes/'),
-      api.get<Client[]>('/clients/'),
-      api.get<Product[]>('/products/'),
+      api.get<Client[]>('/clients/?active_only=false'),
+      api.get<Product[]>('/products/?active_only=false'),
       api.get<Category[]>('/categories?active_only=false'),
       api.get<Order[]>(`/orders/?order_date=${date}`),
     ]).then(([r, c, p, cats, o]) => {

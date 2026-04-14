@@ -13,7 +13,6 @@ import AdminPage from './pages/AdminPage'
 import OwnerDashboard from './pages/OwnerDashboard'
 import DbEditorPage from './pages/DbEditorPage'
 import PosPage from './pages/PosPage'
-import ReportsPage from './pages/ReportsPage'
 
 // ── Монітор підключення до сервера ────────────────────────────────────────────
 
@@ -132,7 +131,6 @@ function AppRoutes() {
           <Route path="routes"    element={<RoutesPage />} />
           <Route path="shop"      element={<ShopPage />} />
           <Route path="finances"  element={<FinancesPage />} />
-          <Route path="reports"   element={<ReportsPage />} />
           <Route path="admin"     element={<AdminPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

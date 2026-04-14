@@ -503,9 +503,9 @@ export default function BakingPage() {
     setLoading(true)
     const [t, p, cats, c, so, sett] = await Promise.all([
       api.get<BakingTask[]>(`/baking/tasks?task_date=${date}`),
-      api.get<Product[]>('/products/'),
+      api.get<Product[]>('/products/?active_only=false'),
       api.get<Category[]>('/categories?active_only=false'),
-      api.get<Client[]>('/clients/'),
+      api.get<Client[]>('/clients/?active_only=false'),
       api.get<Order[]>(`/orders/?order_date=${date}&origin_id=0`),
       api.get<Record<string, { value: string }>>('/settings/'),
     ])

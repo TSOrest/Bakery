@@ -52,15 +52,22 @@
 .refreshBtn:hover { background: rgba(255,255,255,0.25); }
 
 /* ── Сітка карток ── */
+/* max-width: 1640px → span-2 = (1640-28px padding-36px gaps)/4*2 + 12 = 800px */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   padding: 14px;
+  max-width: 1640px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: repeat(2, 1fr); max-width: 840px; }
 }
 
 @media (max-width: 420px) {
-  .grid { padding: 10px; gap: 10px; }
+  .grid { grid-template-columns: 1fr; padding: 10px; gap: 10px; max-width: 100%; }
 }
 
 /* ── Картка ── */
@@ -182,6 +189,183 @@
   font-weight: 700;
   color: #e74c3c;
   white-space: nowrap;
+}
+
+/* ── Календар ── */
+
+.calCard {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #dde3ea;
+  padding: 16px 16px 10px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.calHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.calTitle {
+  flex: 1;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1a3a5c;
+  letter-spacing: 0.01em;
+}
+
+.calLoading {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-left: 6px;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.calNavBtn {
+  background: #f1f5f9;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.calNavBtn:hover { background: #e2e8f0; }
+
+.calTodayBtn {
+  background: none;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: #555;
+  white-space: nowrap;
+}
+.calTodayBtn:hover { background: #f1f5f9; }
+
+.calGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.calDayHead {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #8a97a8;
+  padding: 5px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.calWeekend { color: #b0b8c8; }
+
+.calDayEmpty {
+  min-height: 76px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f2f5;
+}
+
+.calDayCell {
+  min-height: 76px;
+  border-radius: 6px;
+  padding: 5px 6px 4px;
+  background: #fff;
+  border: 1px solid #edf0f4;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color 0.12s;
+  cursor: default;
+}
+.calDayCell:hover { border-color: #c0cadb; }
+
+.calActive {
+  background: #f4f7ff;
+  border-color: #d4ddf0;
+}
+
+.calHasPay {
+  border-left: 3px solid #27ae60;
+}
+
+.calToday {
+  border-color: #1a3a5c !important;
+  background: #eef3fa;
+}
+
+.calSelected {
+  border: 2px solid #f59e0b !important;
+  background: #fffbeb;
+}
+
+.calNum {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #9aabb8;
+  text-align: right;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.calNumToday {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  background: #1a3a5c;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  margin-bottom: 1px;
+}
+
+.calClients {
+  font-size: 0.69rem;
+  color: #7a90b0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.calInv {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1a3a5c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.calPay {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1a8c4e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 /* ── Порожній стан ── */

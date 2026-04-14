@@ -33,9 +33,9 @@ def effective_prices_batch(client_ids: str, date: str, db: Session = Depends(get
     if not cids:
         return {}
 
-    # 1. Активні продукти
+    # 1. Усі продукти (включно з деактивованими — потрібні для відображення цін в існуючих записах)
     prod_ids: list[int] = [
-        r[0] for r in db.query(Product.id).filter(Product.is_active == 1).all()
+        r[0] for r in db.query(Product.id).all()
     ]
     if not prod_ids:
         return {cid: {} for cid in cids}

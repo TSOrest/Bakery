@@ -784,8 +784,8 @@ export default function RoutesPage() {
     try {
       const [r, c, p, cats, inv, ord, fin, cfg] = await Promise.all([
         api.get<Route[]>('/routes/'),
-        api.get<Client[]>('/clients/'),
-        api.get<Product[]>('/products/'),
+        api.get<Client[]>('/clients/?active_only=false'),
+        api.get<Product[]>('/products/?active_only=false'),
         api.get<Category[]>('/categories?active_only=false'),
         api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
         api.get<Order[]>(`/orders/?order_date=${date}`),

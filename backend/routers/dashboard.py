@@ -1,5 +1,6 @@
 """Дашборд для власника — агрегована read-only статистика."""
 
+from calendar import monthrange
 from datetime import date, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends
@@ -9,9 +10,10 @@ from sqlalchemy import func
 from backend.database import get_db
 from backend.models.orders import Order
 from backend.models.baking import BakingTask
-from backend.models.finances import Finance
+from backend.models.finances import Finance, FinanceArticle
 from backend.models.references import Client, Product
 from backend.models.pricing import Price
+from backend.models.shop import ShopSale, ShopReconciliation, ShopReconciliationLine
 from backend.services.finance import get_all_balances, get_summary
 
 router = APIRouter(prefix="/dashboard", tags=["Дашборд"])
@@ -207,3 +209,174 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
             "top": sorted(margin_rows, key=lambda r: r["margin_pct"], reverse=True)[:5],
         },
     }
+
+
+@router.get("/shop-summary/")
+def get_shop_summary(date: str, db: Session = Depends(get_db)):
+    """Зведення по магазину за вказану дату."""
+    shop_clients = db.query(Client).filter(
+        Client.client_kind == "shop"
+    ).all()
+
+    if not shop_clients:
+        return {"available": False}
+
+    shop_ids = [c.id for c in shop_clients]
+
+    # Стаття "Накладна" — відвантаження в магазин
+    invoice_art = (
+        db.query(FinanceArticle).filter(FinanceArticle.name == "Накладна").first()
+    )
+    # Статті оплат від магазину
+    payment_arts = db.query(FinanceArticle).filter(
+        FinanceArticle.name.in_(["Оплата", "Оплата клієнта"])
+    ).all()
+    payment_art_ids = [a.id for a in payment_arts]
+
+    # Оборот (відвантажено в магазин за день)
+    turnover = 0.0
+    if invoice_art:
+        turnover = (
+            db.query(func.sum(Finance.amount))
+            .filter(
+                Finance.finance_date == date,
+                Finance.client_id.in_(shop_ids),
+                Finance.article_id == invoice_art.id,
+            )
+            .scalar() or 0.0
+        )
+
+    # Передано в касу пекарні за день
+    cash_to_bakery = 0.0
+    if payment_art_ids:
+        cash_to_bakery = (
+            db.query(func.sum(Finance.amount))
+            .filter(
+                Finance.finance_date == date,
+                Finance.client_id.in_(shop_ids),
+                Finance.article_id.in_(payment_art_ids),
+                Finance.sign == 1,
+            )
+            .scalar() or 0.0
+        )
+
+    # Накопичений баланс магазину до кінця обраної дати
+    # (від'ємний = магазин має борг перед пекарнею)
+    shop_balance = (
+        db.query(func.sum(Finance.amount * Finance.sign))
+        .filter(
+            Finance.finance_date <= date,
+            Finance.client_id.in_(shop_ids),
+        )
+        .scalar() or 0.0
+    )
+
+    # POS-продажі за день (якщо є)
+    pos_sales = (
+        db.query(func.sum(ShopSale.amount))
+        .filter(
+            ShopSale.sale_date == date,
+            ShopSale.shop_client_id.in_(shop_ids),
+        )
+        .scalar() or 0.0
+    )
+
+    # Залишок у товарі — остання закрита звірка до обраної дати
+    latest_recon = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id.in_(shop_ids),
+            ShopReconciliation.period_to <= date,
+            ShopReconciliation.closed == 1,
+        )
+        .order_by(ShopReconciliation.period_to.desc())
+        .first()
+    )
+
+    stock_value = 0.0
+    stock_date: Optional[str] = None
+    if latest_recon:
+        v = (
+            db.query(func.sum(ShopReconciliationLine.entered_balance * ShopReconciliationLine.price))
+            .filter(
+                ShopReconciliationLine.reconciliation_id == latest_recon.id,
+                ShopReconciliationLine.entered_balance.isnot(None),
+                ShopReconciliationLine.price.isnot(None),
+            )
+            .scalar()
+        )
+        stock_value = round(float(v or 0.0), 2)
+        stock_date  = latest_recon.period_to
+
+    return {
+        "available":      True,
+        "shop_count":     len(shop_clients),
+        "turnover":       round(float(turnover), 2),
+        "cash_to_bakery": round(float(cash_to_bakery), 2),
+        "shop_balance":   round(float(shop_balance), 2),
+        "pos_sales":      round(float(pos_sales), 2),
+        "stock_value":    stock_value,
+        "stock_date":     stock_date,
+    }
+
+
+@router.get("/calendar/")
+def get_calendar(year: int, month: int, db: Session = Depends(get_db)):
+    """Поденні підсумки для календаря дашборду."""
+    from backend.models.finances import FinanceArticle
+
+    _, days_in_month = monthrange(year, month)
+    first_day = date(year, month, 1).isoformat()
+    last_day  = date(year, month, days_in_month).isoformat()
+
+    # Замовлення: кількість унікальних клієнтів-покупців по днях
+    orders_rows = (
+        db.query(
+            Order.order_date,
+            func.count(func.distinct(Order.client_id)).label("clients"),
+        )
+        .join(Client, Order.client_id == Client.id)
+        .filter(
+            Order.order_date >= first_day,
+            Order.order_date <= last_day,
+            Order.qty > 0,
+            Client.client_kind == "customer",
+        )
+        .group_by(Order.order_date)
+        .all()
+    )
+
+    # Статті фінансів: Накладна і Оплата
+    invoice_article = db.query(FinanceArticle).filter(FinanceArticle.name == "Накладна").first()
+    payment_article = db.query(FinanceArticle).filter(FinanceArticle.name == "Оплата").first()
+    article_ids = [a.id for a in [invoice_article, payment_article] if a]
+
+    finance_rows = (
+        db.query(
+            Finance.finance_date,
+            Finance.article_id,
+            Finance.sign,
+            func.sum(Finance.amount).label("total"),
+        )
+        .filter(
+            Finance.finance_date >= first_day,
+            Finance.finance_date <= last_day,
+            Finance.article_id.in_(article_ids),
+        )
+        .group_by(Finance.finance_date, Finance.article_id, Finance.sign)
+        .all()
+    ) if article_ids else []
+
+    days: dict[str, dict] = {}
+
+    for r in orders_rows:
+        days.setdefault(r.order_date, {})["clients"] = int(r.clients or 0)
+
+    for r in finance_rows:
+        d = days.setdefault(r.finance_date, {})
+        if invoice_article and r.article_id == invoice_article.id:
+            d["invoices_sum"] = round(d.get("invoices_sum", 0.0) + float(r.total or 0), 2)
+        elif payment_article and r.article_id == payment_article.id and r.sign == 1:
+            d["payments_sum"] = round(d.get("payments_sum", 0.0) + float(r.total or 0), 2)
+
+    return {"year": year, "month": month, "days": days}
