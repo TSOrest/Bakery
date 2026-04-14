@@ -255,22 +255,36 @@ def get_summary(date: str, db: Session = Depends(get_db)):
     """
     shops = _shop_clients(db)
     result = []
+    from datetime import date as _date, timedelta as _td
     for shop in shops:
-        # Остання звірка для цього магазину
+        # Остання звірка (для відображення дати в summary)
         last_rec: Optional[ShopReconciliation] = (
             db.query(ShopReconciliation)
             .filter(ShopReconciliation.shop_client_id == shop.id)
             .order_by(ShopReconciliation.period_to.desc())
             .first()
         )
-        from datetime import date as _date, timedelta as _td
+        # Остання ЗАКРИТА звірка — база для розрахунку opening і received
+        # Якщо last_rec вже закрита — використовуємо її; якщо відкрита — шукаємо попередню
         if last_rec and last_rec.closed:
-            # Received = лише те що прийшло ПІСЛЯ закриття звірки (не всередині неї)
-            after_to    = (_date.fromisoformat(last_rec.period_to) + _td(days=1)).isoformat()
+            last_closed_rec = last_rec
+        elif last_rec:
+            last_closed_rec = (
+                db.query(ShopReconciliation)
+                .filter(
+                    ShopReconciliation.shop_client_id == shop.id,
+                    ShopReconciliation.closed == 1,
+                )
+                .order_by(ShopReconciliation.period_to.desc())
+                .first()
+            )
+        else:
+            last_closed_rec = None
+
+        # Received = все що надійшло ПІСЛЯ останньої закритої звірки
+        if last_closed_rec:
+            after_to    = (_date.fromisoformat(last_closed_rec.period_to) + _td(days=1)).isoformat()
             period_from = after_to
-            period_to   = date
-        elif last_rec:  # відкрита звірка
-            period_from = last_rec.period_from
             period_to   = date
         else:
             period_from = date
@@ -280,8 +294,8 @@ def get_summary(date: str, db: Session = Depends(get_db)):
         ext     = _received_from_receipts(db, shop.id, period_from, period_to)
         inv     = _received_from_invoices(db, shop.id, period_from, period_to)
         all_pids = set(bakery) | set(ext) | set(inv)
-        if last_rec:
-            all_pids |= {ln.product_id for ln in last_rec.lines}
+        if last_closed_rec:
+            all_pids |= {ln.product_id for ln in last_closed_rec.lines}
 
         # Batch-завантаження продуктів — один запит замість len(all_pids) db.get()
         products_map = {
@@ -294,20 +308,16 @@ def get_summary(date: str, db: Session = Depends(get_db)):
             product = products_map.get(pid)
             if not product or not product.is_active:
                 continue
-            # Відкриваючий залишок: фізичний залишок з останньої ЗАКРИТОЇ звірки
+            # Opening: entered_balance з ОСТАННЬОЇ ЗАКРИТОЇ звірки
             opening = 0.0
-            if last_rec and last_rec.closed and last_rec.lines:
-                opening = sum(ln.entered_balance or 0 for ln in last_rec.lines if ln.product_id == pid)
-            elif not last_rec:
+            if last_closed_rec and last_closed_rec.lines:
+                opening = sum(ln.entered_balance or 0 for ln in last_closed_rec.lines if ln.product_id == pid)
+            elif not last_closed_rec:
                 opening = (product.initial_stock or 0)
             received = (bakery.get(pid, 0) + ext.get(pid, 0) + inv.get(pid, 0))
-            # Продано: тільки для ВІДКРИТОЇ звірки (partial reconciliation in progress)
-            # Для закритої: sold = 0, бо opening = entered_balance вже враховує продаж
+            # sold завжди 0 в summary: current = opening (з закритої звірки) + нові надходження
+            # Відкрита звірка в процесі — її calculated_sold не враховуємо
             sold = 0.0
-            if last_rec and not last_rec.closed:
-                sold = sum(
-                    (ln.calculated_sold or 0) for ln in last_rec.lines if ln.product_id == pid
-                )
             current = max(0.0, opening + received - sold)
             price = _get_shop_price(db, shop.id, pid, date)
             rows.append(ShopSummaryProductRow(

@@ -1458,9 +1458,12 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         daily.setdefault(d, {})[prod_id] = bal
 
                 if shop_client and daily:
+                    sorted_dates   = sorted(daily.keys())
+                    last_import_date = sorted_dates[-1]   # остання дата залишається ВІДКРИТОЮ
                     prev_balance: dict[int, float] = {}
-                    for date_str in sorted(daily.keys()):
+                    for date_str in sorted_dates:
                         day_bal = daily[date_str]
+                        is_last = date_str == last_import_date
 
                         # Надходження з замовлень за цей день (вже в БД після кроку 7)
                         recv_rows = (
@@ -1475,11 +1478,15 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         )
                         received_day: dict[int, float] = {r.product_id: float(r.t) for r in recv_rows}
 
+                        # Остання дата — залишається відкритою (може бути незавершена в старій системі)
                         recon = ShopReconciliation(
                             shop_client_id=shop_client.id,
                             period_from=date_str, period_to=date_str,
-                            cash_expected=0, closed=1,
-                            closed_at=now_str, closed_by="import", created_at=now_str,
+                            cash_expected=0,
+                            closed=0 if is_last else 1,
+                            closed_at=None if is_last else now_str,
+                            closed_by=None if is_last else "import",
+                            created_at=now_str,
                         )
                         db.add(recon)
                         db.flush()
@@ -1509,6 +1516,11 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                             prev_balance[pid] = bal
 
                     ep.found = len(daily)
+                    if daily:
+                        ep.warnings.append(
+                            f"Остання звірка ({last_import_date}) позначена як ВІДКРИТА — "
+                            "перевірте залишки і закрийте її вручну у вкладці Магазин."
+                        )
                 elif not shop_client:
                     ep.warnings.append(
                         "Клієнта-магазин не знайдено (is_own_shop=1 або client_kind='shop')"
