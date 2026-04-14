@@ -2,8 +2,8 @@
 
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -41,12 +41,13 @@ def _shop_clients(db: Session) -> List[Client]:
 
 
 def _received_from_bakery(db: Session, shop_client_id: int, date_from: str, date_to: str) -> dict[int, float]:
-    """Надходження з випічки для summary (total per product_id)."""
+    """Надходження з випічки для summary (total per product_id).
+    Враховує звичайні замовлення (origin_id IS NULL) і надлишки (origin_id=0)."""
     rows = (
         db.query(Order.product_id, func.sum(Order.qty).label("total"))
         .filter(
             Order.client_id == shop_client_id,
-            Order.origin_id == 0,
+            or_(Order.origin_id.is_(None), Order.origin_id == 0),
             Order.order_date >= date_from,
             Order.order_date <= date_to,
         )
@@ -79,7 +80,7 @@ def _received_from_bakery_batched(
         db.query(Order.product_id, Order.order_date, func.sum(Order.qty).label("total"))
         .filter(
             Order.client_id == shop_client_id,
-            Order.origin_id == 0,
+            or_(Order.origin_id.is_(None), Order.origin_id == 0),
             Order.order_date >= date_from,
             Order.order_date <= date_to,
         )
@@ -157,6 +158,53 @@ def _get_shop_price(db: Session, shop_client_id: int, product_id: int, date: str
         .first()
     )
     return base.price if base else None
+
+
+def _get_shop_prices_batch(
+    db: Session, shop_client_id: int, product_ids: set[int], date: str
+) -> dict[int, float]:
+    """Завантажує ціни для кількох продуктів за 2 запити (overrides → базові)."""
+    from backend.models.pricing import ClientPriceOverride, Price
+    result: dict[int, float] = {}
+    if not product_ids:
+        return result
+    pids = list(product_ids)
+
+    overrides = (
+        db.query(ClientPriceOverride)
+        .filter(
+            ClientPriceOverride.client_id == shop_client_id,
+            ClientPriceOverride.product_id.in_(pids),
+            ClientPriceOverride.valid_from <= date,
+        )
+        .filter(
+            (ClientPriceOverride.valid_to == None) | (ClientPriceOverride.valid_to >= date)  # noqa: E711
+        )
+        .order_by(ClientPriceOverride.valid_from.desc())
+        .all()
+    )
+    for o in overrides:
+        if o.product_id not in result:
+            result[o.product_id] = o.price
+
+    remaining = [pid for pid in pids if pid not in result]
+    if remaining:
+        base_prices = (
+            db.query(Price)
+            .filter(
+                Price.product_id.in_(remaining),
+                Price.valid_from <= date,
+                Price.is_active == 1,
+            )
+            .filter((Price.valid_to == None) | (Price.valid_to >= date))  # noqa: E711
+            .order_by(Price.valid_from.desc())
+            .all()
+        )
+        for p in base_prices:
+            if p.product_id not in result:
+                result[p.product_id] = p.price
+
+    return result
 
 
 def _recalc_line(line: ShopReconciliationLine, from_disposal: bool = False) -> None:
@@ -303,6 +351,9 @@ def get_summary(date: str, db: Session = Depends(get_db)):
             for p in db.query(Product).filter(Product.id.in_(all_pids)).all()
         } if all_pids else {}
 
+        # Батч-завантаження цін — 2 запити на магазин замість 2*N
+        prices_map = _get_shop_prices_batch(db, shop.id, all_pids, date)
+
         rows = []
         for pid in sorted(all_pids):
             product = products_map.get(pid)
@@ -316,10 +367,9 @@ def get_summary(date: str, db: Session = Depends(get_db)):
                 opening = (product.initial_stock or 0)
             received = (bakery.get(pid, 0) + ext.get(pid, 0) + inv.get(pid, 0))
             # sold завжди 0 в summary: current = opening (з закритої звірки) + нові надходження
-            # Відкрита звірка в процесі — її calculated_sold не враховуємо
             sold = 0.0
             current = max(0.0, opening + received - sold)
-            price = _get_shop_price(db, shop.id, pid, date)
+            price = prices_map.get(pid)
             rows.append(ShopSummaryProductRow(
                 product_id=pid,
                 product_name=product.name,
@@ -347,14 +397,38 @@ def get_summary(date: str, db: Session = Depends(get_db)):
 @router.get("/reconciliations", response_model=List[ShopReconciliationOut])
 def list_reconciliations(
     shop_client_id: int,
+    include_lines: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    return (
+    recs = (
         db.query(ShopReconciliation)
         .filter(ShopReconciliation.shop_client_id == shop_client_id)
         .order_by(ShopReconciliation.period_to.desc())
         .all()
     )
+    if not include_lines:
+        # Повертаємо тільки заголовки без рядків (не тригеримо lazy-load)
+        return [
+            {
+                "id": r.id, "shop_client_id": r.shop_client_id,
+                "period_from": r.period_from, "period_to": r.period_to,
+                "cash_expected": r.cash_expected, "cash_actual": r.cash_actual,
+                "cash_diff": r.cash_diff, "notes": r.notes,
+                "closed": r.closed, "closed_at": r.closed_at, "closed_by": r.closed_by,
+                "lines": [],
+            }
+            for r in recs
+        ]
+    return recs
+
+
+@router.get("/reconciliations/{rec_id}", response_model=ShopReconciliationOut)
+def get_reconciliation(rec_id: int, db: Session = Depends(get_db)):
+    """Отримати звірку з усіма рядками."""
+    rec = db.get(ShopReconciliation, rec_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Звірку не знайдено")
+    return rec
 
 
 @router.post("/reconciliations", response_model=ShopReconciliationOut, status_code=201)

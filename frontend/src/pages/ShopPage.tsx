@@ -10,25 +10,6 @@ interface ShopClient {
   short_name: string | null
 }
 
-interface SummaryProductRow {
-  product_id: number
-  product_name: string
-  opening_balance: number
-  received: number
-  sold: number
-  current_balance: number
-  price: number | null
-}
-
-interface ShopSummary {
-  shop_client_id: number
-  shop_name: string
-  last_reconciliation_id: number | null
-  last_reconciliation_from: string | null
-  last_reconciliation_to: string | null
-  last_closed: number
-  products: SummaryProductRow[]
-}
 
 interface DisposalLine {
   id: number
@@ -112,7 +93,6 @@ export function AgeBadge({ days }: { days: number }) {
 export default function ShopPage() {
   const { workDate } = useWorkDate()
   const [shops, setShops]               = useState<ShopClient[]>([])
-  const [summaries, setSummaries]       = useState<ShopSummary[]>([])
   const [loading, setLoading]           = useState(false)
   const [loadError, setLoadError]       = useState<string | null>(null)
   const [activeShopId, setActiveShopId] = useState<number | null>(null)
@@ -123,16 +103,6 @@ export default function ShopPage() {
     try {
       const sh = await api.get<ShopClient[]>('/shop/shops')
       setShops(sh)
-      try {
-        const sm = await api.get<ShopSummary[]>(`/shop/summary?date=${workDate}`)
-        setSummaries(sm)
-      } catch {
-        setSummaries(sh.map((s) => ({
-          shop_client_id: s.id, shop_name: s.name,
-          last_reconciliation_id: null, last_reconciliation_from: null,
-          last_reconciliation_to: null, last_closed: 0, products: [],
-        })))
-      }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -148,8 +118,6 @@ export default function ShopPage() {
   }, [shops]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <p style={{ padding: '1.5rem' }}>Завантаження...</p>
-
-  const activeSummary = summaries.find((s) => s.shop_client_id === activeShopId)
 
   return (
     <div style={{ padding: '1.5rem' }}>
@@ -187,7 +155,7 @@ export default function ShopPage() {
             <ShopTabContent
               key={activeShopId}
               shopId={activeShopId}
-              summary={activeSummary}
+              shopName={shops.find((s) => s.id === activeShopId)?.name ?? ''}
               workDate={workDate}
               onRefresh={load}
             />
@@ -211,10 +179,10 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
 // ─── Вміст вкладки магазину ───────────────────────────────────────────────────
 
 function ShopTabContent({
-  shopId, summary, workDate, onRefresh,
+  shopId, shopName, workDate, onRefresh,
 }: {
   shopId: number
-  summary: ShopSummary | undefined
+  shopName: string
   workDate: string
   onRefresh: () => void
 }) {
@@ -233,7 +201,8 @@ function ShopTabContent({
 
   useEffect(() => {
     loadReceipts()
-    api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
+    // Завантажуємо всі продукти (включно з неактивними — у звірках можуть бути старі)
+    api.get<{ id: number; name: string }[]>('/products/').then(setProducts)
   }, [shopId, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dateReceipts  = allReceipts.filter((r) => r.receipt_date === selectedDate)
@@ -280,10 +249,10 @@ function ShopTabContent({
 
   return (
     <>
-      {/* Календар звірок (кнопка + надходження в лівій колонці, підсумки у правій) */}
+      {/* Календар звірок (кнопка + надходження в лівій колонці, деталі у правій) */}
       <ReconciliationCalendar
         shopId={shopId}
-        summary={summary}
+        products={products}
         onSelectDate={setSelectedDate}
         leftFooter={calendarLeftFooter}
       />
@@ -291,7 +260,7 @@ function ShopTabContent({
       {showRecModal && (
         <ReconciliationModal
           shopId={shopId}
-          shopName={summary?.shop_name ?? ''}
+          shopName={shopName}
           workDate={workDate}
           onClose={() => { setShowRecModal(false); onRefresh() }}
         />
@@ -404,10 +373,10 @@ function AddReceiptModal({
 // ─── Календар звірок ─────────────────────────────────────────────────────────
 
 function ReconciliationCalendar({
-  shopId, summary, onSelectDate, leftFooter,
+  shopId, products, onSelectDate, leftFooter,
 }: {
   shopId: number
-  summary?: ShopSummary
+  products: { id: number; name: string }[]
   onSelectDate?: (date: string) => void
   leftFooter?: React.ReactNode
 }) {
@@ -416,14 +385,26 @@ function ReconciliationCalendar({
   const [month, setMonth]             = useState(today.getMonth())
   const [recs, setRecs]               = useState<Reconciliation[]>([])
   const [selectedRec, setSelectedRec] = useState<Reconciliation | null>(null)
-  const [products, setProducts]       = useState<{ id: number; name: string }[]>([])
+  const [loadingRec, setLoadingRec]   = useState(false)
+
+  const loadRecDetail = (id: number) => {
+    setLoadingRec(true)
+    api.get<Reconciliation>(`/shop/reconciliations/${id}`)
+      .then((r) => { setSelectedRec(r); setLoadingRec(false) })
+      .catch(() => setLoadingRec(false))
+  }
 
   useEffect(() => {
-    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}`)
-      .then((data) => { setRecs(data); if (data.length > 0) setSelectedRec(data[0]) })
+    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
+      .then((data) => {
+        setRecs(data)
+        if (data.length > 0) {
+          setSelectedRec(data[0])  // одразу встановлюємо slim (for calendar highlight)
+          loadRecDetail(data[0].id) // і завантажуємо повні дані
+        }
+      })
       .catch(() => {})
-    api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
-  }, [shopId])
+  }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dayRecMap = useMemo(() => {
     const map = new Map<string, Reconciliation>()
@@ -484,7 +465,8 @@ function ReconciliationCalendar({
                   key={day}
                   onClick={() => {
                     if (rec) {
-                      setSelectedRec(rec)
+                      if (selectedRec?.id !== rec.id) loadRecDetail(rec.id)
+                      setSelectedRec(rec)  // slim для підсвічування
                       onSelectDate?.(ds)
                     }
                   }}
@@ -512,82 +494,70 @@ function ReconciliationCalendar({
           {leftFooter}
         </div>
 
-        {/* ── Права панель: підсумки + залишки обраної звірки ── */}
-        <div style={{ flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {/* Поточний стан (summary) */}
-          {summary && summary.products.length > 0 && (() => {
-            const totalBalance = summary.products.reduce((s, p) => s + p.current_balance, 0)
-            const totalSold    = summary.products.reduce((s, p) => s + p.sold, 0)
-            const totalCash    = summary.products.reduce((s, p) => s + p.sold * (p.price ?? 0), 0)
-            const lastDate     = summary.last_reconciliation_to
-            return (
-              <div style={{ ...sectionBox, paddingBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1a3a5c' }}>
-                      🏪 {summary.shop_name}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.1rem' }}>
-                      {lastDate
-                        ? `Остання звірка: ${lastDate} ${summary.last_closed ? '✓' : '(незакрита)'}`
-                        : 'Звірок не проводилось'}
-                    </div>
-                  </div>
-                  {summary.last_closed === 0 && summary.last_reconciliation_id &&
-                    <span style={badgeOpen}>Відкрита</span>}
-                  {summary.last_closed === 1 &&
-                    <span style={badgeClosed}>Закрита</span>}
-                </div>
-                <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                  <Metric label="Залишок" value={`${totalBalance.toFixed(1)} од.`} />
-                  <Metric label="Продано" value={`${totalSold.toFixed(1)} од.`} color="#2e7d32" />
-                  <Metric label="Виручка" value={`${totalCash.toFixed(2)} грн`} color="#b45309" />
-                </div>
-              </div>
+        {/* ── Права панель: деталізація обраної звірки ── */}
+        {selectedRec && (
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+          {/* Заголовок звірки */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.55rem' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1a3a5c' }}>
+              {selectedRec.period_from === selectedRec.period_to
+                ? selectedRec.period_from
+                : `${selectedRec.period_from} – ${selectedRec.period_to}`}
+            </span>
+            {selectedRec.closed
+              ? <span style={badgeClosed}>Закрита</span>
+              : <span style={badgeOpen}>Відкрита</span>}
+          </div>
+
+          {loadingRec ? (
+            <div style={{ color: '#999', fontSize: '0.82rem', padding: '0.5rem 0' }}>Завантаження рядків…</div>
+          ) : selectedRec.lines.length === 0 ? (
+            <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
+          ) : (() => {
+            // Агрегуємо по product_id (кілька рядків з різними batch_date → один рядок)
+            const byProduct = new Map<number, {
+              opening: number; received: number; entered: number; sold: number; price: number | null
+            }>()
+            for (const line of selectedRec.lines) {
+              const e = byProduct.get(line.product_id) ?? { opening: 0, received: 0, entered: 0, sold: 0, price: line.price ?? null }
+              e.opening  += line.opening_balance
+              e.received += line.received
+              e.entered  += line.entered_balance ?? 0
+              e.sold     += line.calculated_sold ?? 0
+              if (line.price != null && e.price == null) e.price = line.price
+              byProduct.set(line.product_id, e)
+            }
+            // Фільтр: показуємо лише рядки де є хоч якийсь рух
+            const rows = [...byProduct.entries()]
+              .map(([pid, v]) => ({ pid, ...v, sum: v.sold * (v.price ?? 0) }))
+              .filter((r) => r.opening > 0 || r.received > 0 || r.entered > 0)
+            const tot = rows.reduce(
+              (a, r) => ({ opening: a.opening + r.opening, received: a.received + r.received,
+                           entered: a.entered + r.entered, sold: a.sold + r.sold, sum: a.sum + r.sum }),
+              { opening: 0, received: 0, entered: 0, sold: 0, sum: 0 },
             )
-          })()}
 
-          {/* Деталі обраної звірки */}
-          {selectedRec && (
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
-              <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1a3a5c' }}>
-                {selectedRec.period_from === selectedRec.period_to
-                  ? selectedRec.period_from
-                  : `${selectedRec.period_from} – ${selectedRec.period_to}`}
-              </span>
-              {selectedRec.closed
-                ? <span style={badgeClosed}>Закрита</span>
-                : <span style={badgeOpen}>Відкрита</span>}
-            </div>
-            {selectedRec.lines.length === 0 ? (
-              <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
-            ) : (() => {
-              // Агрегуємо по product_id (можуть бути кілька рядків з різними batch_date)
-              const byProduct = new Map<number, { opening: number; received: number; entered: number; sold: number }>()
-              for (const line of selectedRec.lines) {
-                const e = byProduct.get(line.product_id) ?? { opening: 0, received: 0, entered: 0, sold: 0 }
-                e.opening   += line.opening_balance
-                e.received  += line.received
-                e.entered   += line.entered_balance ?? 0
-                e.sold      += line.calculated_sold ?? 0
-                byProduct.set(line.product_id, e)
-              }
-              const rows = [...byProduct.entries()].map(([pid, v]) => ({ pid, ...v }))
-              const tot = rows.reduce((a, r) => ({
-                opening: a.opening + r.opening, received: a.received + r.received,
-                entered: a.entered + r.entered, sold: a.sold + r.sold,
-              }), { opening: 0, received: 0, entered: 0, sold: 0 })
+            return (
+              <div style={{ overflowX: 'auto' }}>
+                {/* Підсумки звірки */}
+                <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '0.6rem', padding: '0.4rem 0.2rem', borderBottom: '2px solid #e0e8f0' }}>
+                  <Metric label="Відкриття" value={tot.opening > 0 ? tot.opening.toFixed(1) : '0'} color="#777" />
+                  <Metric label="Надійшло"  value={tot.received > 0 ? `+${tot.received.toFixed(1)}` : '—'} color="#0369a1" />
+                  <Metric label="Залишок"   value={tot.entered.toFixed(1)} color="#7a5800" />
+                  <Metric label="Продано"   value={tot.sold > 0 ? tot.sold.toFixed(1) : '—'} color="#2e7d32" />
+                  <Metric label="Виручка"   value={tot.sum > 0 ? `${tot.sum.toFixed(2)} грн` : '—'} color="#b45309" />
+                </div>
 
-              return (
                 <table style={{ ...miniTableStyle, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       <th style={{ ...miniTh, borderRight: '1px solid #e0e8f0', minWidth: '100px' }}>Виріб</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#f0f4f8', borderRight: '1px solid #e0e8f0' }}>Відкриття</th>
+                      <th style={{ ...miniTh, textAlign: 'right', background: '#f0f4f8', borderRight: '1px solid #e0e8f0' }}>Відкр.</th>
                       <th style={{ ...miniTh, textAlign: 'right', background: '#e8f4fb', borderRight: '1px solid #e0e8f0' }}>Надійшло</th>
                       <th style={{ ...miniTh, textAlign: 'right', background: '#fffae8', borderRight: '1px solid #e0e8f0', color: '#7a5800' }}>Залишок ✎</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#e8f5e9' }}>Продано</th>
+                      <th style={{ ...miniTh, textAlign: 'right', background: '#e8f5e9', borderRight: '1px solid #e0e8f0' }}>Продано</th>
+                      <th style={{ ...miniTh, textAlign: 'right', background: '#f5f0ff', borderRight: '1px solid #e0e8f0' }}>Ціна</th>
+                      <th style={{ ...miniTh, textAlign: 'right', background: '#fff5ea' }}>Сума</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -603,8 +573,14 @@ function ReconciliationCalendar({
                         <td style={{ ...miniTd, textAlign: 'right', background: r.entered > 0 ? '#fffae8' : '#fff5f5', borderRight: '1px solid #f0f0f0', fontWeight: 700, color: r.entered > 0 ? '#7a5800' : '#c00' }}>
                           {r.entered > 0 ? r.entered.toFixed(1) : (selectedRec.closed ? '0' : '—')}
                         </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#f0faf2', color: '#2e7d32', fontWeight: r.sold > 0 ? 600 : 400 }}>
+                        <td style={{ ...miniTd, textAlign: 'right', background: '#f0faf2', borderRight: '1px solid #f0f0f0', color: '#2e7d32', fontWeight: r.sold > 0 ? 600 : 400 }}>
                           {r.sold > 0 ? r.sold.toFixed(1) : '—'}
+                        </td>
+                        <td style={{ ...miniTd, textAlign: 'right', background: '#f8f5ff', borderRight: '1px solid #f0f0f0', color: '#555' }}>
+                          {r.price != null ? r.price.toFixed(2) : '—'}
+                        </td>
+                        <td style={{ ...miniTd, textAlign: 'right', background: '#fffbf0', color: r.sum > 0 ? '#b45309' : '#aaa', fontWeight: r.sum > 0 ? 600 : 400 }}>
+                          {r.sum > 0 ? r.sum.toFixed(2) : '—'}
                         </td>
                       </tr>
                     ))}
@@ -624,14 +600,18 @@ function ReconciliationCalendar({
                       <td style={{ ...miniTd, textAlign: 'right', background: '#e8f5e9', fontWeight: 700, color: '#2e7d32' }}>
                         {tot.sold > 0 ? tot.sold.toFixed(1) : '—'}
                       </td>
+                      <td style={{ ...miniTd, background: '#f5f0ff' }} />
+                      <td style={{ ...miniTd, textAlign: 'right', background: '#fff5ea', fontWeight: 700, color: '#b45309' }}>
+                        {tot.sum > 0 ? tot.sum.toFixed(2) : '—'}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
-              )
-            })()}
-          </div>
-        )}
+              </div>
+            )
+          })()}
         </div>
+        )}
       </div>
     </div>
   )

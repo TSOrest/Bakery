@@ -1466,11 +1466,12 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         is_last = date_str == last_import_date
 
                         # Надходження з замовлень за цей день (вже в БД після кроку 7)
+                        from sqlalchemy import or_ as _or_
                         recv_rows = (
                             db.query(Order.product_id, func.sum(Order.qty).label("t"))
                             .filter(
                                 Order.client_id == shop_client.id,
-                                Order.origin_id == 0,
+                                _or_(Order.origin_id.is_(None), Order.origin_id == 0),
                                 Order.order_date == date_str,
                             )
                             .group_by(Order.product_id)
