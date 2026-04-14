@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import React, { forwardRef, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
 import { useProductAges } from '../hooks/useProductAges'
@@ -163,16 +163,29 @@ export default function ShopPage() {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem' }}>
-          {summaries.map((s) => (
-            <ShopCard
-              key={s.shop_client_id}
-              summary={s}
-              workDate={workDate}
-              onOpen={() => setModal({ shopId: s.shop_client_id, shopName: s.shop_name })}
-            />
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem' }}>
+            {summaries.map((s) => (
+              <ShopCard
+                key={s.shop_client_id}
+                summary={s}
+                workDate={workDate}
+                onOpen={() => setModal({ shopId: s.shop_client_id, shopName: s.shop_name })}
+              />
+            ))}
+          </div>
+          {shops.map((shop) => (
+            <React.Fragment key={shop.id}>
+              {shops.length > 1 && (
+                <h3 style={{ marginTop: '2rem', marginBottom: '0', color: '#1a3a5c' }}>
+                  🏪 {shop.short_name ?? shop.name}
+                </h3>
+              )}
+              <ReceiptsSection shopId={shop.id} workDate={workDate} />
+              <ReconciliationCalendar shopId={shop.id} />
+            </React.Fragment>
           ))}
-        </div>
+        </>
       )}
 
       {modal && (
@@ -271,6 +284,303 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
   )
 }
 
+// ─── Надходження у магазин ────────────────────────────────────────────────────
+
+function ReceiptsSection({ shopId, workDate }: { shopId: number; workDate: string }) {
+  const [receipts, setReceipts] = useState<ShopReceipt[]>([])
+  const [products, setProducts] = useState<{ id: number; name: string }[]>([])
+  const [form, setForm]         = useState({
+    product_id: '', qty: '', purchase_price: '', notes: '', receipt_date: workDate,
+  })
+  const [saving, setSaving] = useState(false)
+
+  const loadReceipts = () =>
+    api.get<ShopReceipt[]>(`/shop/receipts?shop_client_id=${shopId}`).then(setReceipts)
+
+  useEffect(() => {
+    loadReceipts()
+    api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
+  }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setForm((f) => ({ ...f, receipt_date: workDate }))
+  }, [workDate])
+
+  const handleAdd = async () => {
+    if (!form.product_id || !form.qty) return
+    setSaving(true)
+    try {
+      await api.post('/shop/receipts', {
+        shop_client_id: shopId,
+        receipt_date: form.receipt_date,
+        product_id: Number(form.product_id),
+        qty: Number(form.qty),
+        purchase_price: form.purchase_price ? Number(form.purchase_price) : 0,
+        notes: form.notes || null,
+      })
+      setForm({ product_id: '', qty: '', purchase_price: '', notes: '', receipt_date: workDate })
+      await loadReceipts()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
+
+  return (
+    <div style={{ ...sectionBox, marginTop: '1.5rem' }}>
+      <div style={sectionTitle}>Надходження у магазин</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end', marginBottom: '0.75rem' }}>
+        <div>
+          <label style={labelStyle}>Дата</label>
+          <input type="date" value={form.receipt_date}
+            onChange={(e) => setForm({ ...form, receipt_date: e.target.value })}
+            style={{ ...inputStyle, width: '130px' }} />
+        </div>
+        <div>
+          <label style={labelStyle}>Виріб</label>
+          <select value={form.product_id}
+            onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+            style={{ ...inputStyle, width: '180px' }}>
+            <option value="">— оберіть —</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Кількість</label>
+          <input type="number" placeholder="0" min="0" step="0.001"
+            value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })}
+            style={{ ...inputStyle, width: '90px' }} />
+        </div>
+        <div>
+          <label style={labelStyle}>Ціна закупки</label>
+          <input type="number" placeholder="0.00" min="0" step="0.01"
+            value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })}
+            style={{ ...inputStyle, width: '110px' }} />
+        </div>
+        <div>
+          <label style={labelStyle}>Примітка</label>
+          <input placeholder="необов'язково"
+            value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            style={{ ...inputStyle, width: '160px' }} />
+        </div>
+        <button
+          onClick={handleAdd}
+          disabled={saving || !form.product_id || !form.qty}
+          style={{ ...primaryBtn, alignSelf: 'flex-end' }}>
+          {saving ? '…' : '+ Додати'}
+        </button>
+      </div>
+      {receipts.length > 0 ? (
+        <table style={miniTableStyle}>
+          <thead>
+            <tr style={{ background: '#f0f4f8' }}>
+              <th style={miniTh}>Дата</th>
+              <th style={miniTh}>Виріб</th>
+              <th style={{ ...miniTh, textAlign: 'right' }}>Кількість</th>
+              <th style={{ ...miniTh, textAlign: 'right' }}>Ціна</th>
+              <th style={miniTh}>Примітка</th>
+              <th style={miniTh} />
+            </tr>
+          </thead>
+          <tbody>
+            {receipts.slice(0, 30).map((r) => (
+              <tr key={r.id}>
+                <td style={miniTd}>{r.receipt_date}</td>
+                <td style={miniTd}>{productName(r.product_id)}</td>
+                <td style={{ ...miniTd, textAlign: 'right' }}>{r.qty}</td>
+                <td style={{ ...miniTd, textAlign: 'right' }}>
+                  {r.purchase_price > 0 ? r.purchase_price.toFixed(2) : '—'}
+                </td>
+                <td style={{ ...miniTd, color: '#888' }}>{r.notes ?? '—'}</td>
+                <td style={miniTd}>
+                  <button
+                    onClick={() => api.delete(`/shop/receipts/${r.id}`).then(loadReceipts)}
+                    style={deleteBtnSmall}>✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Надходжень не зафіксовано</div>
+      )}
+    </div>
+  )
+}
+
+// ─── Календар звірок ─────────────────────────────────────────────────────────
+
+function ReconciliationCalendar({ shopId }: { shopId: number }) {
+  const today = new Date()
+  const [year, setYear]               = useState(today.getFullYear())
+  const [month, setMonth]             = useState(today.getMonth())
+  const [recs, setRecs]               = useState<Reconciliation[]>([])
+  const [selectedRec, setSelectedRec] = useState<Reconciliation | null>(null)
+  const [products, setProducts]       = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}`)
+      .then((data) => { setRecs(data); if (data.length > 0) setSelectedRec(data[0]) })
+      .catch(() => {})
+    api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
+  }, [shopId])
+
+  const dayRecMap = useMemo(() => {
+    const map = new Map<string, Reconciliation>()
+    for (const rec of recs) {
+      const cur = new Date(rec.period_from)
+      const end = new Date(rec.period_to)
+      while (cur <= end) {
+        map.set(cur.toISOString().slice(0, 10), rec)
+        cur.setDate(cur.getDate() + 1)
+      }
+    }
+    return map
+  }, [recs])
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const startPad    = (new Date(year, month, 1).getDay() + 6) % 7  // Monday-first
+
+  const prevMonth = () => month === 0 ? (setYear((y) => y - 1), setMonth(11)) : setMonth((m) => m - 1)
+  const nextMonth = () => month === 11 ? (setYear((y) => y + 1), setMonth(0)) : setMonth((m) => m + 1)
+
+  const monthLabel = new Date(year, month, 1)
+    .toLocaleString('uk-UA', { month: 'long', year: 'numeric' })
+
+  const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
+  const todayStr = today.toISOString().slice(0, 10)
+
+  if (recs.length === 0) return null
+
+  return (
+    <div style={{ ...sectionBox, marginTop: '1.5rem' }}>
+      <div style={sectionTitle}>Звірки (календар)</div>
+      <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+
+        {/* ── Календар ── */}
+        <div style={{ minWidth: '240px', flex: '0 0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <button onClick={prevMonth} style={{ ...secondaryBtn, padding: '0.2rem 0.6rem' }}>←</button>
+            <span style={{ fontWeight: 600, fontSize: '0.88rem', textTransform: 'capitalize' }}>{monthLabel}</span>
+            <button onClick={nextMonth} style={{ ...secondaryBtn, padding: '0.2rem 0.6rem' }}>→</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+            {['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map((d) => (
+              <div key={d} style={{ textAlign: 'center', fontWeight: 600, color: '#999', padding: '2px 0', fontSize: '0.68rem' }}>{d}</div>
+            ))}
+            {Array(startPad).fill(null).map((_, i) => <div key={`pad${i}`} />)}
+            {Array.from({ length: daysInMonth }, (_, i) => {
+              const day = i + 1
+              const ds  = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+              const rec = dayRecMap.get(ds)
+              const sel = !!rec && selectedRec?.id === rec.id
+              const isToday = ds === todayStr
+              const bg = rec ? (rec.closed ? '#e8f5e9' : '#fff3e0') : 'transparent'
+              const border = sel
+                ? '2px solid #1a3a5c'
+                : isToday ? '1px solid #b45309' : '1px solid transparent'
+              return (
+                <div
+                  key={day}
+                  onClick={() => rec && setSelectedRec(rec)}
+                  style={{
+                    textAlign: 'center', padding: '3px 1px', lineHeight: '1.6',
+                    background: bg, border, borderRadius: '3px', fontSize: '0.78rem',
+                    cursor: rec ? 'pointer' : 'default',
+                    fontWeight: isToday ? 700 : 400,
+                    color: rec ? '#000' : '#ccc',
+                  }}
+                >{day}</div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.7rem', color: '#888' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <span style={{ display: 'inline-block', width: '10px', height: '10px', background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '2px' }} />
+              Закрита
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <span style={{ display: 'inline-block', width: '10px', height: '10px', background: '#fff3e0', border: '1px solid #f0c070', borderRadius: '2px' }} />
+              Відкрита
+            </span>
+          </div>
+        </div>
+
+        {/* ── Залишки обраної звірки ── */}
+        {selectedRec && (
+          <div style={{ flex: '1 1 280px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
+              <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                {selectedRec.period_from === selectedRec.period_to
+                  ? selectedRec.period_from
+                  : `${selectedRec.period_from} – ${selectedRec.period_to}`}
+              </span>
+              {selectedRec.closed
+                ? <span style={badgeClosed}>Закрита</span>
+                : <span style={badgeOpen}>Відкрита</span>}
+            </div>
+            {selectedRec.lines.length === 0 ? (
+              <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
+            ) : (
+              <table style={miniTableStyle}>
+                <thead>
+                  <tr style={{ background: '#f0f4f8' }}>
+                    <th style={miniTh}>Виріб</th>
+                    <th style={{ ...miniTh, textAlign: 'right' }}>Відкриття</th>
+                    <th style={{ ...miniTh, textAlign: 'right' }}>Надійшло</th>
+                    <th style={{ ...miniTh, textAlign: 'right' }}>Залишок</th>
+                    <th style={{ ...miniTh, textAlign: 'right' }}>Продано</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedRec.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td style={miniTd}>{productName(line.product_id)}</td>
+                      <td style={{ ...miniTd, textAlign: 'right', color: '#999' }}>
+                        {line.opening_balance.toFixed(1)}
+                      </td>
+                      <td style={{ ...miniTd, textAlign: 'right', color: '#0369a1' }}>
+                        {line.received > 0 ? `+${line.received.toFixed(1)}` : '—'}
+                      </td>
+                      <td style={{ ...miniTd, textAlign: 'right', fontWeight: 600 }}>
+                        {(line.entered_balance ?? 0).toFixed(1)}
+                      </td>
+                      <td style={{ ...miniTd, textAlign: 'right', color: '#2e7d32' }}>
+                        {(line.calculated_sold ?? 0) > 0 ? (line.calculated_sold ?? 0).toFixed(1) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#f0f4f8', fontWeight: 700 }}>
+                    <td style={miniTd}>Разом:</td>
+                    <td style={{ ...miniTd, textAlign: 'right' }}>
+                      {selectedRec.lines.reduce((s, l) => s + l.opening_balance, 0).toFixed(1)}
+                    </td>
+                    <td style={{ ...miniTd, textAlign: 'right', color: '#0369a1' }}>
+                      {(() => {
+                        const t = selectedRec.lines.reduce((s, l) => s + l.received, 0)
+                        return t > 0 ? `+${t.toFixed(1)}` : '—'
+                      })()}
+                    </td>
+                    <td style={{ ...miniTd, textAlign: 'right' }}>
+                      {selectedRec.lines.reduce((s, l) => s + (l.entered_balance ?? 0), 0).toFixed(1)}
+                    </td>
+                    <td style={{ ...miniTd, textAlign: 'right', color: '#2e7d32' }}>
+                      {selectedRec.lines.reduce((s, l) => s + (l.calculated_sold ?? 0), 0).toFixed(1)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Модальне вікно звірки ────────────────────────────────────────────────────
 
 function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
@@ -285,10 +595,6 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
   const [cashActual, setCashActual] = useState('')
   const [confirmNotes, setConfirmNotes] = useState('')
   const [saving, setSaving]         = useState(false)
-  const [receipts, setReceipts]     = useState<ShopReceipt[]>([])
-  const [recForm, setRecForm]       = useState({
-    product_id: '', qty: '', purchase_price: '', notes: '', receipt_date: workDate,
-  })
   const [products, setProducts]     = useState<{ id: number; name: string }[]>([])
   const [clients, setClients]       = useState<ClientOption[]>([])
   // POS-продажі за день звірки
@@ -301,14 +607,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     if (list.length > 0 && !activeRec) setActiveRec(list[0])
   }
 
-  const loadReceipts = async () => {
-    const r = await api.get<ShopReceipt[]>(`/shop/receipts?shop_client_id=${shopId}`)
-    setReceipts(r)
-  }
-
   useEffect(() => {
     loadRecs()
-    loadReceipts()
     api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
     api.get<{ id: number; full_name: string; short_name: string | null; client_kind: string }[]>(
       '/clients/?active_only=true'
@@ -449,27 +749,6 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     await loadRecs()
   }
 
-  const handleAddReceipt = async () => {
-    if (!recForm.product_id || !recForm.qty) return
-    await api.post('/shop/receipts', {
-      shop_client_id: shopId,
-      receipt_date: recForm.receipt_date,
-      product_id: Number(recForm.product_id),
-      qty: Number(recForm.qty),
-      purchase_price: recForm.purchase_price ? Number(recForm.purchase_price) : 0,
-      notes: recForm.notes || null,
-    })
-    setRecForm({ product_id: '', qty: '', purchase_price: '', notes: '', receipt_date: workDate })
-    await loadReceipts()
-    // Автоматично оновлюємо звірку щоб партія зʼявилась у таблиці
-    if (activeRec && !activeRec.closed) {
-      const updated = await api.post<Reconciliation>(
-        `/shop/reconciliations/${activeRec.id}/refresh-received`, {}
-      )
-      setActiveRec(updated)
-    }
-  }
-
   const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
 
   return (
@@ -523,38 +802,6 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
               </div>
             )}
 
-            <div style={sectionBox}>
-              <div style={sectionTitle}>Надходження</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <input type="date" value={recForm.receipt_date}
-                  onChange={(e) => setRecForm({ ...recForm, receipt_date: e.target.value })} style={inputStyle} />
-                <select value={recForm.product_id}
-                  onChange={(e) => setRecForm({ ...recForm, product_id: e.target.value })} style={inputStyle}>
-                  <option value="">— виріб —</option>
-                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input type="number" placeholder="Кількість" min="0" step="0.001"
-                  value={recForm.qty} onChange={(e) => setRecForm({ ...recForm, qty: e.target.value })} style={inputStyle} />
-                <input type="number" placeholder="Ціна закупки" min="0" step="0.01"
-                  value={recForm.purchase_price} onChange={(e) => setRecForm({ ...recForm, purchase_price: e.target.value })} style={inputStyle} />
-                <input placeholder="Примітка"
-                  value={recForm.notes} onChange={(e) => setRecForm({ ...recForm, notes: e.target.value })} style={inputStyle} />
-                <button onClick={handleAddReceipt} style={primaryBtn}>+ Додати</button>
-              </div>
-              {receipts.length > 0 && (
-                <div style={{ marginTop: '0.5rem', maxHeight: '150px', overflowY: 'auto' }}>
-                  {receipts.map((r) => (
-                    <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', padding: '0.2rem 0', borderBottom: '1px solid #f0f0f0' }}>
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{productName(r.product_id)}</div>
-                        <div style={{ color: '#888' }}>{r.receipt_date} · {r.qty} од.</div>
-                      </div>
-                      <button onClick={() => api.delete(`/shop/receipts/${r.id}`).then(loadReceipts)} style={deleteBtnSmall}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* ── Права панель ───────────────────────────────────────────────── */}
