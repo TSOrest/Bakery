@@ -263,9 +263,15 @@ def get_summary(date: str, db: Session = Depends(get_db)):
             .order_by(ShopReconciliation.period_to.desc())
             .first()
         )
-        if last_rec:
+        from datetime import date as _date, timedelta as _td
+        if last_rec and last_rec.closed:
+            # Received = лише те що прийшло ПІСЛЯ закриття звірки (не всередині неї)
+            after_to    = (_date.fromisoformat(last_rec.period_to) + _td(days=1)).isoformat()
+            period_from = after_to
+            period_to   = date
+        elif last_rec:  # відкрита звірка
             period_from = last_rec.period_from
-            period_to   = last_rec.period_to if last_rec.closed else date
+            period_to   = date
         else:
             period_from = date
             period_to   = date
@@ -288,16 +294,17 @@ def get_summary(date: str, db: Session = Depends(get_db)):
             product = products_map.get(pid)
             if not product or not product.is_active:
                 continue
-            # Відкриваючий залишок = сума entered_balance всіх рядків продукту в останній закритій звірці
+            # Відкриваючий залишок: фізичний залишок з останньої ЗАКРИТОЇ звірки
             opening = 0.0
-            if last_rec and last_rec.closed:
+            if last_rec and last_rec.closed and last_rec.lines:
                 opening = sum(ln.entered_balance or 0 for ln in last_rec.lines if ln.product_id == pid)
             elif not last_rec:
                 opening = (product.initial_stock or 0)
             received = (bakery.get(pid, 0) + ext.get(pid, 0) + inv.get(pid, 0))
-            # Продано = сума calculated_sold з усіх рядків в останній звірці
+            # Продано: тільки для ВІДКРИТОЇ звірки (partial reconciliation in progress)
+            # Для закритої: sold = 0, бо opening = entered_balance вже враховує продаж
             sold = 0.0
-            if last_rec:
+            if last_rec and not last_rec.closed:
                 sold = sum(
                     (ln.calculated_sold or 0) for ln in last_rec.lines if ln.product_id == pid
                 )
@@ -361,9 +368,26 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
     db.add(rec)
     db.flush()
 
-    eff_from   = _effective_date_from(db, data.shop_client_id, data.period_from)
-    bakery_b   = _received_from_bakery_batched(db, data.shop_client_id, eff_from, data.period_to)
-    ext_b      = _received_from_receipts_batched(db, data.shop_client_id, eff_from, data.period_to)
+    eff_from = _effective_date_from(db, data.shop_client_id, data.period_from)
+
+    # Остання закрита звірка (потрібна для двох перевірок нижче)
+    last_closed = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == data.shop_client_id,
+            ShopReconciliation.closed == 1,
+        )
+        .order_by(ShopReconciliation.period_to.desc())
+        .first()
+    )
+
+    # Якщо остання закрита звірка порожня (placeholder від імпорту без рядків) —
+    # захопити всі надходження з самого початку, щоб оператор бачив незвірений товар
+    if last_closed and not last_closed.lines:
+        eff_from = '2000-01-01'
+
+    bakery_b    = _received_from_bakery_batched(db, data.shop_client_id, eff_from, data.period_to)
+    ext_b       = _received_from_receipts_batched(db, data.shop_client_id, eff_from, data.period_to)
     carry_overs = _carry_over_lines(db, data.shop_client_id, data.period_from)
 
     # Збираємо всі (product_id, batch_date) → {opening, received}
@@ -382,11 +406,8 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
     for (pid, d), qty in ext_b.items():
         _ensure(pid, d)['received'] += qty
 
-    # Початковий залишок (тільки для першої звірки, якщо ще немає закритих)
-    if not carry_overs and not db.query(ShopReconciliation).filter(
-        ShopReconciliation.shop_client_id == data.shop_client_id,
-        ShopReconciliation.closed == 1,
-    ).first():
+    # Початковий залишок — якщо немає закритих звірок АБО остання закрита порожня
+    if not carry_overs and (not last_closed or not last_closed.lines):
         for product in db.query(Product).filter(Product.is_active == 1).all():
             if (product.id, None) not in batch_data and (product.initial_stock or 0) > 0:
                 _ensure(product.id, None)['opening'] += product.initial_stock

@@ -1425,7 +1425,12 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     diff=diff,
                 ))
 
-            # ── 10. Залишки (tblDailyBalances) ───────────────────────────────
+            # ── 10. Залишки (tblDailyBalances) → щоденні звірки магазину ─────
+            # Для кожної дати в tblDailyBalances створюємо закриту ShopReconciliation.
+            # opening  = EndBalance попереднього дня
+            # received = замовлення на магазин за цей день (вже імпортовані в крок 7)
+            # entered  = EndBalance цього дня
+            # calculated_sold = max(0, opening + received - entered)
             _update_state(step="Залишки магазину", progress=90)
             ep = EntityReport()
             stock_tname = _find_table_for("stock", tables)
@@ -1435,9 +1440,8 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     db.query(Client).filter(Client.is_own_shop == 1).first()
                     or db.query(Client).filter(Client.client_kind == "shop").first()
                 )
-                # Знаходимо останній EndBalance per product на/до дати переходу
-                last_balance: dict[int, float] = {}
-                last_date:    dict[int, str]   = {}
+                # Зчитуємо всі рядки → {date_str: {prod_id: end_balance}}
+                daily: dict[str, dict[int, float]] = {}
                 if cm.get("product_id") and cm.get("date") and cm.get("end_balance"):
                     for row in reader.rows(stock_tname):
                         d = _safe_date(row.get(cm["date"]))
@@ -1450,30 +1454,61 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                             prod_id = None
                         if not prod_id:
                             continue
-                        if d >= last_date.get(prod_id, ""):
-                            bal = _safe_float(row.get(cm["end_balance"])) or 0
-                            last_balance[prod_id] = bal
-                            last_date[prod_id]    = d
+                        bal = _safe_float(row.get(cm["end_balance"])) or 0.0
+                        daily.setdefault(d, {})[prod_id] = bal
 
-                if shop_client and last_balance:
-                    recon = ShopReconciliation(
-                        shop_client_id=shop_client.id,
-                        period_from=tr_date, period_to=tr_date,
-                        cash_expected=0, closed=1,
-                        closed_at=now_str, closed_by="import", created_at=now_str,
-                    )
-                    db.add(recon); db.flush()
-                    for prod_id, qty in last_balance.items():
-                        if qty <= 0:
-                            ep.skipped += 1; continue
-                        db.add(ShopReconciliationLine(
-                            reconciliation_id=recon.id, product_id=prod_id,
-                            batch_date=None, opening_balance=qty,
-                            received=0, entered_balance=qty, written_off=0,
-                            calculated_sold=0, price=None, expected_cash=0,
-                        ))
-                        ep.imported += 1
-                    ep.found = len(last_balance)
+                if shop_client and daily:
+                    prev_balance: dict[int, float] = {}
+                    for date_str in sorted(daily.keys()):
+                        day_bal = daily[date_str]
+
+                        # Надходження з замовлень за цей день (вже в БД після кроку 7)
+                        recv_rows = (
+                            db.query(Order.product_id, func.sum(Order.qty).label("t"))
+                            .filter(
+                                Order.client_id == shop_client.id,
+                                Order.origin_id == 0,
+                                Order.order_date == date_str,
+                            )
+                            .group_by(Order.product_id)
+                            .all()
+                        )
+                        received_day: dict[int, float] = {r.product_id: float(r.t) for r in recv_rows}
+
+                        recon = ShopReconciliation(
+                            shop_client_id=shop_client.id,
+                            period_from=date_str, period_to=date_str,
+                            cash_expected=0, closed=1,
+                            closed_at=now_str, closed_by="import", created_at=now_str,
+                        )
+                        db.add(recon)
+                        db.flush()
+
+                        all_pids = set(day_bal) | set(prev_balance) | set(received_day)
+                        for pid in all_pids:
+                            opening  = prev_balance.get(pid, 0.0)
+                            received = received_day.get(pid, 0.0)
+                            entered  = day_bal.get(pid, 0.0)
+                            c_sold   = max(0.0, opening + received - entered)
+                            db.add(ShopReconciliationLine(
+                                reconciliation_id=recon.id,
+                                product_id=pid,
+                                batch_date=None,
+                                opening_balance=opening,
+                                received=received,
+                                entered_balance=entered,
+                                written_off=0.0,
+                                calculated_sold=c_sold,
+                                price=None,
+                                expected_cash=0.0,
+                            ))
+                            ep.imported += 1
+
+                        # Оновлюємо prev_balance для наступного дня
+                        for pid, bal in day_bal.items():
+                            prev_balance[pid] = bal
+
+                    ep.found = len(daily)
                 elif not shop_client:
                     ep.warnings.append(
                         "Клієнта-магазин не знайдено (is_own_shop=1 або client_kind='shop')"
