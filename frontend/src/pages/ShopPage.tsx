@@ -1,7 +1,6 @@
 import React, { forwardRef, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
-import { useProductAges } from '../hooks/useProductAges'
 
 // ─── Типи ────────────────────────────────────────────────────────────────────
 
@@ -199,80 +198,6 @@ export default function ShopPage() {
   )
 }
 
-// ─── Картка магазину ──────────────────────────────────────────────────────────
-
-function ShopCard({ summary, workDate, onOpen }: {
-  summary: ShopSummary
-  workDate: string
-  onOpen: () => void
-}) {
-  const { getAge } = useProductAges(workDate)
-
-  const totalBalance = summary.products.reduce((s, p) => s + p.current_balance, 0)
-  const totalSold    = summary.products.reduce((s, p) => s + p.sold, 0)
-  const totalCash    = summary.products.reduce((s, p) => s + p.sold * (p.price ?? 0), 0)
-  const lastDate     = summary.last_reconciliation_to
-
-  return (
-    <div style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1a3a5c' }}>🏪 {summary.shop_name}</div>
-          <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.2rem' }}>
-            {lastDate
-              ? `Остання звірка: ${lastDate} ${summary.last_closed ? '✓' : '(незакрита)'}`
-              : 'Звірок не проводилось'}
-          </div>
-        </div>
-        {summary.last_closed === 0 && summary.last_reconciliation_id && <span style={badgeOpen}>Відкрита</span>}
-        {summary.last_closed === 1 && <span style={badgeClosed}>Закрита</span>}
-      </div>
-
-      <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', flexWrap: 'wrap' }}>
-        <Metric label="Залишок" value={`${totalBalance.toFixed(1)} од.`} />
-        <Metric label="Продано" value={`${totalSold.toFixed(1)} од.`} color="#2e7d32" />
-        <Metric label="Виручка" value={`${totalCash.toFixed(2)} грн`} color="#b45309" />
-      </div>
-
-      {summary.products.length > 0 && (
-        <table style={{ ...miniTableStyle, marginTop: '0.9rem' }}>
-          <thead>
-            <tr style={{ background: '#f0f4f8' }}>
-              <th style={miniTh}>Виріб</th>
-              <th style={{ ...miniTh, textAlign: 'right' }}>Залишок</th>
-              <th style={{ ...miniTh, textAlign: 'right' }}>Продано</th>
-              <th style={{ ...miniTh, textAlign: 'right' }}>Ціна</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summary.products.map((p) => {
-              const age = getAge(p.product_id)
-              return (
-                <tr key={p.product_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <td style={miniTd}>
-                    {p.product_name}
-                    {age && age.age_days > 1 && <AgeBadge days={age.age_days} />}
-                  </td>
-                  <td style={{ ...miniTd, textAlign: 'right', fontWeight: 600 }}>{p.current_balance.toFixed(1)}</td>
-                  <td style={{ ...miniTd, textAlign: 'right', color: '#2e7d32' }}>
-                    {p.sold > 0 ? p.sold.toFixed(1) : '—'}
-                  </td>
-                  <td style={{ ...miniTd, textAlign: 'right', color: '#555' }}>
-                    {p.price != null ? p.price.toFixed(2) : '—'}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      )}
-
-      <button onClick={onOpen} style={{ ...primaryBtn, marginTop: '1rem', width: '100%' }}>
-        Відкрити звірку
-      </button>
-    </div>
-  )
-}
 
 function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
@@ -317,53 +242,51 @@ function ShopTabContent({
   const handleDeleteReceipt = (id: number) =>
     api.delete(`/shop/receipts/${id}`).then(() => setReceiptRefresh((n) => n + 1))
 
-  // Підвал лівої колонки календаря: надходження на обрану дату + кнопка
+  // Підвал лівої колонки календаря: кнопка звірки + надходження на обрану дату
   const calendarLeftFooter = (
-    <div style={{ marginTop: '0.75rem', borderTop: '1px solid #e0e8f0', paddingTop: '0.6rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-        <span style={{ ...sectionTitle, margin: 0 }}>Надходження · {selectedDate}</span>
-        <button
-          onClick={() => setAddReceiptOpen(true)}
-          style={{ ...primaryBtn, fontSize: '0.78rem', padding: '0.2rem 0.65rem' }}
-        >+ Додати</button>
-      </div>
-      {dateReceipts.length > 0 ? (
-        <div>
-          {dateReceipts.map((r) => (
-            <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', padding: '0.18rem 0', borderBottom: '1px solid #f0f0f0' }}>
-              <div>
-                <span style={{ fontWeight: 600 }}>{productName(r.product_id)}</span>
-                <span style={{ color: '#777', marginLeft: '0.4rem' }}>{r.qty} од.{r.purchase_price > 0 ? ` · ${r.purchase_price.toFixed(2)} грн` : ''}</span>
-              </div>
-              <button onClick={() => handleDeleteReceipt(r.id)} style={deleteBtnSmall}>✕</button>
-            </div>
-          ))}
+    <div>
+      <button
+        onClick={() => setShowRecModal(true)}
+        style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.5rem' }}
+      >
+        Відкрити звірку
+      </button>
+      <div style={{ borderTop: '1px solid #e0e8f0', paddingTop: '0.55rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+          <span style={{ ...sectionTitle, margin: 0 }}>Надходження · {selectedDate}</span>
+          <button
+            onClick={() => setAddReceiptOpen(true)}
+            style={{ ...primaryBtn, fontSize: '0.75rem', padding: '0.18rem 0.6rem' }}
+          >+ Додати</button>
         </div>
-      ) : (
-        <div style={{ color: '#bbb', fontSize: '0.78rem' }}>Надходжень немає</div>
-      )}
+        {dateReceipts.length > 0 ? (
+          <div>
+            {dateReceipts.map((r) => (
+              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', padding: '0.18rem 0', borderBottom: '1px solid #f0f0f0' }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{productName(r.product_id)}</span>
+                  <span style={{ color: '#777', marginLeft: '0.4rem' }}>{r.qty} од.{r.purchase_price > 0 ? ` · ${r.purchase_price.toFixed(2)} грн` : ''}</span>
+                </div>
+                <button onClick={() => handleDeleteReceipt(r.id)} style={deleteBtnSmall}>✕</button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: '#bbb', fontSize: '0.78rem' }}>Надходжень немає</div>
+        )}
+      </div>
     </div>
   )
 
   return (
     <>
-      {/* Календар звірок (зі списком надходжень нижче в лівій колонці) */}
+      {/* Календар звірок (кнопка + надходження в лівій колонці, підсумки у правій) */}
       <ReconciliationCalendar
         shopId={shopId}
+        summary={summary}
         onSelectDate={setSelectedDate}
         leftFooter={calendarLeftFooter}
       />
-
-      {/* Підсумкова картка магазину */}
-      {summary && (
-        <div style={{ marginTop: '1.25rem' }}>
-          <ShopCard
-            summary={summary}
-            workDate={workDate}
-            onOpen={() => setShowRecModal(true)}
-          />
-        </div>
-      )}
 
       {showRecModal && (
         <ReconciliationModal
@@ -373,6 +296,7 @@ function ShopTabContent({
           onClose={() => { setShowRecModal(false); onRefresh() }}
         />
       )}
+
 
       {addReceiptOpen && (
         <AddReceiptModal
@@ -480,9 +404,10 @@ function AddReceiptModal({
 // ─── Календар звірок ─────────────────────────────────────────────────────────
 
 function ReconciliationCalendar({
-  shopId, onSelectDate, leftFooter,
+  shopId, summary, onSelectDate, leftFooter,
 }: {
   shopId: number
+  summary?: ShopSummary
   onSelectDate?: (date: string) => void
   leftFooter?: React.ReactNode
 }) {
@@ -587,9 +512,44 @@ function ReconciliationCalendar({
           {leftFooter}
         </div>
 
-        {/* ── Залишки обраної звірки ── */}
-        {selectedRec && (
-          <div style={{ flex: '1 1 320px', overflowX: 'auto' }}>
+        {/* ── Права панель: підсумки + залишки обраної звірки ── */}
+        <div style={{ flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {/* Поточний стан (summary) */}
+          {summary && summary.products.length > 0 && (() => {
+            const totalBalance = summary.products.reduce((s, p) => s + p.current_balance, 0)
+            const totalSold    = summary.products.reduce((s, p) => s + p.sold, 0)
+            const totalCash    = summary.products.reduce((s, p) => s + p.sold * (p.price ?? 0), 0)
+            const lastDate     = summary.last_reconciliation_to
+            return (
+              <div style={{ ...sectionBox, paddingBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1a3a5c' }}>
+                      🏪 {summary.shop_name}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.1rem' }}>
+                      {lastDate
+                        ? `Остання звірка: ${lastDate} ${summary.last_closed ? '✓' : '(незакрита)'}`
+                        : 'Звірок не проводилось'}
+                    </div>
+                  </div>
+                  {summary.last_closed === 0 && summary.last_reconciliation_id &&
+                    <span style={badgeOpen}>Відкрита</span>}
+                  {summary.last_closed === 1 &&
+                    <span style={badgeClosed}>Закрита</span>}
+                </div>
+                <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+                  <Metric label="Залишок" value={`${totalBalance.toFixed(1)} од.`} />
+                  <Metric label="Продано" value={`${totalSold.toFixed(1)} од.`} color="#2e7d32" />
+                  <Metric label="Виручка" value={`${totalCash.toFixed(2)} грн`} color="#b45309" />
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Деталі обраної звірки */}
+          {selectedRec && (
+          <div style={{ overflowX: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
               <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1a3a5c' }}>
                 {selectedRec.period_from === selectedRec.period_to
@@ -671,6 +631,7 @@ function ReconciliationCalendar({
             })()}
           </div>
         )}
+        </div>
       </div>
     </div>
   )
@@ -1367,11 +1328,6 @@ const shopTabActiveStyle: React.CSSProperties = {
   ...shopTabStyle,
   background: '#fff', color: '#1a3a5c', fontWeight: 700,
   borderBottom: '2px solid #fff', borderColor: '#d0dce8',
-}
-const cardStyle: React.CSSProperties = {
-  background: '#fff', border: '1px solid #e0e8f0', borderRadius: '10px',
-  padding: '1.1rem 1.25rem', minWidth: '320px', maxWidth: '420px',
-  flex: '1 1 320px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
 }
 const tableStyle: React.CSSProperties = {
   width: '100%', borderCollapse: 'collapse', background: '#fff',
