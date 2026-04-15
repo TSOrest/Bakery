@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -397,38 +397,14 @@ def get_summary(date: str, db: Session = Depends(get_db)):
 @router.get("/reconciliations", response_model=List[ShopReconciliationOut])
 def list_reconciliations(
     shop_client_id: int,
-    include_lines: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    recs = (
+    return (
         db.query(ShopReconciliation)
         .filter(ShopReconciliation.shop_client_id == shop_client_id)
         .order_by(ShopReconciliation.period_to.desc())
         .all()
     )
-    if not include_lines:
-        # Повертаємо тільки заголовки без рядків (не тригеримо lazy-load)
-        return [
-            {
-                "id": r.id, "shop_client_id": r.shop_client_id,
-                "period_from": r.period_from, "period_to": r.period_to,
-                "cash_expected": r.cash_expected, "cash_actual": r.cash_actual,
-                "cash_diff": r.cash_diff, "notes": r.notes,
-                "closed": r.closed, "closed_at": r.closed_at, "closed_by": r.closed_by,
-                "lines": [],
-            }
-            for r in recs
-        ]
-    return recs
-
-
-@router.get("/reconciliations/{rec_id}", response_model=ShopReconciliationOut)
-def get_reconciliation(rec_id: int, db: Session = Depends(get_db)):
-    """Отримати звірку з усіма рядками."""
-    rec = db.get(ShopReconciliation, rec_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Звірку не знайдено")
-    return rec
 
 
 @router.post("/reconciliations", response_model=ShopReconciliationOut, status_code=201)

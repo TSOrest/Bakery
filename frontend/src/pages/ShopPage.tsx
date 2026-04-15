@@ -385,23 +385,12 @@ function ReconciliationCalendar({
   const [month, setMonth]             = useState(today.getMonth())
   const [recs, setRecs]               = useState<Reconciliation[]>([])
   const [selectedRec, setSelectedRec] = useState<Reconciliation | null>(null)
-  const [loadingRec, setLoadingRec]   = useState(false)
-
-  const loadRecDetail = (id: number) => {
-    setLoadingRec(true)
-    api.get<Reconciliation>(`/shop/reconciliations/${id}`)
-      .then((r) => { setSelectedRec(r); setLoadingRec(false) })
-      .catch(() => setLoadingRec(false))
-  }
 
   useEffect(() => {
-    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
+    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}`)
       .then((data) => {
         setRecs(data)
-        if (data.length > 0) {
-          setSelectedRec(data[0])  // одразу встановлюємо slim (for calendar highlight)
-          loadRecDetail(data[0].id) // і завантажуємо повні дані
-        }
+        if (data.length > 0) setSelectedRec(data[0])
       })
       .catch(() => {})
   }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -465,8 +454,7 @@ function ReconciliationCalendar({
                   key={day}
                   onClick={() => {
                     if (rec) {
-                      if (selectedRec?.id !== rec.id) loadRecDetail(rec.id)
-                      setSelectedRec(rec)  // slim для підсвічування
+                      setSelectedRec(rec)
                       onSelectDate?.(ds)
                     }
                   }}
@@ -509,9 +497,7 @@ function ReconciliationCalendar({
               : <span style={badgeOpen}>Відкрита</span>}
           </div>
 
-          {loadingRec ? (
-            <div style={{ color: '#999', fontSize: '0.82rem', padding: '0.5rem 0' }}>Завантаження рядків…</div>
-          ) : selectedRec.lines.length === 0 ? (
+          {selectedRec.lines.length === 0 ? (
             <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
           ) : (() => {
             // Агрегуємо по product_id (кілька рядків з різними batch_date → один рядок)
