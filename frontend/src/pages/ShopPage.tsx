@@ -385,12 +385,24 @@ function ReconciliationCalendar({
   const [month, setMonth]             = useState(today.getMonth())
   const [recs, setRecs]               = useState<Reconciliation[]>([])
   const [selectedRec, setSelectedRec] = useState<Reconciliation | null>(null)
+  const [loadingRec, setLoadingRec]   = useState(false)
+
+  const loadRecDetail = (id: number) => {
+    setLoadingRec(true)
+    api.get<Reconciliation>(`/shop/reconciliations/${id}`)
+      .then((full) => { setSelectedRec(full); setLoadingRec(false) })
+      .catch(() => setLoadingRec(false))
+  }
 
   useEffect(() => {
-    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}`)
+    // Завантажуємо список без рядків (50 KB замість 3.6 MB)
+    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
       .then((data) => {
         setRecs(data)
-        if (data.length > 0) setSelectedRec(data[0])
+        if (data.length > 0) {
+          setSelectedRec(data[0])      // slim для підсвічування
+          loadRecDetail(data[0].id)    // повні рядки для правої панелі
+        }
       })
       .catch(() => {})
   }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -454,7 +466,10 @@ function ReconciliationCalendar({
                   key={day}
                   onClick={() => {
                     if (rec) {
-                      setSelectedRec(rec)
+                      if (selectedRec?.id !== rec.id) {
+                        setSelectedRec(rec)   // slim для підсвічування
+                        loadRecDetail(rec.id) // повні рядки
+                      }
                       onSelectDate?.(ds)
                     }
                   }}
@@ -497,7 +512,9 @@ function ReconciliationCalendar({
               : <span style={badgeOpen}>Відкрита</span>}
           </div>
 
-          {selectedRec.lines.length === 0 ? (
+          {loadingRec ? (
+            <div style={{ color: '#999', fontSize: '0.82rem', padding: '0.5rem 0' }}>Завантаження…</div>
+          ) : selectedRec.lines.length === 0 ? (
             <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
           ) : (() => {
             // Агрегуємо по product_id (кілька рядків з різними batch_date → один рядок)

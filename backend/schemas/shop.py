@@ -85,6 +85,23 @@ class ShopReconciliationLineUpdate(BaseModel):
     price: Optional[float] = None
 
 
+class ShopReconciliationHeaderOut(BaseModel):
+    """Схема звірки БЕЗ рядків — для швидкого завантаження календаря."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    shop_client_id: int
+    period_from: str
+    period_to: str
+    cash_expected: float
+    cash_actual: Optional[float]
+    cash_diff: Optional[float]
+    notes: Optional[str]
+    closed: int
+    closed_at: Optional[str]
+    closed_by: Optional[str]
+    created_at: Optional[str]
+
+
 class ShopReconciliationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -20,7 +21,7 @@ from backend.routers.auth import require_user
 from backend.schemas.shop import (
     ShopCountOut, ShopCountUpdate,
     OtherStockInCreate, OtherStockInOut,
-    ShopReconciliationOut, ShopReconciliationCreate,
+    ShopReconciliationOut, ShopReconciliationHeaderOut, ShopReconciliationCreate,
     ShopReconciliationLineOut, ShopReconciliationLineUpdate,
     ShopReconciliationConfirm,
     ShopReceiptCreate, ShopReceiptOut,
@@ -397,14 +398,22 @@ def get_summary(date: str, db: Session = Depends(get_db)):
 @router.get("/reconciliations", response_model=List[ShopReconciliationOut])
 def list_reconciliations(
     shop_client_id: int,
+    include_lines: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    return (
+    recs = (
         db.query(ShopReconciliation)
         .filter(ShopReconciliation.shop_client_id == shop_client_id)
         .order_by(ShopReconciliation.period_to.desc())
         .all()
     )
+    if not include_lines:
+        # JSONResponse обходить response_model — Pydantic не лізе в r.lines
+        return JSONResponse([
+            ShopReconciliationHeaderOut.model_validate(r).model_dump()
+            for r in recs
+        ])
+    return recs
 
 
 @router.post("/reconciliations", response_model=ShopReconciliationOut, status_code=201)
