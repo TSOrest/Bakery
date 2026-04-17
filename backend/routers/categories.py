@@ -16,7 +16,7 @@ def list_categories(active_only: bool = False, db: Session = Depends(get_db)):
     q = db.query(Category)
     if active_only:
         q = q.filter(Category.is_active == 1)
-    return q.order_by(Category.name).all()
+    return q.order_by(Category.sort_order, Category.name).all()
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)

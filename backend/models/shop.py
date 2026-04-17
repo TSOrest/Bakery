@@ -56,6 +56,7 @@ class ShopReconciliation(Base):
     closed_at       = Column(Text)
     closed_by       = Column(Text)
     created_at      = Column(Text)
+    rec_type        = Column(Text, default='regular')  # 'regular' | 'opening' | 'archive'
 
     lines = relationship(
         "ShopReconciliationLine",

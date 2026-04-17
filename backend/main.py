@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.database import engine, Base
+from backend.database import engine, Base, run_migrations
 import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
@@ -17,8 +17,9 @@ from backend.routers import (
 )
 from backend.routers import auth_github, db_editor, backup, import_accdb
 
-# Ініціалізуємо таблиці (якщо не існують)
+# Ініціалізуємо таблиці (якщо не існують) та застосовуємо міграції
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 
 DEFAULT_ROLE_PERMISSIONS = {

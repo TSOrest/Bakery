@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import OwnerDashboard from './OwnerDashboard'
 import type { ClientBalance, Finance, FinanceSummary, InternalKpi, FinanceArticle } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
@@ -11,7 +12,7 @@ import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
 
-type TabId = 'balances' | 'journal' | 'reports'
+type TabId = 'dashboard' | 'balances' | 'journal' | 'reports'
 
 function firstDayOfMonth(iso: string): string {
   return iso.slice(0, 7) + '-01'
@@ -369,7 +370,7 @@ export default function FinancesPage() {
   const { workDate } = useWorkDate()
   const today = workDate ?? new Date().toISOString().slice(0, 10)
 
-  const [tab,           setTab]           = useState<TabId>('balances')
+  const [tab,           setTab]           = useState<TabId>('dashboard')
   const [balances,      setBalances]      = useState<ClientBalance[]>([])
   const [summary,       setSummary]       = useState<FinanceSummary | null>(null)
   const [internalKpi,   setInternalKpi]   = useState<InternalKpi | null>(null)
@@ -571,6 +572,12 @@ export default function FinancesPage() {
       {/* Вкладки */}
       <div className={styles.tabs}>
         <button
+          className={tab === 'dashboard' ? styles.tabActive : styles.tab}
+          onClick={() => setTab('dashboard')}
+        >
+          Дашборд
+        </button>
+        <button
           className={tab === 'balances' ? styles.tabActive : styles.tab}
           onClick={() => setTab('balances')}
         >
@@ -589,6 +596,9 @@ export default function FinancesPage() {
           Звіти
         </button>
       </div>
+
+      {/* ── Дашборд ── */}
+      {tab === 'dashboard' && <OwnerDashboard />}
 
       {/* ── Баланси ── */}
       {tab === 'balances' && (

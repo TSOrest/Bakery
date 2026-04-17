@@ -10,9 +10,41 @@ import RoutesPage from './pages/RoutesPage'
 import ShopPage from './pages/ShopPage'
 import FinancesPage from './pages/FinancesPage'
 import AdminPage from './pages/AdminPage'
-import OwnerDashboard from './pages/OwnerDashboard'
 import DbEditorPage from './pages/DbEditorPage'
 import PosPage from './pages/PosPage'
+
+// ── Редірект на першу доступну вкладку ───────────────────────────────────────
+
+// Порядок вкладок і ключі — мають збігатись з Layout.tsx ALL_TABS
+const NAV_TABS = [
+  { path: '/orders',   key: 'orders'   },
+  { path: '/baking',   key: 'baking'   },
+  { path: '/routes',   key: 'routes'   },
+  { path: '/shop',     key: 'shop'     },
+  { path: '/finances', key: 'finances' },
+  { path: '/admin',    key: 'admin'    },
+]
+const ROLE_FALLBACK: Record<string, string[]> = {
+  operator:   ['orders', 'baking', 'routes', 'shop', 'reports'],
+  accountant: ['orders', 'finances', 'reports'],
+  admin:      NAV_TABS.map(t => t.key),
+  owner:      ['finances'],
+}
+
+function DefaultRedirect() {
+  const { user, permissions } = useAuth()
+  if (!user) return <Navigate to="/" replace />
+  const role = user.role
+  const allowed: string[] = role === 'admin'
+    ? NAV_TABS.map(t => t.key)
+    : (permissions[role] ?? ROLE_FALLBACK[role] ?? [])
+  const first = NAV_TABS.find(({ key }) => {
+    if (key === 'admin')    return allowed.includes('admin') || allowed.some(k => k.startsWith('admin_'))
+    if (key === 'finances') return allowed.includes('finances') || allowed.includes('reports') || allowed.includes('dashboard')
+    return allowed.includes(key)
+  })
+  return <Navigate to={first?.path ?? '/finances'} replace />
+}
 
 // ── Монітор підключення до сервера ────────────────────────────────────────────
 
@@ -123,9 +155,8 @@ function AppRoutes() {
         <Route path="db-editor" element={<DbEditorPage />} />
         <Route path="pos" element={<PosPage />} />
         <Route path="/" element={<Layout />}>
-          {/* Дашборд — головна сторінка */}
-          <Route index element={<OwnerDashboard />} />
-          <Route path="dashboard" element={<OwnerDashboard />} />
+          <Route index element={<DefaultRedirect />} />
+          <Route path="dashboard" element={<Navigate to="/finances" replace />} />
           <Route path="orders"    element={<OrdersPage />} />
           <Route path="baking"    element={<BakingPage />} />
           <Route path="routes"    element={<RoutesPage />} />

@@ -296,7 +296,8 @@ CREATE TABLE IF NOT EXISTS shop_reconciliations (
     closed          INTEGER DEFAULT 0,
     closed_at       TEXT,
     closed_by       TEXT,
-    created_at      TEXT    DEFAULT (datetime('now'))
+    created_at      TEXT    DEFAULT (datetime('now')),
+    rec_type        TEXT    DEFAULT 'regular'  -- 'regular' | 'opening' | 'archive'
 );
 
 CREATE TABLE IF NOT EXISTS shop_reconciliation_lines (

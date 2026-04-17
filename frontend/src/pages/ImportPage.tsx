@@ -741,7 +741,13 @@ function StepOrders({
 
 // ─── Step 8: Finances ─────────────────────────────────────────────────────────
 
-function StepFinances({ preview }: { preview: AccdbPreview }) {
+function StepFinances({
+  preview, shopInitialCash, setShopInitialCash,
+}: {
+  preview: AccdbPreview
+  shopInitialCash: string
+  setShopInitialCash: (v: string) => void
+}) {
   return (
     <div>
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 8 — Фінансова історія</h2>
@@ -751,6 +757,43 @@ function StepFinances({ preview }: { preview: AccdbPreview }) {
       <div style={INFO_BOX}>
         <strong>Знайдено фінансових операцій: {preview.finances.count}</strong>
       </div>
+
+      <div style={{ marginTop: 24, padding: '16px 20px', background: '#f5f3ff', border: '1px solid #c4b5fd', borderRadius: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Початковий залишок каси магазину</div>
+        <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '0 0 12px' }}>
+          Вкажіть суму готівки в касі магазину на момент початку обліку (колонка{' '}
+          <strong>«Зал. в касі»</strong> в рядку першого дня звірки старої програми).
+          Якщо залишити порожнім — сума буде розрахована автоматично як різниця між
+          боргом магазину та вартістю товару на початок (може бути неточним через
+          відсутність повної фінансової історії).
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.9rem' }}>
+          <span style={{ whiteSpace: 'nowrap' }}>Каса на початок:</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={shopInitialCash}
+            onChange={e => setShopInitialCash(e.target.value)}
+            placeholder="напр. 1024.00"
+            style={{ padding: '0.3rem 0.5rem', border: '1px solid #c4b5fd', borderRadius: 4, fontSize: '0.9rem', width: 140 }}
+          />
+          <span style={{ color: '#6b7280' }}>грн</span>
+          {shopInitialCash !== '' && (
+            <button
+              onClick={() => setShopInitialCash('')}
+              style={{ fontSize: '0.8rem', color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              очистити (авто)
+            </button>
+          )}
+        </label>
+        {shopInitialCash === '' && (
+          <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '8px 0 0' }}>
+            Сума не вказана — буде обчислена автоматично.
+          </p>
+        )}
+      </div>
     </div>
   )
 }
@@ -759,7 +802,7 @@ function StepFinances({ preview }: { preview: AccdbPreview }) {
 
 function StepConfirm({
   preview, transDate,
-  routeMappings, catMappings, clientMappings, basePriceCat, invoiceDraftFrom,
+  routeMappings, catMappings, clientMappings, basePriceCat, invoiceDraftFrom, shopInitialCash,
 }: {
   preview: AccdbPreview
   transDate: string
@@ -768,6 +811,7 @@ function StepConfirm({
   clientMappings: ClientMapping[]
   basePriceCat: string
   invoiceDraftFrom: string
+  shopInitialCash: string
 }) {
   const importedRoutes = routeMappings.filter(r => r.import_it).length
   const skippedRoutes  = routeMappings.filter(r => !r.import_it).length
@@ -802,6 +846,10 @@ function StepConfirm({
         } />
         <SummaryRow label="Базова цінова категорія"
           value={baseCat ? `${baseCat.name} (${baseCat.price_count} цін)` : '— не вибрано —'} />
+        <SummaryRow
+          label="Каса магазину на початок"
+          value={shopInitialCash !== '' ? `${parseFloat(shopInitialCash).toFixed(2)} грн` : '— авто (розрахунок з балансів)'}
+        />
       </div>
 
       <div style={{ marginTop: 24, background: '#fff7ed', border: '1px solid #fed7aa',
@@ -833,10 +881,12 @@ function StepExecution({
   const [correcting, setCorrecting]   = useState<Set<number>>(new Set())
   const [corrected, setCorrected]     = useState<Set<number>>(new Set())
   const [corrErr, setCorrErr]         = useState<Record<number, string>>({})
-  const [priceInputs, setPriceInputs] = useState<Record<number, string>>({})
-  const [priceSaving, setPriceSaving] = useState<Set<number>>(new Set())
-  const [priceSaved, setPriceSaved]   = useState<Set<number>>(new Set())
-  const [priceErr, setPriceErr]       = useState<Record<number, string>>({})
+  const [priceInputs, setPriceInputs]   = useState<Record<number, string>>({})
+  const [priceSaving, setPriceSaving]   = useState<Set<number>>(new Set())
+  const [priceSaved, setPriceSaved]     = useState<Set<number>>(new Set())
+  const [priceErr, setPriceErr]         = useState<Record<number, string>>({})
+  // productId → обраний client_id (для вибору серед кількох клієнтів)
+  const [clientChoice, setClientChoice] = useState<Record<number, number>>({})
 
   async function applyCorrection(clientId: number, diff: number) {
     setCorrecting(s => new Set(s).add(clientId))
@@ -870,7 +920,8 @@ function StepExecution({
     }
   }
 
-  async function savePrice(productId: number) {
+  // Зберегти ручно введену базову ціну (для виробів без жодної клієнтської)
+  async function saveManualPrice(productId: number) {
     const val = parseFloat((priceInputs[productId] || '').replace(',', '.'))
     if (!val || val <= 0) {
       setPriceErr(prev => ({ ...prev, [productId]: 'Введіть ціну > 0' }))
@@ -896,6 +947,44 @@ function StepExecution({
       setPriceSaving(s => { const n = new Set(s); n.delete(productId); return n })
     }
   }
+
+  // Скопіювати діапазони цін обраного клієнта як базові ціни виробу
+  async function copyClientRanges(productId: number, ranges: { price: number; valid_from: string; valid_to: string | null }[]) {
+    setPriceSaving(s => new Set(s).add(productId))
+    setPriceErr(prev => { const n = { ...prev }; delete n[productId]; return n })
+    try {
+      for (const r of ranges) {
+        const body: Record<string, unknown> = {
+          product_id: productId, price: r.price, valid_from: r.valid_from, is_active: 1,
+        }
+        if (r.valid_to) body.valid_to = r.valid_to
+        const res = await fetch('/api/v1/prices/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}))
+          throw new Error(e.detail ?? 'Помилка збереження ціни')
+        }
+      }
+      setPriceSaved(s => new Set(s).add(productId))
+    } catch (e: any) {
+      setPriceErr(prev => ({ ...prev, [productId]: e.message }))
+    } finally {
+      setPriceSaving(s => { const n = new Set(s); n.delete(productId); return n })
+    }
+  }
+
+  // Авто-копіювання для виробів з єдиною клієнтською групою
+  useEffect(() => {
+    if (!report) return
+    for (const p of report.validation.zero_price_products) {
+      if (p.client_groups.length === 1) {
+        copyClientRanges(p.id, p.client_groups[0].ranges)
+      }
+    }
+  }, [report]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Running state
   if (!report && !status?.error) {
@@ -1024,56 +1113,99 @@ function StepExecution({
             Активні вироби без базової ціни ({report.validation.zero_price_products.filter(p => !priceSaved.has(p.id)).length}):
           </strong>
           <p style={{ fontSize: '0.82rem', color: '#92400e', marginBottom: 10 }}>
-            Встановіть початкову ціну для кожного виробу, щоб він відображався коректно в системі.
+            Клієнтські діапазони цін копіюються як базові. Якщо є кілька клієнтів — оберіть джерело.
+            Для виробів без жодної клієнтської ціни введіть ціну вручну.
           </p>
           <table style={tbl()}>
             <thead>
               <tr>
                 <th style={TH}>Виріб</th>
-                <th style={{ ...TH, width: 140 }}>Ціна (грн)</th>
-                <th style={{ ...TH, width: 120 }}>Дія</th>
+                <th style={{ ...TH, width: 260 }}>Джерело цін</th>
+                <th style={{ ...TH, width: 110 }}>Дія</th>
               </tr>
             </thead>
             <tbody>
-              {report.validation.zero_price_products.map(p => (
-                <tr key={p.id} style={{ background: priceSaved.has(p.id) ? '#f0fdf4' : undefined }}>
-                  <td style={TD}>{p.name}</td>
-                  <td style={TD}>
-                    {priceSaved.has(p.id) ? (
-                      <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>
-                        {priceInputs[p.id] ?? '—'} грн
-                      </span>
-                    ) : (
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={priceInputs[p.id] ?? ''}
-                        onChange={e => setPriceInputs(prev => ({ ...prev, [p.id]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Enter') savePrice(p.id) }}
-                        style={{ width: 120, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 4 }}
-                        placeholder="0.00"
-                      />
-                    )}
-                    {priceErr[p.id] && (
-                      <div style={{ color: '#dc2626', fontSize: '0.72rem', marginTop: 2 }}>{priceErr[p.id]}</div>
-                    )}
-                  </td>
-                  <td style={TD}>
-                    {priceSaved.has(p.id) ? (
-                      <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>✓ Збережено</span>
-                    ) : (
-                      <button
-                        style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
-                        disabled={priceSaving.has(p.id)}
-                        onClick={() => savePrice(p.id)}
-                      >
-                        {priceSaving.has(p.id) ? '...' : 'Зберегти'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {report.validation.zero_price_products.map(p => {
+                const saved       = priceSaved.has(p.id)
+                const saving      = priceSaving.has(p.id)
+                const groups      = p.client_groups
+                const chosenId    = clientChoice[p.id]
+                const chosenGroup = groups.find(g => g.client_id === chosenId)
+
+                return (
+                  <tr key={p.id} style={{ background: saved ? '#f0fdf4' : undefined }}>
+                    <td style={TD}>{p.name}</td>
+                    <td style={TD}>
+                      {saved ? (
+                        <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>
+                          {groups.length === 0
+                            ? `${priceInputs[p.id] ?? '—'} грн (вручну)`
+                            : groups.length === 1
+                              ? `${groups[0].client_name} — ${groups[0].ranges.length} діап.`
+                              : `${chosenGroup?.client_name} — ${chosenGroup?.ranges.length} діап.`
+                          }
+                        </span>
+                      ) : groups.length === 0 ? (
+                        <input
+                          type="number" min="0.01" step="0.01"
+                          value={priceInputs[p.id] ?? ''}
+                          onChange={e => setPriceInputs(prev => ({ ...prev, [p.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') saveManualPrice(p.id) }}
+                          style={{ width: 120, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 4 }}
+                          placeholder="0.00"
+                        />
+                      ) : groups.length === 1 ? (
+                        <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>
+                          {groups[0].client_name} — {groups[0].ranges.length} діап. (авто)
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {groups.map(g => (
+                            <label key={g.client_id} style={{ display: 'flex', alignItems: 'baseline', gap: 5, fontSize: '0.82rem', cursor: 'pointer' }}>
+                              <input
+                                type="radio" name={`client_${p.id}`} value={g.client_id}
+                                checked={chosenId === g.client_id}
+                                onChange={() => setClientChoice(prev => ({ ...prev, [p.id]: g.client_id }))}
+                              />
+                              <span>
+                                <strong>{g.client_name}</strong>
+                                <span style={{ color: '#6b7280', marginLeft: 4 }}>
+                                  {g.ranges.length} діап.{' '}
+                                  ({[...new Set(g.ranges.map(r => r.price.toFixed(2)))].join(' / ')} грн)
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                          {!chosenId && (
+                            <div style={{ fontSize: '0.72rem', color: '#92400e' }}>Оберіть клієнта-джерело</div>
+                          )}
+                        </div>
+                      )}
+                      {priceErr[p.id] && (
+                        <div style={{ color: '#dc2626', fontSize: '0.72rem', marginTop: 2 }}>{priceErr[p.id]}</div>
+                      )}
+                    </td>
+                    <td style={{ ...TD, verticalAlign: 'middle' }}>
+                      {saved ? (
+                        <span style={{ color: '#16a34a', fontSize: '0.82rem' }}>✓ Збережено</span>
+                      ) : saving ? (
+                        <span style={{ color: '#6b7280', fontSize: '0.82rem' }}>...</span>
+                      ) : groups.length === 1 ? null
+                      : groups.length === 0 ? (
+                        <button style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
+                          onClick={() => saveManualPrice(p.id)}>
+                          Зберегти
+                        </button>
+                      ) : chosenId ? (
+                        <button style={{ ...BTN_PRIMARY, padding: '4px 12px', fontSize: '0.78rem' }}
+                          onClick={() => copyClientRanges(p.id, chosenGroup!.ranges)}>
+                          Скопіювати
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1225,6 +1357,9 @@ export default function ImportPage({ onClose }: Props) {
 
   // Step 7: накладні-чернетки
   const [invoiceDraftFrom, setInvoiceDraftFrom] = useState<string>(today())
+
+  // Step 8: початковий залишок каси магазину
+  const [shopInitialCash, setShopInitialCash] = useState<string>('')
 
   // Execution state
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null)
@@ -1380,6 +1515,7 @@ export default function ImportPage({ onClose }: Props) {
         default_client_kind: 'customer',
         base_price_category: basePriceCat,
         invoice_draft_from:  invoiceDraftFrom || null,
+        shop_initial_cash:   shopInitialCash !== '' ? parseFloat(shopInitialCash) : null,
       })
       goTo(10)
     } catch (e: any) {
@@ -1484,7 +1620,11 @@ export default function ImportPage({ onClose }: Props) {
                 />
               )}
               {step === 8 && preview && (
-                <StepFinances preview={preview} />
+                <StepFinances
+                  preview={preview}
+                  shopInitialCash={shopInitialCash}
+                  setShopInitialCash={setShopInitialCash}
+                />
               )}
               {step === 9 && preview && (
                 <StepConfirm
@@ -1495,6 +1635,7 @@ export default function ImportPage({ onClose }: Props) {
                   clientMappings={clientMappings}
                   basePriceCat={basePriceCat}
                   invoiceDraftFrom={invoiceDraftFrom}
+                  shopInitialCash={shopInitialCash}
                 />
               )}
               {step === 10 && (

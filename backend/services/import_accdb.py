@@ -30,9 +30,11 @@ from backend.schemas.import_accdb import (
     AccdbPreview,
     BalanceMismatch,
     ClientPreview,
+    ClientPriceGroup,
     ColumnMap,
     EntityReport,
     ImportMapping,
+    ImportPriceRange,
     ImportReport,
     PriceCategory,
     RoutePreview,
@@ -1460,7 +1462,95 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 if shop_client and daily:
                     sorted_dates   = sorted(daily.keys())
                     last_import_date = sorted_dates[-1]   # остання дата залишається ВІДКРИТОЮ
-                    prev_balance: dict[int, float] = {}
+
+                    # ── Genesis (стартова) звірка з initial_stock ─────────────
+                    from datetime import date as _date, timedelta as _td
+                    genesis_lines: dict[int, float] = {}
+                    for product in db.query(Product).filter(Product.is_active == 1).all():
+                        in_daily = any(product.id in day for day in daily.values())
+                        if in_daily and (product.initial_stock or 0) > 0:
+                            genesis_lines[product.id] = float(product.initial_stock or 0)
+
+                    if genesis_lines:
+                        genesis_date = (
+                            _date.fromisoformat(sorted_dates[0]) - _td(days=1)
+                        ).isoformat()
+
+                        # Готівка в касі = |борг магазину перед пекарнею| − вартість товару на полиці.
+                        # Борг = сума (накладних − оплат) за весь імпортований період до дати старту.
+                        # Вартість товару = initial_stock × ціна магазину на genesis_date.
+                        net_row = db.execute(
+                            text("SELECT COALESCE(SUM(amount * sign), 0) FROM finances WHERE client_id = :cid AND finance_date < :d"),
+                            {"cid": shop_client.id, "d": sorted_dates[0]},
+                        ).fetchone()
+                        net_balance = float(net_row[0] if net_row else 0.0)
+
+                        goods_value = 0.0
+                        for _gpid, _gqty in genesis_lines.items():
+                            # Спочатку шукаємо індивідуальну ціну магазину, потім базову ціну
+                            _price_row = db.execute(
+                                text("""
+                                    SELECT price FROM client_price_overrides
+                                    WHERE client_id = :cid AND product_id = :pid
+                                      AND valid_from <= :d
+                                      AND (valid_to IS NULL OR valid_to >= :d)
+                                    ORDER BY valid_from DESC LIMIT 1
+                                """),
+                                {"cid": shop_client.id, "pid": _gpid, "d": genesis_date},
+                            ).fetchone()
+                            if _price_row is None:
+                                _price_row = db.execute(
+                                    text("""
+                                        SELECT price FROM prices
+                                        WHERE product_id = :pid AND is_active = 1
+                                          AND valid_from <= :d
+                                          AND (valid_to IS NULL OR valid_to >= :d)
+                                        ORDER BY valid_from DESC LIMIT 1
+                                    """),
+                                    {"pid": _gpid, "d": genesis_date},
+                                ).fetchone()
+                            if _price_row is not None:
+                                goods_value += _gqty * float(_price_row[0])
+
+                        if mapping.shop_initial_cash is not None:
+                            initial_cash = float(mapping.shop_initial_cash)
+                        else:
+                            initial_cash = max(0.0, round(-net_balance - goods_value, 2))
+
+                        genesis_rec = ShopReconciliation(
+                            shop_client_id=shop_client.id,
+                            period_from=genesis_date,
+                            period_to=genesis_date,
+                            cash_expected=initial_cash,
+                            cash_actual=initial_cash,
+                            cash_diff=0.0,
+                            closed=1,
+                            closed_at=now_str,
+                            closed_by="import",
+                            created_at=now_str,
+                            rec_type='opening',
+                        )
+                        db.add(genesis_rec)
+                        db.flush()
+                        for pid, qty in genesis_lines.items():
+                            db.add(ShopReconciliationLine(
+                                reconciliation_id=genesis_rec.id,
+                                product_id=pid,
+                                batch_date=None,
+                                opening_balance=0.0,
+                                received=0.0,
+                                entered_balance=qty,
+                                written_off=0.0,
+                                calculated_sold=0.0,
+                                price=None,
+                                expected_cash=0.0,
+                            ))
+                            ep.imported += 1
+                        prev_balance: dict[int, float] = dict(genesis_lines)
+                    else:
+                        prev_balance = {}
+                    # ── Кінець genesis ─────────────────────────────────────────
+
                     for date_str in sorted_dates:
                         day_bal = daily[date_str]
                         is_last = date_str == last_import_date
@@ -1468,7 +1558,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         # Надходження з замовлень за цей день (вже в БД після кроку 7)
                         from sqlalchemy import or_ as _or_
                         recv_rows = (
-                            db.query(Order.product_id, func.sum(Order.qty).label("t"))
+                            db.query(Order.product_id, func.sum(Order.qty).label("qty_sum"))
                             .filter(
                                 Order.client_id == shop_client.id,
                                 _or_(Order.origin_id.is_(None), Order.origin_id == 0),
@@ -1477,7 +1567,7 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                             .group_by(Order.product_id)
                             .all()
                         )
-                        received_day: dict[int, float] = {r.product_id: float(r.t) for r in recv_rows}
+                        received_day: dict[int, float] = {r[0]: float(r[1] or 0) for r in recv_rows}
 
                         # Остання дата — залишається відкритою (може бути незавершена в старій системі)
                         recon = ShopReconciliation(
@@ -1540,7 +1630,49 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 if p.id not in imported_product_ids:
                     continue
                 if not db.query(Price).filter(Price.product_id == p.id, Price.is_active == 1).first():
-                    zero_price.append(ZeroPriceProduct(id=p.id, name=p.name))
+                    # Зібрати діапазони клієнтських цін, згруповані по клієнту
+                    override_rows = (
+                        db.query(
+                            ClientPriceOverride.client_id,
+                            Client.full_name,
+                            ClientPriceOverride.price,
+                            ClientPriceOverride.valid_from,
+                            ClientPriceOverride.valid_to,
+                        )
+                        .join(Client, Client.id == ClientPriceOverride.client_id)
+                        .filter(ClientPriceOverride.product_id == p.id)
+                        .order_by(ClientPriceOverride.client_id, ClientPriceOverride.valid_from)
+                        .all()
+                    )
+                    groups: dict[int, ClientPriceGroup] = {}
+                    for cid, cname, cprice, vfrom, vto in override_rows:
+                        if cprice and cprice > 0:
+                            if cid not in groups:
+                                groups[cid] = ClientPriceGroup(client_id=cid, client_name=cname, ranges=[])
+                            groups[cid].ranges.append(ImportPriceRange(
+                                price=float(cprice), valid_from=vfrom, valid_to=vto,
+                            ))
+
+                    # Дедублікація: якщо кілька клієнтів мають ОДНАКОВІ діапазони
+                    # (напр. Магазин/Списання/Колодій з одними цінами) — показуємо як одну групу.
+                    # Тільки реально різні набори діапазонів вимагають вибору.
+                    def _range_sig(g: ClientPriceGroup) -> tuple:
+                        return tuple(sorted(
+                            (r.price, r.valid_from, r.valid_to or '') for r in g.ranges
+                        ))
+
+                    # Групуємо по сигнатурі; перевага — клієнт магазину, потім перший по порядку
+                    sig_to_group: dict[tuple, ClientPriceGroup] = {}
+                    for g in groups.values():
+                        sig = _range_sig(g)
+                        if sig not in sig_to_group:
+                            sig_to_group[sig] = g
+                        elif shop_client and g.client_id == shop_client.id:
+                            sig_to_group[sig] = g  # якщо магазин — обираємо його
+
+                    zero_price.append(ZeroPriceProduct(
+                        id=p.id, name=p.name, client_groups=list(sig_to_group.values()),
+                    ))
 
             validation = ValidationReport(
                 balance_mismatches=mismatches,
@@ -1566,4 +1698,6 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             db.close()
 
     except Exception as exc:
-        _update_state(running=False, step="Помилка", progress=0, error=str(exc))
+        import traceback as _tb
+        _update_state(running=False, step="Помилка", progress=0,
+                      error=f"{exc}\n{_tb.format_exc()}")

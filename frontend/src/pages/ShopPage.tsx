@@ -45,7 +45,9 @@ interface Reconciliation {
   cash_diff: number | null
   notes: string | null
   closed: number
+  rec_type: string   // 'regular' | 'opening' | 'archive'
   lines: RecLine[]
+  prev_cash_balance: number | null  // обчислюється бекендом динамічно
 }
 
 interface ShopReceipt {
@@ -120,8 +122,8 @@ export default function ShopPage() {
   if (loading) return <p style={{ padding: '1.5rem' }}>Завантаження...</p>
 
   return (
-    <div style={{ padding: '1.5rem' }}>
-      <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>Магазин</h2>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '1.5rem', boxSizing: 'border-box' }}>
+      <h2 style={{ marginTop: 0, marginBottom: '1rem', flexShrink: 0 }}>Магазин</h2>
 
       {loadError && (
         <div style={{ background: '#fff0f0', border: '1px solid #f5b8b8', borderRadius: 6, padding: '0.6rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: '#c00' }}>
@@ -139,7 +141,7 @@ export default function ShopPage() {
       ) : (
         <>
           {/* Горизонтальні вкладки магазинів */}
-          <div style={shopTabsBarStyle}>
+          <div style={{ ...shopTabsBarStyle, flexShrink: 0 }}>
             {shops.map((shop) => (
               <button
                 key={shop.id}
@@ -151,15 +153,17 @@ export default function ShopPage() {
             ))}
           </div>
 
-          {activeShopId && (
-            <ShopTabContent
-              key={activeShopId}
-              shopId={activeShopId}
-              shopName={shops.find((s) => s.id === activeShopId)?.name ?? ''}
-              workDate={workDate}
-              onRefresh={load}
-            />
-          )}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            {activeShopId && (
+              <ShopTabContent
+                key={activeShopId}
+                shopId={activeShopId}
+                shopName={shops.find((s) => s.id === activeShopId)?.name ?? ''}
+                workDate={workDate}
+                onRefresh={load}
+              />
+            )}
+          </div>
         </>
       )}
     </div>
@@ -167,11 +171,21 @@ export default function ShopPage() {
 }
 
 
-function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
+
+function SummaryCard({ label, value, color, highlight }: { label: string; value: number; color?: string; highlight?: boolean }) {
+  const isZero = value === 0
   return (
-    <div>
-      <div style={{ fontSize: '0.72rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: '1.1rem', fontWeight: 700, color: color ?? '#1a3a5c' }}>{value}</div>
+    <div style={{
+      background: highlight ? '#f0f6ff' : '#f8f9fb',
+      border: `1px solid ${highlight ? '#b0c8e8' : '#e0e8f0'}`,
+      borderRadius: 5,
+      padding: '0.28rem 0.4rem',
+      minWidth: 0,
+    }}>
+      <div style={{ fontSize: '0.62rem', color: '#999', lineHeight: 1.25, marginBottom: '0.1rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+      <div style={{ fontSize: '0.82rem', fontWeight: highlight ? 800 : 700, color: isZero ? '#c0c8d0' : (color ?? '#1a3a5c') }}>
+        {isZero ? '0.00 грн' : `${value.toFixed(2)} грн`}
+      </div>
     </div>
   )
 }
@@ -188,10 +202,13 @@ function ShopTabContent({
 }) {
   const [selectedDate, setSelectedDate]       = useState(workDate)
   const [showRecModal, setShowRecModal]       = useState(false)
+  const [showOpeningModal, setShowOpeningModal] = useState(false)
   const [addReceiptOpen, setAddReceiptOpen]   = useState(false)
   const [receiptRefresh, setReceiptRefresh]   = useState(0)
   const [allReceipts, setAllReceipts]         = useState<ShopReceipt[]>([])
-  const [products, setProducts]               = useState<{ id: number; name: string }[]>([])
+  const [products, setProducts]               = useState<{ id: number; name: string; category_id: number | null }[]>([])
+  const [categories, setCategories]           = useState<{ id: number; name: string }[]>([])
+  const [hasOpeningRec, setHasOpeningRec]     = useState(false)
 
   useEffect(() => { setSelectedDate(workDate) }, [workDate])
 
@@ -199,10 +216,17 @@ function ShopTabContent({
     api.get<ShopReceipt[]>(`/shop/receipts?shop_client_id=${shopId}`)
       .then(setAllReceipts).catch(() => {})
 
+  const checkOpeningRec = () =>
+    api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
+      .then((recs) => setHasOpeningRec(recs.some((r) => r.rec_type === 'opening')))
+      .catch(() => {})
+
   useEffect(() => {
     loadReceipts()
+    checkOpeningRec()
     // Завантажуємо всі продукти (включно з неактивними — у звірках можуть бути старі)
-    api.get<{ id: number; name: string }[]>('/products/').then(setProducts)
+    api.get<{ id: number; name: string; category_id: number | null }[]>('/products/').then(setProducts)
+    api.get<{ id: number; name: string }[]>('/categories').then(setCategories)
   }, [shopId, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dateReceipts  = allReceipts.filter((r) => r.receipt_date === selectedDate)
@@ -216,10 +240,18 @@ function ShopTabContent({
     <div>
       <button
         onClick={() => setShowRecModal(true)}
-        style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.5rem' }}
+        style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.35rem' }}
       >
         Відкрити звірку
       </button>
+      {!hasOpeningRec && (
+        <button
+          onClick={() => setShowOpeningModal(true)}
+          style={{ ...secondaryBtn, width: '100%', marginBottom: '0.5rem', fontSize: '0.78rem', color: '#5b21b6', borderColor: '#c4b5fd' }}
+        >
+          ◈ Початковий залишок
+        </button>
+      )}
       <div style={{ borderTop: '1px solid #e0e8f0', paddingTop: '0.55rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
           <span style={{ ...sectionTitle, margin: 0 }}>Надходження · {selectedDate}</span>
@@ -250,12 +282,15 @@ function ShopTabContent({
   return (
     <>
       {/* Календар звірок (кнопка + надходження в лівій колонці, деталі у правій) */}
-      <ReconciliationCalendar
-        shopId={shopId}
-        products={products}
-        onSelectDate={setSelectedDate}
-        leftFooter={calendarLeftFooter}
-      />
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ReconciliationCalendar
+          shopId={shopId}
+          products={products}
+          categories={categories}
+          onSelectDate={setSelectedDate}
+          leftFooter={calendarLeftFooter}
+        />
+      </div>
 
       {showRecModal && (
         <ReconciliationModal
@@ -274,6 +309,16 @@ function ShopTabContent({
           products={products}
           onClose={() => setAddReceiptOpen(false)}
           onSaved={() => setReceiptRefresh((n) => n + 1)}
+        />
+      )}
+
+      {showOpeningModal && (
+        <OpeningRecModal
+          shopId={shopId}
+          products={products}
+          workDate={workDate}
+          onClose={() => setShowOpeningModal(false)}
+          onSaved={() => { setHasOpeningRec(true); setShowOpeningModal(false); onRefresh() }}
         />
       )}
     </>
@@ -370,13 +415,125 @@ function AddReceiptModal({
   )
 }
 
+// ─── Модаль стартового залишку ────────────────────────────────────────────────
+
+function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
+  shopId: number
+  products: { id: number; name: string }[]
+  workDate: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [startDate, setStartDate] = useState(workDate)
+  const [qtys, setQtys]           = useState<Record<number, string>>({})
+  const [cashMode, setCashMode]   = useState<'auto' | 'manual'>('auto')
+  const [cashVal, setCashVal]     = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const lines = products
+        .filter((p) => parseFloat(qtys[p.id] || '0') > 0)
+        .map((p) => ({ product_id: p.id, qty: parseFloat(qtys[p.id]) }))
+      await api.post('/shop/reconciliations/opening', {
+        shop_client_id: shopId,
+        start_date: startDate,
+        lines,
+        cash_actual: cashMode === 'manual' ? (parseFloat(cashVal) || 0) : null,
+      })
+      onSaved()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Помилка збереження')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={overlayStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={{ ...modalStyle, maxWidth: '520px', height: 'auto', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+          <h3 style={{ margin: 0, color: '#5b21b6' }}>◈ Початковий залишок магазину</h3>
+          <button onClick={onClose} style={closeBtnStyle}>✕</button>
+        </div>
+        <p style={{ margin: '0 0 0.75rem', fontSize: '0.82rem', color: '#555' }}>
+          Вкажіть дату першого дня реального обліку і фактичні залишки товару на той момент.
+          Звірка буде датована попереднім днем і стане якорем ланцюжка.
+        </p>
+
+        <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem', alignItems: 'flex-end' }}>
+          <div>
+            <label style={labelStyle}>Перший день обліку</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              style={{ ...inputStyle, width: '140px' }} />
+          </div>
+          <div>
+            <label style={labelStyle}>Каса</label>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+              <label style={{ fontSize: '0.78rem', cursor: 'pointer' }}>
+                <input type="radio" checked={cashMode === 'auto'} onChange={() => setCashMode('auto')} /> авто
+              </label>
+              <label style={{ fontSize: '0.78rem', cursor: 'pointer' }}>
+                <input type="radio" checked={cashMode === 'manual'} onChange={() => setCashMode('manual')} /> вручну
+              </label>
+              {cashMode === 'manual' && (
+                <input type="number" min="0" step="0.01" placeholder="0.00"
+                  value={cashVal} onChange={(e) => setCashVal(e.target.value)}
+                  style={{ ...inputStyle, width: '90px' }} />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e0e8f0', borderRadius: '4px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+            <thead style={{ position: 'sticky', top: 0, background: '#f0f4f8', zIndex: 1 }}>
+              <tr>
+                <th style={{ ...miniTh, textAlign: 'left', borderBottom: '1px solid #d0dce8' }}>Виріб</th>
+                <th style={{ ...miniTh, textAlign: 'right', borderBottom: '1px solid #d0dce8', width: '90px' }}>Кількість</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p) => (
+                <tr key={p.id}>
+                  <td style={miniTd}>{p.name}</td>
+                  <td style={{ ...miniTd, textAlign: 'right' }}>
+                    <input type="number" min="0" step="0.001" placeholder="0"
+                      value={qtys[p.id] ?? ''}
+                      onChange={(e) => setQtys((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                      style={{ ...inputStyle, width: '80px', textAlign: 'right' }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {error && <div style={{ color: '#c00', fontSize: '0.8rem', marginTop: '0.4rem' }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.75rem' }}>
+          <button onClick={onClose} style={secondaryBtn}>Скасувати</button>
+          <button onClick={handleSave} disabled={saving || !startDate} style={primaryBtn}>
+            {saving ? '…' : 'Зберегти'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ─── Календар звірок ─────────────────────────────────────────────────────────
 
 function ReconciliationCalendar({
-  shopId, products, onSelectDate, leftFooter,
+  shopId, products, categories, onSelectDate, leftFooter,
 }: {
   shopId: number
-  products: { id: number; name: string }[]
+  products: { id: number; name: string; category_id: number | null }[]
+  categories: { id: number; name: string }[]
   onSelectDate?: (date: string) => void
   leftFooter?: React.ReactNode
 }) {
@@ -435,12 +592,12 @@ function ReconciliationCalendar({
   if (recs.length === 0) return null
 
   return (
-    <div style={{ ...sectionBox, marginTop: '1.5rem' }}>
-      <div style={sectionTitle}>Звірки (календар)</div>
-      <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+    <div style={{ ...sectionBox, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ ...sectionTitle, flexShrink: 0 }}>Звірки (календар)</div>
+      <div style={{ display: 'flex', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
 
         {/* ── Календар ── */}
-        <div style={{ minWidth: '240px', flex: '0 0 auto' }}>
+        <div style={{ minWidth: '240px', flex: '0 0 auto', overflowY: 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
             <button onClick={prevMonth} style={{ ...secondaryBtn, padding: '0.2rem 0.6rem' }}>←</button>
             <span style={{ fontWeight: 600, fontSize: '0.88rem', textTransform: 'capitalize' }}>{monthLabel}</span>
@@ -457,7 +614,9 @@ function ReconciliationCalendar({
               const rec = dayRecMap.get(ds)
               const sel = !!rec && selectedRec?.id === rec.id
               const isToday = ds === todayStr
-              const bg = rec ? (rec.closed ? '#e8f5e9' : '#fff3e0') : 'transparent'
+              const bg = rec
+                ? (rec.rec_type === 'opening' ? '#f3f0ff' : rec.closed ? '#e8f5e9' : '#fff3e0')
+                : 'transparent'
               const border = sel
                 ? '2px solid #1a3a5c'
                 : isToday ? '1px solid #b45309' : '1px solid transparent'
@@ -484,7 +643,7 @@ function ReconciliationCalendar({
               )
             })}
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.7rem', color: '#888' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.7rem', color: '#888', flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
               <span style={{ display: 'inline-block', width: '10px', height: '10px', background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: '2px' }} />
               Закрита
@@ -493,23 +652,29 @@ function ReconciliationCalendar({
               <span style={{ display: 'inline-block', width: '10px', height: '10px', background: '#fff3e0', border: '1px solid #f0c070', borderRadius: '2px' }} />
               Відкрита
             </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <span style={{ display: 'inline-block', width: '10px', height: '10px', background: '#f3f0ff', border: '1px solid #c4b5fd', borderRadius: '2px' }} />
+              Початок
+            </span>
           </div>
           {leftFooter}
         </div>
 
         {/* ── Права панель: деталізація обраної звірки ── */}
         {selectedRec && (
-        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+        <div style={{ flex: '1 1 400px', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Заголовок звірки */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.55rem' }}>
-            <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1a3a5c' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', flexShrink: 0 }}>
+            <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1a3a5c' }}>
               {selectedRec.period_from === selectedRec.period_to
                 ? selectedRec.period_from
                 : `${selectedRec.period_from} – ${selectedRec.period_to}`}
             </span>
-            {selectedRec.closed
-              ? <span style={badgeClosed}>Закрита</span>
-              : <span style={badgeOpen}>Відкрита</span>}
+            {selectedRec.rec_type === 'opening'
+              ? <span style={badgeOpening}>Початок</span>
+              : selectedRec.closed
+                ? <span style={badgeClosed}>Закрита</span>
+                : <span style={badgeOpen}>Відкрита</span>}
           </div>
 
           {loadingRec ? (
@@ -519,98 +684,278 @@ function ReconciliationCalendar({
           ) : (() => {
             // Агрегуємо по product_id (кілька рядків з різними batch_date → один рядок)
             const byProduct = new Map<number, {
-              opening: number; received: number; entered: number; sold: number; price: number | null
+              opening: number; received: number; entered: number
+              sold: number; writtenOff: number; price: number | null
             }>()
             for (const line of selectedRec.lines) {
-              const e = byProduct.get(line.product_id) ?? { opening: 0, received: 0, entered: 0, sold: 0, price: line.price ?? null }
-              e.opening  += line.opening_balance
-              e.received += line.received
-              e.entered  += line.entered_balance ?? 0
-              e.sold     += line.calculated_sold ?? 0
+              const e = byProduct.get(line.product_id) ?? {
+                opening: 0, received: 0, entered: 0, sold: 0, writtenOff: 0, price: line.price ?? null,
+              }
+              e.opening    += line.opening_balance
+              e.received   += line.received
+              e.entered    += line.entered_balance ?? 0
+              e.sold       += line.calculated_sold ?? 0
+              e.writtenOff += line.written_off ?? 0
               if (line.price != null && e.price == null) e.price = line.price
               byProduct.set(line.product_id, e)
             }
+
             // Фільтр: показуємо лише рядки де є хоч якийсь рух
-            const rows = [...byProduct.entries()]
-              .map(([pid, v]) => ({ pid, ...v, sum: v.sold * (v.price ?? 0) }))
-              .filter((r) => r.opening > 0 || r.received > 0 || r.entered > 0)
-            const tot = rows.reduce(
-              (a, r) => ({ opening: a.opening + r.opening, received: a.received + r.received,
-                           entered: a.entered + r.entered, sold: a.sold + r.sold, sum: a.sum + r.sum }),
-              { opening: 0, received: 0, entered: 0, sold: 0, sum: 0 },
+            type Row = { pid: number; opening: number; received: number; entered: number; sold: number; writtenOff: number; price: number | null }
+            const allRows: Row[] = [...byProduct.entries()]
+              .map(([pid, v]) => ({ pid, ...v }))
+              .filter((r) => r.opening > 0 || r.received > 0 || r.entered > 0 || r.sold > 0)
+
+            // Грошові підсумки
+            const val = (qty: number, price: number | null) => qty * (price ?? 0)
+            const totOpeningVal   = allRows.reduce((s, r) => s + val(r.opening,    r.price), 0)
+            const totReceivedVal  = allRows.reduce((s, r) => s + val(r.received,   r.price), 0)
+            const totSoldVal      = allRows.reduce((s, r) => s + val(r.sold,       r.price), 0)
+            const totWrittenOffVal= allRows.reduce((s, r) => s + val(r.writtenOff, r.price), 0)
+            const totClosingVal   = allRows.reduce((s, r) => s + val(r.entered,    r.price), 0)
+
+            // Залишок в касі: бекенд обчислює prev_cash_balance динамічно з фінансів
+            const prevCashBalance = selectedRec.prev_cash_balance ?? 0
+            const cashExtracted   = selectedRec.cash_actual ?? 0
+            const cashBalance     = prevCashBalance + totSoldVal - cashExtracted
+
+            // Групуємо по категоріях
+            const catMap = new Map<number | null, Row[]>()
+            for (const row of allRows) {
+              const prod = products.find((p) => p.id === row.pid)
+              const catId = prod?.category_id ?? null
+              if (!catMap.has(catId)) catMap.set(catId, [])
+              catMap.get(catId)!.push(row)
+            }
+            // Сортуємо групи за порядком у довіднику (sort_order), null — в кінець
+            const sortedGroups = [...catMap.entries()].sort(([a], [b]) => {
+              if (a === null && b !== null) return 1
+              if (a !== null && b === null) return -1
+              const idxA = categories.findIndex((c) => c.id === a)
+              const idxB = categories.findIndex((c) => c.id === b)
+              return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB)
+            })
+
+            const fmt  = (v: number) => v.toFixed(2)
+            // Q: ціле без ".0", дробове з 1 знаком; невидимий ".0" вирівнює позицію крапки
+            const Q = (v: number): React.ReactNode => (
+              v % 1 === 0
+                ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(v)}<span style={{ visibility: 'hidden' }}>.0</span></span>
+                : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{v.toFixed(1)}</span>
             )
+            const clr  = (v: number, activeColor: string) => v === 0 ? '#c8ced6' : activeColor
+
+            // Стилі колонок
+            const BG_OPEN = '#f0f4f8'
+            const BG_RECV = '#e8f4fb'
+            const BG_SOLD = '#e8f5e9'
+            const BG_WOFF = '#fff0f0'
+            const BG_CLOS = '#fffae8'
+            const tdR = { ...miniTd, textAlign: 'right' as const }
+            const tdQ = { ...tdR, fontWeight: 700 as const }                          // кількість — жирний
+            const tdM = { ...tdR, fontStyle: 'italic' as const, fontVariantNumeric: 'tabular-nums' as const } // гроші — курсив
 
             return (
-              <div style={{ overflowX: 'auto' }}>
-                {/* Підсумки звірки */}
-                <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '0.6rem', padding: '0.4rem 0.2rem', borderBottom: '2px solid #e0e8f0' }}>
-                  <Metric label="Відкриття" value={tot.opening > 0 ? tot.opening.toFixed(1) : '0'} color="#777" />
-                  <Metric label="Надійшло"  value={tot.received > 0 ? `+${tot.received.toFixed(1)}` : '—'} color="#0369a1" />
-                  <Metric label="Залишок"   value={tot.entered.toFixed(1)} color="#7a5800" />
-                  <Metric label="Продано"   value={tot.sold > 0 ? tot.sold.toFixed(1) : '—'} color="#2e7d32" />
-                  <Metric label="Виручка"   value={tot.sum > 0 ? `${tot.sum.toFixed(2)} грн` : '—'} color="#b45309" />
-                </div>
+              <>
+                {/* ── Грошовий підсумок — поза скролом, залишається зверху ── */}
+                {selectedRec.rec_type === 'opening' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>
+                    <div style={{ background: '#f3f0ff', border: '1px solid #c4b5fd', borderRadius: '8px', padding: '0.4rem 1rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: '#7c3aed', marginBottom: '2px' }}>Товар на початок</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#5b21b6' }}>{totClosingVal.toFixed(2)} грн</div>
+                    </div>
+                    <div style={{ background: '#f3f0ff', border: '1px solid #c4b5fd', borderRadius: '8px', padding: '0.4rem 1rem' }}>
+                      <div style={{ fontSize: '0.7rem', color: '#7c3aed', marginBottom: '2px' }}>Каса на початок</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#5b21b6' }}>
+                        {(selectedRec.cash_actual ?? 0).toFixed(2)} грн
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(80px, 1fr))', gap: '0.3rem', marginBottom: '0.5rem', flexShrink: 0 }}>
+                    <SummaryCard label="Каса поч." value={prevCashBalance} color="#555" />
+                    <SummaryCard label="Товар поч." value={totOpeningVal} color="#555" />
+                    <SummaryCard label="Прийнято" value={totReceivedVal} color="#0369a1" />
+                    <SummaryCard label="Продано" value={totSoldVal} color="#2e7d32" highlight />
+                    <SummaryCard label="Списано" value={totWrittenOffVal} color="#c00" />
+                    <SummaryCard label="Товар кін." value={totClosingVal} color="#7a5800" />
+                    <SummaryCard label="Виведено" value={cashExtracted} color="#b45309" />
+                    <SummaryCard label="Каса кін." value={cashBalance} color="#1a3a5c" highlight />
+                  </div>
+                )}
 
-                <table style={{ ...miniTableStyle, borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...miniTh, borderRight: '1px solid #e0e8f0', minWidth: '100px' }}>Виріб</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#f0f4f8', borderRight: '1px solid #e0e8f0' }}>Відкр.</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#e8f4fb', borderRight: '1px solid #e0e8f0' }}>Надійшло</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#fffae8', borderRight: '1px solid #e0e8f0', color: '#7a5800' }}>Залишок ✎</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#e8f5e9', borderRight: '1px solid #e0e8f0' }}>Продано</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#f5f0ff', borderRight: '1px solid #e0e8f0' }}>Ціна</th>
-                      <th style={{ ...miniTh, textAlign: 'right', background: '#fff5ea' }}>Сума</th>
+                {/* ── Таблиця деталізації — власний скрол-контейнер ── */}
+                {selectedRec.rec_type === 'opening' ? (
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
+                    <table style={{ ...miniTableStyle, borderCollapse: 'collapse', fontSize: '0.76rem' }}>
+                      <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
+                        <tr style={{ background: '#f3f0ff' }}>
+                          <th style={{ ...miniTh, textAlign: 'left', minWidth: '110px', background: '#f3f0ff', boxShadow: 'inset 0 -1px 0 #c4b5fd' }}>Назва</th>
+                          <th style={{ ...miniTh, textAlign: 'right', minWidth: '50px', background: '#f3f0ff', boxShadow: 'inset 0 -1px 0 #c4b5fd' }}>Ціна</th>
+                          <th style={{ ...miniTh, textAlign: 'right', minWidth: '50px', background: BG_CLOS, boxShadow: 'inset 0 -1px 0 #c4b5fd' }}>Кіл</th>
+                          <th style={{ ...miniTh, textAlign: 'right', minWidth: '60px', background: BG_CLOS, boxShadow: 'inset 0 -1px 0 #c4b5fd' }}>Вартість</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedGroups.map(([catId, rows]) => {
+                          const catName = catId != null ? (categories.find((c) => c.id === catId)?.name ?? `Категорія #${catId}`) : 'Без категорії'
+                          const catRows = rows.sort((a, b) => productName(a.pid).localeCompare(productName(b.pid), 'uk'))
+                          return (
+                            <React.Fragment key={catId ?? 'null'}>
+                              <tr>
+                                <td colSpan={4} style={{ ...miniTd, fontWeight: 700, color: '#5b21b6', fontSize: '0.75rem', padding: '3px 6px', background: '#ede9fe', position: 'sticky', top: '1.8rem', zIndex: 2, boxShadow: '0 1px 0 #c4b5fd' }}>
+                                  {catName}
+                                </td>
+                              </tr>
+                              {catRows.map((r, idx) => (
+                                <tr key={r.pid} style={{ background: idx % 2 === 0 ? '#fff' : '#fafcff' }}>
+                                  <td style={{ ...miniTd, fontWeight: 500 }}>{productName(r.pid)}</td>
+                                  <td style={{ ...tdM, color: '#999' }}>{r.price != null ? r.price.toFixed(2) : '—'}</td>
+                                  <td style={{ ...tdQ, background: BG_CLOS, color: clr(r.entered, '#7a5800') }}>{Q(r.entered)}</td>
+                                  <td style={{ ...tdM, background: BG_CLOS, color: clr(val(r.entered, r.price), '#7a5800') }}>{fmt(val(r.entered, r.price))}</td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'auto' }}>
+                <table style={{ ...miniTableStyle, borderCollapse: 'collapse', fontSize: '0.76rem' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 3 }}>
+                    <tr style={{ background: '#f0f4f8' }}>
+                      <th style={{ ...miniTh, textAlign: 'left', minWidth: '110px', borderRight: '1px solid #d0dce8', background: '#f0f4f8', boxShadow: 'inset 0 -1px 0 #d0dce8' }} rowSpan={2}>Назва</th>
+                      <th style={{ ...miniTh, textAlign: 'right', borderRight: '1px solid #d0dce8', minWidth: '44px', background: '#f0f4f8', boxShadow: 'inset 0 -1px 0 #d0dce8' }} rowSpan={2}>Ціна</th>
+                      <th style={{ ...miniTh, textAlign: 'center', background: BG_OPEN, borderRight: '1px solid #d0dce8' }} colSpan={2}>Відкриття</th>
+                      <th style={{ ...miniTh, textAlign: 'center', background: BG_RECV, borderRight: '1px solid #d0dce8' }} colSpan={2}>Надійшло</th>
+                      <th style={{ ...miniTh, textAlign: 'center', background: BG_SOLD, borderRight: '1px solid #d0dce8' }} colSpan={2}>Продано</th>
+                      <th style={{ ...miniTh, textAlign: 'center', background: BG_WOFF, borderRight: '1px solid #d0dce8' }} colSpan={2}>Списано</th>
+                      <th style={{ ...miniTh, textAlign: 'center', background: BG_CLOS }} colSpan={2}>Залишок</th>
+                    </tr>
+                    <tr style={{ fontSize: '0.7rem', color: '#666' }}>
+                      <th style={{ ...miniTh, background: BG_OPEN, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Кіл</th>
+                      <th style={{ ...miniTh, background: BG_OPEN, textAlign: 'right', borderRight: '1px solid #d0dce8', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Вар</th>
+                      <th style={{ ...miniTh, background: BG_RECV, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Кіл</th>
+                      <th style={{ ...miniTh, background: BG_RECV, textAlign: 'right', borderRight: '1px solid #d0dce8', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Вар</th>
+                      <th style={{ ...miniTh, background: BG_SOLD, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Кіл</th>
+                      <th style={{ ...miniTh, background: BG_SOLD, textAlign: 'right', borderRight: '1px solid #d0dce8', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Вар</th>
+                      <th style={{ ...miniTh, background: BG_WOFF, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Кіл</th>
+                      <th style={{ ...miniTh, background: BG_WOFF, textAlign: 'right', borderRight: '1px solid #d0dce8', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Вар</th>
+                      <th style={{ ...miniTh, background: BG_CLOS, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Кіл</th>
+                      <th style={{ ...miniTh, background: BG_CLOS, textAlign: 'right', boxShadow: 'inset 0 -1px 0 #d0dce8' }}>Вар</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r, idx) => (
-                      <tr key={r.pid} style={{ background: idx % 2 === 0 ? '#fff' : '#fafcff' }}>
-                        <td style={{ ...miniTd, borderRight: '1px solid #f0f0f0', fontWeight: 500 }}>{productName(r.pid)}</td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#f7f9fb', borderRight: '1px solid #f0f0f0', color: '#777' }}>
-                          {r.opening > 0 ? r.opening.toFixed(1) : '—'}
-                        </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#f0f8ff', borderRight: '1px solid #f0f0f0', color: '#0369a1', fontWeight: r.received > 0 ? 600 : 400 }}>
-                          {r.received > 0 ? `+${r.received.toFixed(1)}` : '—'}
-                        </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: r.entered > 0 ? '#fffae8' : '#fff5f5', borderRight: '1px solid #f0f0f0', fontWeight: 700, color: r.entered > 0 ? '#7a5800' : '#c00' }}>
-                          {r.entered > 0 ? r.entered.toFixed(1) : (selectedRec.closed ? '0' : '—')}
-                        </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#f0faf2', borderRight: '1px solid #f0f0f0', color: '#2e7d32', fontWeight: r.sold > 0 ? 600 : 400 }}>
-                          {r.sold > 0 ? r.sold.toFixed(1) : '—'}
-                        </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#f8f5ff', borderRight: '1px solid #f0f0f0', color: '#555' }}>
-                          {r.price != null ? r.price.toFixed(2) : '—'}
-                        </td>
-                        <td style={{ ...miniTd, textAlign: 'right', background: '#fffbf0', color: r.sum > 0 ? '#b45309' : '#aaa', fontWeight: r.sum > 0 ? 600 : 400 }}>
-                          {r.sum > 0 ? r.sum.toFixed(2) : '—'}
-                        </td>
-                      </tr>
-                    ))}
+                    {sortedGroups.map(([catId, rows]) => {
+                      const catName = catId != null
+                        ? (categories.find((c) => c.id === catId)?.name ?? `Категорія #${catId}`)
+                        : 'Без категорії'
+                      const catRows = rows.sort((a, b) => {
+                        const na = products.find((p) => p.id === a.pid)?.name ?? ''
+                        const nb = products.find((p) => p.id === b.pid)?.name ?? ''
+                        return na.localeCompare(nb, 'uk')
+                      })
+                      const catTot = catRows.reduce(
+                        (s, r) => ({
+                          opening: s.opening + r.opening,
+                          received: s.received + r.received,
+                          sold: s.sold + r.sold,
+                          writtenOff: s.writtenOff + r.writtenOff,
+                          entered: s.entered + r.entered,
+                          openingV: s.openingV + val(r.opening, r.price),
+                          receivedV: s.receivedV + val(r.received, r.price),
+                          soldV: s.soldV + val(r.sold, r.price),
+                          writtenOffV: s.writtenOffV + val(r.writtenOff, r.price),
+                          enteredV: s.enteredV + val(r.entered, r.price),
+                        }),
+                        { opening:0, received:0, sold:0, writtenOff:0, entered:0, openingV:0, receivedV:0, soldV:0, writtenOffV:0, enteredV:0 },
+                      )
+                      return (
+                        <React.Fragment key={catId ?? 'null'}>
+                          {/* Рядок категорії — sticky під шапкою таблиці */}
+                          <tr>
+                            <td colSpan={12} style={{ ...miniTd, fontWeight: 700, color: '#1a3a5c', fontSize: '0.75rem', padding: '3px 6px', letterSpacing: '0.03em', background: '#e0e8f4', position: 'sticky', top: '3.2rem', zIndex: 2, boxShadow: '0 1px 0 #c8d8ec' }}>
+                              {catName}
+                            </td>
+                          </tr>
+                          {/* Рядки виробів */}
+                          {catRows.map((r, idx) => {
+                            const openV = val(r.opening, r.price)
+                            const recvV = val(r.received, r.price)
+                            const soldV = val(r.sold, r.price)
+                            const woffV = val(r.writtenOff, r.price)
+                            const cloV  = val(r.entered, r.price)
+                            return (
+                              <tr key={r.pid} style={{ background: idx % 2 === 0 ? '#fff' : '#fafcff' }}>
+                                <td style={{ ...miniTd, borderRight: '1px solid #eee', fontWeight: 500 }}>{productName(r.pid)}</td>
+                                <td style={{ ...tdM, borderRight: '1px solid #eee', color: '#999' }}>
+                                  {r.price != null ? r.price.toFixed(2) : '—'}
+                                </td>
+                                <td style={{ ...tdQ, background: BG_OPEN, color: clr(r.opening,  '#555') }}>{Q(r.opening)}</td>
+                                <td style={{ ...tdM, background: BG_OPEN, borderRight: '1px solid #d0dce8', color: clr(openV, '#555') }}>{fmt(openV)}</td>
+                                <td style={{ ...tdQ, background: BG_RECV, color: clr(r.received,  '#0369a1') }}>{Q(r.received)}</td>
+                                <td style={{ ...tdM, background: BG_RECV, borderRight: '1px solid #d0dce8', color: clr(recvV, '#0369a1') }}>{fmt(recvV)}</td>
+                                <td style={{ ...tdQ, background: BG_SOLD, color: clr(r.sold,  '#2e7d32') }}>{Q(r.sold)}</td>
+                                <td style={{ ...tdM, background: BG_SOLD, borderRight: '1px solid #d0dce8', color: clr(soldV, '#2e7d32') }}>{fmt(soldV)}</td>
+                                <td style={{ ...tdQ, background: BG_WOFF, color: clr(r.writtenOff, '#c00') }}>{Q(r.writtenOff)}</td>
+                                <td style={{ ...tdM, background: BG_WOFF, borderRight: '1px solid #d0dce8', color: clr(woffV, '#c00') }}>{fmt(woffV)}</td>
+                                <td style={{ ...tdQ, background: BG_CLOS, color: clr(r.entered, '#7a5800') }}>{Q(r.entered)}</td>
+                                <td style={{ ...tdM, background: BG_CLOS, color: clr(cloV, '#7a5800') }}>{fmt(cloV)}</td>
+                              </tr>
+                            )
+                          })}
+                          {/* Підсумок категорії (якщо > 1 рядок) */}
+                          {catRows.length > 1 && (
+                            <tr style={{ background: '#ecf3fb', borderTop: '1px solid #c8d8ec' }}>
+                              <td style={{ ...miniTd, fontStyle: 'italic', color: '#666', borderRight: '1px solid #eee' }}>Разом по групі</td>
+                              <td style={{ ...miniTd, borderRight: '1px solid #eee' }} />
+                              <td style={{ ...tdQ, background: BG_OPEN, color: clr(catTot.opening,  '#555') }}>{Q(catTot.opening)}</td>
+                              <td style={{ ...tdM, background: BG_OPEN, borderRight: '1px solid #d0dce8', color: clr(catTot.openingV,  '#555') }}>{fmt(catTot.openingV)}</td>
+                              <td style={{ ...tdQ, background: BG_RECV, color: clr(catTot.received,  '#0369a1') }}>{Q(catTot.received)}</td>
+                              <td style={{ ...tdM, background: BG_RECV, borderRight: '1px solid #d0dce8', color: clr(catTot.receivedV, '#0369a1') }}>{fmt(catTot.receivedV)}</td>
+                              <td style={{ ...tdQ, background: BG_SOLD, color: clr(catTot.sold, '#2e7d32') }}>{Q(catTot.sold)}</td>
+                              <td style={{ ...tdM, background: BG_SOLD, borderRight: '1px solid #d0dce8', color: clr(catTot.soldV, '#2e7d32') }}>{fmt(catTot.soldV)}</td>
+                              <td style={{ ...tdQ, background: BG_WOFF, color: clr(catTot.writtenOff, '#c00') }}>{Q(catTot.writtenOff)}</td>
+                              <td style={{ ...tdM, background: BG_WOFF, borderRight: '1px solid #d0dce8', color: clr(catTot.writtenOffV, '#c00') }}>{fmt(catTot.writtenOffV)}</td>
+                              <td style={{ ...tdQ, background: BG_CLOS, color: clr(catTot.entered, '#7a5800') }}>{Q(catTot.entered)}</td>
+                              <td style={{ ...tdM, background: BG_CLOS, color: clr(catTot.enteredV, '#7a5800') }}>{fmt(catTot.enteredV)}</td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      )
+                    })}
                   </tbody>
                   <tfoot>
-                    <tr style={{ borderTop: '2px solid #c0d0e0' }}>
-                      <td style={{ ...miniTd, fontWeight: 700, color: '#1a3a5c' }}>Разом</td>
-                      <td style={{ ...miniTd, textAlign: 'right', background: '#f0f4f8', fontWeight: 700, color: '#555' }}>
-                        {tot.opening > 0 ? tot.opening.toFixed(1) : '—'}
-                      </td>
-                      <td style={{ ...miniTd, textAlign: 'right', background: '#e8f4fb', fontWeight: 700, color: '#0369a1' }}>
-                        {tot.received > 0 ? `+${tot.received.toFixed(1)}` : '—'}
-                      </td>
-                      <td style={{ ...miniTd, textAlign: 'right', background: '#fffae8', fontWeight: 700, color: '#7a5800' }}>
-                        {tot.entered.toFixed(1)}
-                      </td>
-                      <td style={{ ...miniTd, textAlign: 'right', background: '#e8f5e9', fontWeight: 700, color: '#2e7d32' }}>
-                        {tot.sold > 0 ? tot.sold.toFixed(1) : '—'}
-                      </td>
-                      <td style={{ ...miniTd, background: '#f5f0ff' }} />
-                      <td style={{ ...miniTd, textAlign: 'right', background: '#fff5ea', fontWeight: 700, color: '#b45309' }}>
-                        {tot.sum > 0 ? tot.sum.toFixed(2) : '—'}
-                      </td>
+                    <tr style={{ borderTop: '2px solid #c0d0e0', background: '#eef2f8' }}>
+                      <td style={{ ...miniTd, fontWeight: 700, color: '#1a3a5c', borderRight: '1px solid #eee' }}>Всього</td>
+                      <td style={{ ...miniTd, borderRight: '1px solid #eee' }} />
+                      {(() => {
+                        const tO = allRows.reduce((s,r)=>s+r.opening,0)
+                        const tRc = allRows.reduce((s,r)=>s+r.received,0)
+                        const tS = allRows.reduce((s,r)=>s+r.sold,0)
+                        const tW = allRows.reduce((s,r)=>s+r.writtenOff,0)
+                        const tE = allRows.reduce((s,r)=>s+r.entered,0)
+                        return (<>
+                          <td style={{ ...tdQ, background: BG_OPEN, color: clr(tO,  '#555') }}>{Q(tO)}</td>
+                          <td style={{ ...tdM, background: BG_OPEN, borderRight: '1px solid #d0dce8', color: clr(totOpeningVal, '#555') }}>{fmt(totOpeningVal)}</td>
+                          <td style={{ ...tdQ, background: BG_RECV, color: clr(tRc, '#0369a1') }}>{Q(tRc)}</td>
+                          <td style={{ ...tdM, background: BG_RECV, borderRight: '1px solid #d0dce8', color: clr(totReceivedVal, '#0369a1') }}>{fmt(totReceivedVal)}</td>
+                          <td style={{ ...tdQ, background: BG_SOLD, color: clr(tS, '#2e7d32') }}>{Q(tS)}</td>
+                          <td style={{ ...tdM, background: BG_SOLD, borderRight: '1px solid #d0dce8', color: clr(totSoldVal, '#2e7d32') }}>{fmt(totSoldVal)}</td>
+                          <td style={{ ...tdQ, background: BG_WOFF, color: clr(tW, '#c00') }}>{Q(tW)}</td>
+                          <td style={{ ...tdM, background: BG_WOFF, borderRight: '1px solid #d0dce8', color: clr(totWrittenOffVal, '#c00') }}>{fmt(totWrittenOffVal)}</td>
+                          <td style={{ ...tdQ, background: BG_CLOS, color: clr(tE, '#7a5800') }}>{Q(tE)}</td>
+                          <td style={{ ...tdM, background: BG_CLOS, color: clr(totClosingVal, '#7a5800') }}>{fmt(totClosingVal)}</td>
+                        </>)
+                      })()}
                     </tr>
                   </tfoot>
                 </table>
-              </div>
+                </div>
+                )}{/* /else: opening */}
+              </>
             )
           })()}
         </div>
@@ -1355,6 +1700,10 @@ const badgeOpen: React.CSSProperties = {
 const badgeClosed: React.CSSProperties = {
   display: 'inline-block', padding: '2px 8px', background: '#e8f5e9', color: '#2e7d32',
   border: '1px solid #a5d6a7', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 700,
+}
+const badgeOpening: React.CSSProperties = {
+  display: 'inline-block', padding: '2px 8px', background: '#ede9fe', color: '#5b21b6',
+  border: '1px solid #c4b5fd', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 700,
 }
 const overlayStyle: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -101,6 +101,7 @@ class ImportMapping(BaseModel):
     default_client_kind: str = 'customer'
     base_price_category: str = ''                  # Access КодКатегорії для базових цін
     invoice_draft_from: str | None = None          # YYYY-MM-DD; накладні з цієї дати = draft
+    shop_initial_cash: Optional[float] = None      # початковий залишок каси магазину (None = авто)
 
 
 # ─── Звіт ─────────────────────────────────────────────────────────────────────
@@ -123,9 +124,22 @@ class BalanceMismatch(BaseModel):
     diff:             float
 
 
+class ImportPriceRange(BaseModel):
+    price:      float
+    valid_from: str
+    valid_to:   Optional[str] = None
+
+
+class ClientPriceGroup(BaseModel):
+    client_id:   int
+    client_name: str
+    ranges:      list[ImportPriceRange]
+
+
 class ZeroPriceProduct(BaseModel):
-    id:   int
-    name: str
+    id:            int
+    name:          str
+    client_groups: list[ClientPriceGroup] = []   # діапазони цін по кожному клієнту
 
 
 class ValidationReport(BaseModel):

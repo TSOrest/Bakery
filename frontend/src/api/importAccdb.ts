@@ -96,6 +96,7 @@ export interface ImportMapping {
   default_client_kind:  string
   base_price_category:  string          // Access КодКатегорії for base prices
   invoice_draft_from:   string | null   // YYYY-MM-DD; накладні з цієї дати = draft
+  shop_initial_cash:    number | null   // початковий залишок каси магазину (null = авто)
 }
 
 // ─── Context types ────────────────────────────────────────────────────────────
@@ -146,9 +147,22 @@ export interface BalanceMismatch {
   diff:             number
 }
 
+export interface ImportPriceRange {
+  price:      number
+  valid_from: string
+  valid_to:   string | null
+}
+
+export interface ClientPriceGroup {
+  client_id:   number
+  client_name: string
+  ranges:      ImportPriceRange[]
+}
+
 export interface ZeroPriceProduct {
-  id:   number
-  name: string
+  id:            number
+  name:          string
+  client_groups: ClientPriceGroup[]
 }
 
 export interface ValidationReport {

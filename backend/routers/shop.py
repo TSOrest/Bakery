@@ -22,7 +22,9 @@ from backend.schemas.shop import (
     ShopCountOut, ShopCountUpdate,
     OtherStockInCreate, OtherStockInOut,
     ShopReconciliationOut, ShopReconciliationHeaderOut, ShopReconciliationCreate,
+    ShopReconciliationOpeningCreate,
     ShopReconciliationLineOut, ShopReconciliationLineUpdate,
+    ShopReconciliationOpeningCashUpdate,
     ShopReconciliationConfirm,
     ShopReceiptCreate, ShopReceiptOut,
     ShopSummary, ShopSummaryProductRow,
@@ -509,12 +511,216 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
     return rec
 
 
+def _cash_before_date(db: Session, shop_client_id: int, before_date: str) -> float:
+    """Накопичений касовий баланс магазину до вказаної дати (для стартової звірки)."""
+    result = db.query(
+        func.sum(Finance.amount * Finance.sign)
+    ).filter(
+        Finance.client_id == shop_client_id,
+        Finance.finance_date < before_date,
+    ).scalar()
+    return float(result or 0)
+
+
+@router.post("/reconciliations/opening", response_model=ShopReconciliationOut, status_code=201)
+def create_opening_reconciliation(
+    data: ShopReconciliationOpeningCreate,
+    db: Session = Depends(get_db),
+    _user=Depends(require_user),
+):
+    """Стартова (початкова) звірка магазину.
+    Датується (start_date - 1 день), closed=1, rec_type='opening'.
+    Є якорем ланцюжка: перша реальна звірка бере entered_balance звідси як opening_balance.
+    """
+    from datetime import date as _date, timedelta
+    genesis_date = (_date.fromisoformat(data.start_date) - timedelta(days=1)).isoformat()
+
+    existing = db.query(ShopReconciliation).filter(
+        ShopReconciliation.shop_client_id == data.shop_client_id,
+        ShopReconciliation.rec_type == 'opening',
+    ).first()
+    if existing:
+        raise HTTPException(400, "Стартова звірка вже існує для цього магазину")
+
+    cash_actual = data.cash_actual if data.cash_actual is not None \
+        else _cash_before_date(db, data.shop_client_id, data.start_date)
+
+    now_str = datetime.utcnow().isoformat()
+    rec = ShopReconciliation(
+        shop_client_id=data.shop_client_id,
+        period_from=genesis_date,
+        period_to=genesis_date,
+        cash_expected=cash_actual,
+        cash_actual=cash_actual,
+        cash_diff=0.0,
+        closed=1,
+        closed_at=now_str,
+        closed_by="opening",
+        created_at=now_str,
+        rec_type='opening',
+    )
+    db.add(rec)
+    db.flush()
+
+    for item in data.lines:
+        qty = float(item.get('qty') or 0)
+        if qty <= 0:
+            continue
+        db.add(ShopReconciliationLine(
+            reconciliation_id=rec.id,
+            product_id=int(item['product_id']),
+            opening_balance=0.0,
+            received=0.0,
+            entered_balance=qty,
+            written_off=0.0,
+            calculated_sold=0.0,
+            price=None,
+            expected_cash=0.0,
+        ))
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+@router.patch("/reconciliations/{rec_id}/opening-cash", response_model=ShopReconciliationOut)
+def update_opening_cash(
+    rec_id: int,
+    body: ShopReconciliationOpeningCashUpdate,
+    db: Session = Depends(get_db),
+    _user=Depends(require_user),
+):
+    """Оновлює cash_actual стартової звірки (rec_type='opening')."""
+    rec = db.get(ShopReconciliation, rec_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+    if rec.rec_type != 'opening':
+        raise HTTPException(status_code=400, detail="Тільки для стартових звірок")
+    rec.cash_actual   = body.cash_actual
+    rec.cash_expected = body.cash_actual
+    rec.cash_diff     = 0.0
+    db.commit()
+    db.refresh(rec)
+    return get_reconciliation(rec_id, db)
+
+
+def _cash_actual_from_finances(db: Session, shop_client_id: int, period_from: str, period_to: str) -> float:
+    """Виведення виручки з магазину: операції 'Оплата' від магазину за period,
+    виключаючи «списання» — тобто ті, для яких на ту ж дату і на ту ж суму
+    існує парна витрата без клієнта (client_id IS NULL, sign=-1).
+    Такі пари створювались у старій програмі для проведення списань через магазин.
+    Fallback: якщо статтю 'Оплата' не знайдено — беремо всі sign=+1."""
+    article = (
+        db.query(FinanceArticle)
+        .filter(FinanceArticle.name == "Оплата", FinanceArticle.direction == "income")
+        .first()
+    )
+
+    # Усі «Оплата» від магазину за period
+    income_q = db.query(Finance).filter(
+        Finance.client_id == shop_client_id,
+        Finance.finance_date >= period_from,
+        Finance.finance_date <= period_to,
+    )
+    income_q = income_q.filter(Finance.article_id == article.id) if article else income_q.filter(Finance.sign == 1)
+    income_rows = income_q.all()
+
+    if not income_rows:
+        return 0.0
+
+    # Парні витрати: client=NULL, sign=-1 за той же period
+    # Будуємо множину (date, amount) — потенційні списання
+    writeoff_keys: set[tuple[str, float]] = {
+        (r.finance_date, r.amount)
+        for r in db.query(Finance.finance_date, Finance.amount).filter(
+            Finance.client_id.is_(None),
+            Finance.sign == -1,
+            Finance.finance_date >= period_from,
+            Finance.finance_date <= period_to,
+        ).all()
+    }
+
+    # Сумуємо лише ті «Оплата», що НЕ мають парної витрати
+    return sum(
+        r.amount for r in income_rows
+        if (r.finance_date, r.amount) not in writeoff_keys
+    )
+
+
+def _enrich_rec_in_memory(db: Session, rec: ShopReconciliation) -> None:
+    """Заповнює поля ціни, received, calculated_sold і cash_expected в пам'яті (без commit).
+    Викликати всередині `with db.no_autoflush:`."""
+
+    # 1. Ціни: підтягуємо для рядків де price = None
+    lines_no_price = [ln for ln in rec.lines if ln.price is None]
+    if lines_no_price:
+        pids = {ln.product_id for ln in lines_no_price}
+        prices_map = _get_shop_prices_batch(db, rec.shop_client_id, pids, rec.period_to)
+        for ln in lines_no_price:
+            ln.price = prices_map.get(ln.product_id)
+
+    # 2. Received: якщо всі рядки мають received=0 — дані з імпорту, перераховуємо з замовлень.
+    # Opening/genesis-рек пропускаємо — вони є знімком початкового стану, не реальною звіркою.
+    if rec.rec_type != 'opening' and rec.lines and all(ln.received == 0 for ln in rec.lines):
+        recv_map = _received_from_bakery(db, rec.shop_client_id, rec.period_from, rec.period_to)
+        for ln in rec.lines:
+            recv = recv_map.get(ln.product_id, 0.0)
+            ln.received = recv
+            # Перераховуємо calculated_sold: opening + received - entered - written_off
+            ln.calculated_sold = max(
+                0.0,
+                ln.opening_balance + recv - (ln.entered_balance or 0.0) - (ln.written_off or 0.0),
+            )
+
+    # 3. cash_expected: якщо 0 — рахуємо з рядків (Σ sold × price)
+    if rec.cash_expected == 0:
+        rec.cash_expected = sum(
+            (ln.calculated_sold or 0.0) * (ln.price or 0.0) for ln in rec.lines
+        )
+
+
 @router.get("/reconciliations/{rec_id}", response_model=ShopReconciliationOut)
 def get_reconciliation(rec_id: int, db: Session = Depends(get_db)):
     rec = db.get(ShopReconciliation, rec_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Звірку не знайдено")
-    return rec
+
+    with db.no_autoflush:
+        _enrich_rec_in_memory(db, rec)
+
+        # 4. cash_actual: якщо None — беремо з фінансів (всі надходження від магазину)
+        if rec.cash_actual is None:
+            rec.cash_actual = _cash_actual_from_finances(
+                db, rec.shop_client_id, rec.period_from, rec.period_to
+            )
+            rec.cash_diff = rec.cash_expected - rec.cash_actual
+
+        # 5. Залишок у касі ПІСЛЯ попередньої звірки
+        prev_rec = (
+            db.query(ShopReconciliation)
+            .filter(
+                ShopReconciliation.shop_client_id == rec.shop_client_id,
+                ShopReconciliation.period_to < rec.period_from,
+            )
+            .order_by(ShopReconciliation.period_to.desc())
+            .first()
+        )
+        prev_cash_balance = 0.0
+        if prev_rec:
+            _enrich_rec_in_memory(db, prev_rec)
+            if prev_rec.cash_actual is None:
+                prev_rec.cash_actual = _cash_actual_from_finances(
+                    db, rec.shop_client_id, prev_rec.period_from, prev_rec.period_to
+                )
+            if prev_rec.rec_type == 'opening':
+                # Для genesis-рек "Каса поч." = фактичний залишок у касі на момент старту
+                prev_cash_balance = prev_rec.cash_actual or 0.0
+            else:
+                prev_cash_balance = prev_rec.cash_expected - (prev_rec.cash_actual or 0.0)
+
+    out = ShopReconciliationOut.model_validate(rec)
+    data = out.model_dump()
+    data["prev_cash_balance"] = prev_cash_balance
+    return JSONResponse(data)
 
 
 @router.put(

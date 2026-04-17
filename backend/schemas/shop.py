@@ -100,6 +100,7 @@ class ShopReconciliationHeaderOut(BaseModel):
     closed_at: Optional[str]
     closed_by: Optional[str]
     created_at: Optional[str]
+    rec_type: str = 'regular'
 
 
 class ShopReconciliationOut(BaseModel):
@@ -116,13 +117,27 @@ class ShopReconciliationOut(BaseModel):
     closed_at: Optional[str]
     closed_by: Optional[str]
     created_at: Optional[str]
+    rec_type: str = 'regular'
     lines: List[ShopReconciliationLineOut] = []
+    # Поле для frontend: залишок у касі ПІСЛЯ попередньої звірки (обчислюється динамічно)
+    prev_cash_balance: Optional[float] = None
 
 
 class ShopReconciliationCreate(BaseModel):
     shop_client_id: int
     period_from: str
     period_to: str
+
+
+class ShopReconciliationOpeningCreate(BaseModel):
+    shop_client_id: int
+    start_date: str                      # перший день реального обліку (rec датується start_date - 1)
+    lines: List[dict]                    # [{product_id: int, qty: float}]
+    cash_actual: Optional[float] = None  # None → авто з finances
+
+
+class ShopReconciliationOpeningCashUpdate(BaseModel):
+    cash_actual: float
 
 
 class ShopReconciliationConfirm(BaseModel):

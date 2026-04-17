@@ -1,9 +1,12 @@
 """Підключення до SQLite та сесія SQLAlchemy."""
 
 import os
+import logging
 from pathlib import Path
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+
+log = logging.getLogger(__name__)
 
 _data_dir = os.getenv("BAKERY_DATA_DIR")
 if _data_dir:
@@ -46,3 +49,35 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def run_migrations() -> None:
+    """Автоматично застосовує нові SQL-міграції з database/migrations/."""
+    migrations_dir = Path(__file__).parent.parent / "database" / "migrations"
+    if not migrations_dir.exists():
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS schema_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))"
+        ))
+        conn.commit()
+
+        applied = {r[0] for r in conn.execute(text("SELECT name FROM schema_migrations"))}
+
+        for sql_file in sorted(migrations_dir.glob("*.sql")):
+            if sql_file.name in applied:
+                continue
+            try:
+                sql = sql_file.read_text(encoding="utf-8")
+                for statement in sql.split(";"):
+                    stmt = statement.strip()
+                    if stmt:
+                        conn.execute(text(stmt))
+                conn.execute(text("INSERT INTO schema_migrations (name) VALUES (:n)"), {"n": sql_file.name})
+                conn.commit()
+                log.info("Migration applied: %s", sql_file.name)
+            except Exception as exc:
+                log.warning("Migration %s skipped: %s", sql_file.name, exc)
+                conn.rollback()

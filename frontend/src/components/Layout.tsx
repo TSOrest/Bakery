@@ -42,7 +42,6 @@ export default function Layout() {
 
   // Усі вкладки з ключем що відповідає role_permissions
   const ALL_TABS = [
-    { path: '/',         label: 'Дашборд',    key: 'dashboard', exact: true },
     { path: '/orders',   label: 'Замовлення', key: 'orders'   },
     { path: '/baking',   label: 'Випічка',    key: 'baking'   },
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
@@ -66,8 +65,8 @@ export default function Layout() {
     if (t.key === 'admin') {
       return allowed.includes('admin') || allowed.some(k => k.startsWith('admin_'))
     }
-    // Фінанси показуємо якщо є 'finances' АБО 'reports' (звіти тепер всередині)
-    if (t.key === 'finances') return allowed.includes('finances') || allowed.includes('reports')
+    // Фінанси показуємо якщо є 'finances', 'reports' або 'dashboard' (дашборд тепер всередині)
+    if (t.key === 'finances') return allowed.includes('finances') || allowed.includes('reports') || allowed.includes('dashboard')
     return allowed.includes(t.key)
   })
 
