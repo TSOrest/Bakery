@@ -395,6 +395,85 @@ def get_summary(date: str, db: Session = Depends(get_db)):
     return result
 
 
+# ─── Сповіщення про зміну ціни ────────────────────────────────────────────────
+
+@router.get("/price-change-alert")
+def price_change_alert(db: Session = Depends(get_db)):
+    """Перевіряє чи є зміни цін для товарів наявних у відкритій звірці магазину.
+    Якщо так — рекомендується закрити звірку щоб переоцінка потрапила в окрему звірку."""
+    from datetime import date as _dt
+    from backend.models.pricing import Price, ClientPriceOverride
+
+    shop_client = (
+        db.query(Client).filter(Client.is_own_shop == 1).first()
+        or db.query(Client).filter(Client.client_kind == "shop").first()
+    )
+    if not shop_client:
+        return {"has_alert": False, "products": []}
+
+    open_rec = (
+        db.query(ShopReconciliation)
+        .filter(ShopReconciliation.shop_client_id == shop_client.id,
+                ShopReconciliation.closed == 0)
+        .order_by(ShopReconciliation.period_from)
+        .first()
+    )
+    if not open_rec:
+        return {"has_alert": False, "products": []}
+
+    last_closed = (
+        db.query(ShopReconciliation)
+        .filter(ShopReconciliation.shop_client_id == shop_client.id,
+                ShopReconciliation.closed == 1,
+                ShopReconciliation.rec_type != "opening")
+        .order_by(ShopReconciliation.period_to.desc())
+        .first()
+    )
+    price_change_from = last_closed.period_to if last_closed else open_rec.period_from
+    today = _dt.today().isoformat()
+
+    # Товари з ненульовим залишком у відкритій звірці
+    stock_pids: set[int] = set()
+    for ln in open_rec.lines:
+        if (ln.opening_balance or 0) > 0 or (ln.entered_balance or 0) > 0:
+            stock_pids.add(ln.product_id)
+    if last_closed:
+        for ln in last_closed.lines:
+            if (ln.entered_balance or 0) > 0:
+                stock_pids.add(ln.product_id)
+    if not stock_pids:
+        return {"has_alert": False, "products": []}
+
+    pids_list = list(stock_pids)
+    changed: set[int] = set()
+
+    for r in (db.query(Price.product_id)
+              .filter(Price.product_id.in_(pids_list),
+                      Price.valid_from > price_change_from,
+                      Price.valid_from <= today,
+                      Price.is_active == 1)
+              .distinct().all()):
+        changed.add(r[0])
+
+    for r in (db.query(ClientPriceOverride.product_id)
+              .filter(ClientPriceOverride.client_id == shop_client.id,
+                      ClientPriceOverride.product_id.in_(pids_list),
+                      ClientPriceOverride.valid_from > price_change_from,
+                      ClientPriceOverride.valid_from <= today)
+              .distinct().all()):
+        changed.add(r[0])
+
+    if not changed:
+        return {"has_alert": False, "products": []}
+
+    from backend.models.references import Product as ProductModel
+    products = db.query(ProductModel).filter(ProductModel.id.in_(list(changed))).all()
+    return {
+        "has_alert": True,
+        "products": [{"id": p.id, "name": p.name} for p in products],
+    }
+
+
 # ─── Звірки ───────────────────────────────────────────────────────────────────
 
 @router.get("/reconciliations", response_model=List[ShopReconciliationOut])
@@ -627,23 +706,79 @@ def _cash_actual_from_finances(db: Session, shop_client_id: int, period_from: st
     if not income_rows:
         return 0.0
 
-    # Парні витрати: client=NULL, sign=-1 за той же period
-    # Будуємо множину (date, amount) — потенційні списання
-    writeoff_keys: set[tuple[str, float]] = {
-        (r.finance_date, r.amount)
-        for r in db.query(Finance.finance_date, Finance.amount).filter(
-            Finance.client_id.is_(None),
-            Finance.sign == -1,
-            Finance.finance_date >= period_from,
-            Finance.finance_date <= period_to,
-        ).all()
-    }
+    # Парні витрати-списання: тільки art="Списання" (art_id=18), client=NULL, sign=-1.
+    # Саме такі пари створювались у старій програмі для списань через магазин.
+    # НЕ враховуємо зарплату, оренду тощо — вони можуть випадково збігатись за сумою.
+    списання_article = (
+        db.query(FinanceArticle)
+        .filter(
+            FinanceArticle.name.in_(["Списання", "Списання магазину"]),
+            FinanceArticle.direction == "expense",
+        )
+        .first()
+    )
+    writeoff_keys: set[tuple[str, float]] = set()
+    if списання_article:
+        writeoff_keys = {
+            (r.finance_date, r.amount)
+            for r in db.query(Finance.finance_date, Finance.amount).filter(
+                Finance.client_id.is_(None),
+                Finance.sign == -1,
+                Finance.article_id == списання_article.id,
+                Finance.finance_date >= period_from,
+                Finance.finance_date <= period_to,
+            ).all()
+        }
 
-    # Сумуємо лише ті «Оплата», що НЕ мають парної витрати
+    # Сумуємо лише ті «Оплата», що НЕ мають парної витрати-списання
     return sum(
         r.amount for r in income_rows
         if (r.finance_date, r.amount) not in writeoff_keys
     )
+
+
+def _get_closing_cash(db: Session, shop_client_id: int, up_to_period_to: str) -> float:
+    """Кінцевий залишок у касі станом на кінець up_to_period_to.
+    Акумулює ланцюжок від opening: opening_cash + Σ(expected_i − actual_i)."""
+    recs = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == shop_client_id,
+            ShopReconciliation.period_to <= up_to_period_to,
+        )
+        .order_by(ShopReconciliation.period_to)
+        .all()
+    )
+    balance = 0.0
+    with db.no_autoflush:
+        for r in recs:
+            if r.rec_type == "opening":
+                balance = r.cash_actual or 0.0
+            else:
+                _enrich_rec_in_memory(db, r)
+                if r.cash_actual is None:
+                    r.cash_actual = _cash_actual_from_finances(
+                        db, shop_client_id, r.period_from, r.period_to
+                    )
+                balance += (r.cash_expected or 0.0) - (r.cash_actual or 0.0)
+    return round(balance, 2)
+
+
+def _terminal_from_finances(db: Session, shop_client_id: int, period_from: str, period_to: str) -> float:
+    """Термінальні надходження від магазину: Оплата з нотатками 'терм*' за period."""
+    article = (
+        db.query(FinanceArticle)
+        .filter(FinanceArticle.name == "Оплата", FinanceArticle.direction == "income")
+        .first()
+    )
+    q = db.query(Finance).filter(
+        Finance.client_id == shop_client_id,
+        Finance.finance_date >= period_from,
+        Finance.finance_date <= period_to,
+        Finance.notes.ilike("%терм%"),
+    )
+    q = q.filter(Finance.article_id == article.id) if article else q.filter(Finance.sign == 1)
+    return round(sum(r.amount for r in q.all()), 2)
 
 
 def _enrich_rec_in_memory(db: Session, rec: ShopReconciliation) -> None:
@@ -705,21 +840,44 @@ def get_reconciliation(rec_id: int, db: Session = Depends(get_db)):
             .first()
         )
         prev_cash_balance = 0.0
+        prev_stock_value = 0.0
         if prev_rec:
-            _enrich_rec_in_memory(db, prev_rec)
-            if prev_rec.cash_actual is None:
-                prev_rec.cash_actual = _cash_actual_from_finances(
-                    db, rec.shop_client_id, prev_rec.period_from, prev_rec.period_to
-                )
-            if prev_rec.rec_type == 'opening':
-                # Для genesis-рек "Каса поч." = фактичний залишок у касі на момент старту
-                prev_cash_balance = prev_rec.cash_actual or 0.0
-            else:
-                prev_cash_balance = prev_rec.cash_expected - (prev_rec.cash_actual or 0.0)
+            prev_cash_balance = _get_closing_cash(
+                db, rec.shop_client_id, prev_rec.period_to
+            )
+            # "Товар поч." = вартість залишку на кінець попередньої звірки
+            # (entered_balance × ціна попереднього дня, а не сьогоднішня)
+            with db.no_autoflush:
+                _enrich_rec_in_memory(db, prev_rec)
+            prev_stock_value = round(
+                sum((ln.entered_balance or 0.0) * (ln.price or 0.0) for ln in prev_rec.lines), 2
+            )
+
+    terminal_cash = _terminal_from_finances(
+        db, rec.shop_client_id, rec.period_from, rec.period_to
+    )
+
+    # 6. Ціни на початок звірки (день до period_from) — для переоцінки залишку
+    from datetime import date as _dt, timedelta as _td
+    opening_date = (_dt.fromisoformat(rec.period_from) - _td(days=1)).isoformat()
+    all_pids = {ln.product_id for ln in rec.lines}
+    opening_prices: dict[int, float] = {}
+    if all_pids:
+        opening_prices = _get_shop_prices_batch(db, rec.shop_client_id, all_pids, opening_date)
+
+    revaluation_sum = round(sum(
+        (ln.entered_balance or 0.0)
+        * ((ln.price or 0.0) - opening_prices.get(ln.product_id, ln.price or 0.0))
+        for ln in rec.lines
+    ), 2)
 
     out = ShopReconciliationOut.model_validate(rec)
     data = out.model_dump()
     data["prev_cash_balance"] = prev_cash_balance
+    data["prev_stock_value"] = prev_stock_value
+    data["terminal_cash"] = terminal_cash
+    data["opening_prices"] = {str(pid): p for pid, p in opening_prices.items()}
+    data["revaluation_sum"] = revaluation_sum if revaluation_sum != 0.0 else None
     return JSONResponse(data)
 
 

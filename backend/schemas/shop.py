@@ -119,8 +119,12 @@ class ShopReconciliationOut(BaseModel):
     created_at: Optional[str]
     rec_type: str = 'regular'
     lines: List[ShopReconciliationLineOut] = []
-    # Поле для frontend: залишок у касі ПІСЛЯ попередньої звірки (обчислюється динамічно)
-    prev_cash_balance: Optional[float] = None
+    # Поля обчислюються динамічно (не зберігаються в БД):
+    prev_cash_balance: Optional[float] = None   # залишок у касі після попередньої звірки
+    prev_stock_value: Optional[float] = None    # вартість товару на кінець попередньої звірки
+    terminal_cash: Optional[float] = None       # термінальна частина cash_actual
+    opening_prices: Optional[dict] = None       # {str(pid): price} — ціни ДО початку звірки
+    revaluation_sum: Optional[float] = None     # переоцінка: Σ entered × (closing_price − opening_price)
 
 
 class ShopReconciliationCreate(BaseModel):

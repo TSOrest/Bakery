@@ -48,6 +48,10 @@ interface Reconciliation {
   rec_type: string   // 'regular' | 'opening' | 'archive'
   lines: RecLine[]
   prev_cash_balance: number | null  // обчислюється бекендом динамічно
+  prev_stock_value: number | null   // вартість товару на кінець попередньої звірки
+  terminal_cash: number | null      // термінальна частина cash_actual
+  opening_prices: Record<string, number> | null  // ціни до початку звірки {pid: price}
+  revaluation_sum: number | null   // переоцінка через зміну ціни
 }
 
 interface ShopReceipt {
@@ -130,6 +134,7 @@ export default function ShopPage() {
           Помилка завантаження: {loadError}
         </div>
       )}
+
 
       {shops.length === 0 ? (
         <div style={{ color: '#888', padding: '2rem 0' }}>
@@ -543,6 +548,7 @@ function ReconciliationCalendar({
   const [recs, setRecs]               = useState<Reconciliation[]>([])
   const [selectedRec, setSelectedRec] = useState<Reconciliation | null>(null)
   const [loadingRec, setLoadingRec]   = useState(false)
+  const [priceAlert, setPriceAlert]   = useState<{has_alert: boolean; products: {id:number;name:string}[]}>({has_alert: false, products: []})
 
   const loadRecDetail = (id: number) => {
     setLoadingRec(true)
@@ -550,6 +556,11 @@ function ReconciliationCalendar({
       .then((full) => { setSelectedRec(full); setLoadingRec(false) })
       .catch(() => setLoadingRec(false))
   }
+
+  useEffect(() => {
+    api.get<{has_alert: boolean; products: {id:number;name:string}[]}>('/shop/price-change-alert')
+      .then(setPriceAlert).catch(() => {})
+  }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // Завантажуємо список без рядків (50 KB замість 3.6 MB)
@@ -593,6 +604,15 @@ function ReconciliationCalendar({
 
   return (
     <div style={{ ...sectionBox, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+      {priceAlert.has_alert && (
+        <div style={{ background: '#fffbe6', border: '1.5px solid #f59e0b', borderRadius: 6, padding: '0.5rem 1rem', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+          <span>⚠️</span>
+          <span>
+            <strong>Рекомендується провести звірку</strong> — змінились ціни на товар що є на залишку:&nbsp;
+            {priceAlert.products.map((p: {id:number;name:string}) => p.name).join(', ')}.
+          </span>
+        </div>
+      )}
       <div style={{ ...sectionTitle, flexShrink: 0 }}>Звірки (календар)</div>
       <div style={{ display: 'flex', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
 
@@ -706,17 +726,28 @@ function ReconciliationCalendar({
               .map(([pid, v]) => ({ pid, ...v }))
               .filter((r) => r.opening > 0 || r.received > 0 || r.entered > 0 || r.sold > 0)
 
-            // Грошові підсумки
+            // Ціни до початку звірки (для операційних колонок при переоцінці)
+            const openingPricesMap = selectedRec.opening_prices ?? {}
+            const opPrice = (pid: number, fallback: number | null) =>
+              openingPricesMap[String(pid)] ?? fallback ?? 0
+            // val: для рядків деталізації (по поточній ціні рядка)
             const val = (qty: number, price: number | null) => qty * (price ?? 0)
-            const totOpeningVal   = allRows.reduce((s, r) => s + val(r.opening,    r.price), 0)
-            const totReceivedVal  = allRows.reduce((s, r) => s + val(r.received,   r.price), 0)
-            const totSoldVal      = allRows.reduce((s, r) => s + val(r.sold,       r.price), 0)
-            const totWrittenOffVal= allRows.reduce((s, r) => s + val(r.writtenOff, r.price), 0)
-            const totClosingVal   = allRows.reduce((s, r) => s + val(r.entered,    r.price), 0)
+
+            // Грошові підсумки — операційні колонки по ціні ДО звірки, залишок — по поточній
+            const totOpeningVal   = allRows.reduce((s, r) => s + r.opening    * opPrice(r.pid, r.price), 0)
+            const totReceivedVal  = allRows.reduce((s, r) => s + r.received   * opPrice(r.pid, r.price), 0)
+            const totSoldVal      = allRows.reduce((s, r) => s + r.sold       * opPrice(r.pid, r.price), 0)
+            const totWrittenOffVal= allRows.reduce((s, r) => s + r.writtenOff * opPrice(r.pid, r.price), 0)
+            const totClosingVal   = allRows.reduce((s, r) => s + r.entered    * (r.price ?? 0), 0)
+            const revaluation     = selectedRec.revaluation_sum ?? 0
 
             // Залишок в касі: бекенд обчислює prev_cash_balance динамічно з фінансів
             const prevCashBalance = selectedRec.prev_cash_balance ?? 0
+            // "Товар поч." = вартість залишку на кінець попередньої звірки (ціни того дня)
+            const prevStockValue  = selectedRec.prev_stock_value ?? totOpeningVal
             const cashExtracted   = selectedRec.cash_actual ?? 0
+            const terminalCash    = selectedRec.terminal_cash ?? 0
+            const cashWithdrawn   = cashExtracted - terminalCash   // чиста готівка (без термінала)
             const cashBalance     = prevCashBalance + totSoldVal - cashExtracted
 
             // Групуємо по категоріях
@@ -772,14 +803,16 @@ function ReconciliationCalendar({
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(80px, 1fr))', gap: '0.3rem', marginBottom: '0.5rem', flexShrink: 0 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${(terminalCash > 0 ? 1 : 0) + (revaluation !== 0 ? 1 : 0) + 8}, minmax(78px, 1fr))`, gap: '0.3rem', marginBottom: '0.5rem', flexShrink: 0 }}>
                     <SummaryCard label="Каса поч." value={prevCashBalance} color="#555" />
-                    <SummaryCard label="Товар поч." value={totOpeningVal} color="#555" />
+                    <SummaryCard label="Товар поч." value={prevStockValue} color="#555" />
                     <SummaryCard label="Прийнято" value={totReceivedVal} color="#0369a1" />
                     <SummaryCard label="Продано" value={totSoldVal} color="#2e7d32" highlight />
                     <SummaryCard label="Списано" value={totWrittenOffVal} color="#c00" />
+                    {revaluation !== 0 && <SummaryCard label="Переоцінка" value={revaluation} color="#7c3aed" />}
                     <SummaryCard label="Товар кін." value={totClosingVal} color="#7a5800" />
-                    <SummaryCard label="Виведено" value={cashExtracted} color="#b45309" />
+                    <SummaryCard label="Виведено" value={cashWithdrawn} color="#b45309" />
+                    {terminalCash > 0 && <SummaryCard label="Термінал" value={terminalCash} color="#0369a1" />}
                     <SummaryCard label="Каса кін." value={cashBalance} color="#1a3a5c" highlight />
                   </div>
                 )}

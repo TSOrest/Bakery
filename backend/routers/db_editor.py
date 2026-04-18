@@ -2,6 +2,7 @@
 Редактор бази даних — тільки для ролі admin.
 Дозволяє переглядати схему таблиць та редагувати дані напряму через SQLite PRAGMA.
 """
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
@@ -117,20 +118,57 @@ def get_table_data(
     table: str,
     page: int = Query(0, ge=0),
     page_size: int = Query(50, ge=1, le=200),
+    sort_col: Optional[str] = Query(None),
+    sort_dir: str = Query("asc"),
+    filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(_require_admin),
 ):
-    """Дані таблиці з пагінацією."""
+    """Дані таблиці з пагінацією, сортуванням і фільтрацією."""
     _validate_table(db, table)
-
-    total = db.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
-    rows = db.execute(
-        text(f'SELECT * FROM "{table}" LIMIT :limit OFFSET :offset'),
-        {"limit": page_size, "offset": page * page_size},
-    ).fetchall()
 
     cols = db.execute(text(f'PRAGMA table_info("{table}")')).fetchall()
     col_names = [c[1] for c in cols]
+
+    # ── Filters ──
+    where_parts: list[str] = []
+    params: dict[str, Any] = {}
+
+    if filters:
+        try:
+            filter_map: dict[str, list] = json.loads(filters)
+        except Exception:
+            filter_map = {}
+
+        for i, (col, vals) in enumerate(filter_map.items()):
+            if col not in col_names or not vals:
+                continue
+            null_vals  = [v for v in vals if v is None]
+            non_null   = [v for v in vals if v is not None]
+            sub: list[str] = []
+            if null_vals:
+                sub.append(f'"{col}" IS NULL')
+            if non_null:
+                for j, v in enumerate(non_null):
+                    params[f"fv{i}_{j}"] = v
+                placeholders = ", ".join(f":fv{i}_{j}" for j in range(len(non_null)))
+                sub.append(f'"{col}" IN ({placeholders})')
+            if sub:
+                where_parts.append(f'({" OR ".join(sub)})')
+
+    where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+    # ── Sort ──
+    order_sql = ""
+    if sort_col and sort_col in col_names:
+        direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+        order_sql = f'ORDER BY "{sort_col}" {direction}'
+
+    total = db.execute(text(f'SELECT COUNT(*) FROM "{table}" {where_sql}'), params).scalar()
+    rows = db.execute(
+        text(f'SELECT * FROM "{table}" {where_sql} {order_sql} LIMIT :limit OFFSET :offset'),
+        {**params, "limit": page_size, "offset": page * page_size},
+    ).fetchall()
 
     return {
         "total": total,
@@ -139,6 +177,38 @@ def get_table_data(
         "columns": col_names,
         "rows": [dict(zip(col_names, r)) for r in rows],
     }
+
+
+@router.get("/tables/{table}/distinct/{column}")
+def get_distinct_values(
+    table: str,
+    column: str,
+    db: Session = Depends(get_db),
+    _=Depends(_require_admin),
+):
+    """Унікальні значення колонки для фільтра (макс 500)."""
+    _validate_table(db, table)
+
+    cols = db.execute(text(f'PRAGMA table_info("{table}")')).fetchall()
+    col_names = [c[1] for c in cols]
+    if column not in col_names:
+        raise HTTPException(404, f"Колонка '{column}' не знайдена")
+
+    rows = db.execute(
+        text(f'SELECT DISTINCT "{column}" FROM "{table}" ORDER BY "{column}" LIMIT 500')
+    ).fetchall()
+
+    values: list = []
+    has_null = False
+    for (v,) in rows:
+        if v is None:
+            has_null = True
+        else:
+            values.append(str(v))
+    if has_null:
+        values.append(None)
+
+    return {"column": column, "values": values}
 
 
 @router.get("/tables/{table}/fk-options/{column}")

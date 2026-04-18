@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import styles from './DbEditorPage.module.css'
 import ErdView from './DbEditorErd'
@@ -234,22 +234,36 @@ const COLUMN_HINTS: Record<string, Record<string, string>> = {
 export default function DbEditorPage() {
   const { token } = useAuth()
 
-  const [tables,       setTables]       = useState<TableInfo[]>([])
-  const [search,       setSearch]       = useState('')
-  const [selected,     setSelected]     = useState<string | null>(null)
-  const [schema,       setSchema]       = useState<SchemaInfo | null>(null)
-  const [data,         setData]         = useState<DataResult | null>(null)
-  const [page,         setPage]         = useState(0)
-  const [editRow,      setEditRow]      = useState<Record<string, unknown> | null>(null)
-  const [editVals,     setEditVals]     = useState<Record<string, unknown>>({})
-  const [fkOptions,    setFkOptions]    = useState<Record<string, FkOption[]>>({})
-  const [saving,       setSaving]       = useState(false)
-  const [deleting,     setDeleting]     = useState<string | null>(null)
-  const [loadingData,  setLoadingData]  = useState(false)
-  const [error,        setError]        = useState<string | null>(null)
-  const [loadError,    setLoadError]    = useState<string | null>(null)
-  const [showDdl,      setShowDdl]      = useState(false)
-  const [showErd,      setShowErd]      = useState(false)
+  const [tables,        setTables]        = useState<TableInfo[]>([])
+  const [search,        setSearch]        = useState('')
+  const [selected,      setSelected]      = useState<string | null>(null)
+  const [schema,        setSchema]        = useState<SchemaInfo | null>(null)
+  const [data,          setData]          = useState<DataResult | null>(null)
+  const [page,          setPage]          = useState(0)
+  const [editRow,       setEditRow]       = useState<Record<string, unknown> | null>(null)
+  const [editVals,      setEditVals]      = useState<Record<string, unknown>>({})
+  const [fkOptions,     setFkOptions]     = useState<Record<string, FkOption[]>>({})
+  const [saving,        setSaving]        = useState(false)
+  const [deleting,      setDeleting]      = useState<string | null>(null)
+  const [loadingData,   setLoadingData]   = useState(false)
+  const [error,         setError]         = useState<string | null>(null)
+  const [loadError,     setLoadError]     = useState<string | null>(null)
+  const [showDdl,       setShowDdl]       = useState(false)
+  const [showErd,       setShowErd]       = useState(false)
+
+  // sort + filter + FK names
+  const [showFkNames,   setShowFkNames]   = useState(false)
+  const [displayFkOpts, setDisplayFkOpts] = useState<Record<string, FkOption[]>>({})
+  const [sortCol,       setSortCol]       = useState<string | null>(null)
+  const [sortDir,       setSortDir]       = useState<'asc' | 'desc'>('asc')
+  const [activeFilters, setActiveFilters] = useState<Record<string, (string | null)[]>>({})
+  const [filterOpen,    setFilterOpen]    = useState<string | null>(null)
+  const [filterPos,     setFilterPos]     = useState({ top: 0, left: 0 })
+  const [distinctVals,  setDistinctVals]  = useState<Record<string, (string | null)[]>>({})
+  const [pendingFilter, setPendingFilter] = useState<Record<string, boolean>>({})
+  const [filterSearch,  setFilterSearch]  = useState('')
+
+  const filterDropdownRef = useRef<HTMLDivElement>(null)
 
   // Parse CHECK(col IN ('v1','v2',...)) from DDL for enum dropdowns in edit modal
   const checkEnums = useMemo<Record<string, string[]>>(() => {
@@ -264,7 +278,6 @@ export default function DbEditorPage() {
     }
     return result
   }, [schema])
-
 
   const apiFetch = useCallback(async (path: string, opts?: RequestInit) => {
     const res = await fetch(`/api/v1/db-editor${path}`, {
@@ -298,6 +311,12 @@ export default function DbEditorPage() {
     setSchema(null)
     setData(null)
     setFkOptions({})
+    setDisplayFkOpts({})
+    setSortCol(null)
+    setSortDir('asc')
+    setActiveFilters({})
+    setDistinctVals({})
+    setFilterOpen(null)
     setError(null)
     setShowDdl(false)
 
@@ -310,12 +329,58 @@ export default function DbEditorPage() {
     }).catch(e => setError(e.message))
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadPage = useCallback(async (p: number) => {
+  // Auto-load FK options for display when showFkNames is on or schema changes
+  useEffect(() => {
+    if (!showFkNames || !schema || !selected) return
+    let cancelled = false
+    const load = async () => {
+      const opts: Record<string, FkOption[]> = {}
+      for (const fk of schema.foreign_keys) {
+        if (fk.from_col in opts) continue
+        try {
+          const res = await apiFetch(`/tables/${selected}/fk-options/${fk.from_col}`)
+          opts[fk.from_col] = res.options
+        } catch { /* optional */ }
+      }
+      if (!cancelled) setDisplayFkOpts(opts)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [showFkNames, schema]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    if (!filterOpen) return
+    const handler = (e: MouseEvent) => {
+      if (filterDropdownRef.current && !filterDropdownRef.current.contains(e.target as Node)) {
+        setFilterOpen(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [filterOpen])
+
+  const loadPage = useCallback(async (p: number, overrides?: {
+    sort?: { col: string | null; dir: 'asc' | 'desc' }
+    filters?: Record<string, (string | null)[]>
+  }) => {
     if (!selected) return
     setLoadingData(true)
     setError(null)
+
+    const sc = overrides?.sort !== undefined ? overrides.sort.col  : sortCol
+    const sd = overrides?.sort !== undefined ? overrides.sort.dir  : sortDir
+    const af = overrides?.filters !== undefined ? overrides.filters : activeFilters
+
+    let url = `/tables/${selected}/data?page=${p}&page_size=50`
+    if (sc) url += `&sort_col=${encodeURIComponent(sc)}&sort_dir=${sd}`
+    const nonEmpty = Object.fromEntries(Object.entries(af).filter(([, v]) => v.length > 0))
+    if (Object.keys(nonEmpty).length > 0) {
+      url += `&filters=${encodeURIComponent(JSON.stringify(nonEmpty))}`
+    }
+
     try {
-      const d = await apiFetch(`/tables/${selected}/data?page=${p}&page_size=50`)
+      const d = await apiFetch(url)
       setData(d)
       setPage(p)
     } catch (e: unknown) {
@@ -323,7 +388,7 @@ export default function DbEditorPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [selected, apiFetch])
+  }, [selected, apiFetch, sortCol, sortDir, activeFilters])
 
   const startEdit = useCallback(async (row: Record<string, unknown>) => {
     setEditRow(row)
@@ -356,7 +421,6 @@ export default function DbEditorPage() {
         body: JSON.stringify(editVals),
       })
       setEditRow(null)
-      // Refresh table list counts
       loadTables()
       await loadPage(page)
     } catch (e: unknown) {
@@ -381,10 +445,91 @@ export default function DbEditorPage() {
     }
   }
 
-  const pkCol    = schema?.columns.find(c => c.is_pk)?.name
-  const fkColSet = new Set(schema?.foreign_keys.map(fk => fk.from_col) ?? [])
+  // ── Sort ──────────────────────────────────────────────────────────────────
+
+  const clickSort = useCallback((col: string) => {
+    let newCol: string | null = col
+    let newDir: 'asc' | 'desc' = 'asc'
+    if (sortCol === col) {
+      if (sortDir === 'asc') { newDir = 'desc' }
+      else { newCol = null; newDir = 'asc' }
+    }
+    setSortCol(newCol)
+    setSortDir(newDir)
+    loadPage(0, { sort: { col: newCol, dir: newDir } })
+  }, [sortCol, sortDir, loadPage])
+
+  const applySort = useCallback((col: string | null, dir: 'asc' | 'desc') => {
+    setSortCol(col)
+    setSortDir(dir)
+    setFilterOpen(null)
+    loadPage(0, { sort: { col, dir } })
+  }, [loadPage])
+
+  // ── Filter ────────────────────────────────────────────────────────────────
+
+  const openFilter = useCallback(async (col: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setFilterPos({ top: rect.bottom + 2, left: rect.left })
+    setFilterOpen(col)
+    setFilterSearch('')
+
+    const initPending = (vals: (string | null)[]) => {
+      const current = activeFilters[col] ?? []
+      const pending: Record<string, boolean> = {}
+      vals.forEach(v => {
+        const key = v === null ? '__NULL__' : v
+        pending[key] = current.length === 0 || current.some(cv => cv === v)
+      })
+      setPendingFilter(pending)
+    }
+
+    if (distinctVals[col]) {
+      initPending(distinctVals[col])
+    } else {
+      try {
+        const res = await apiFetch(`/tables/${selected}/distinct/${col}`)
+        const vals: (string | null)[] = res.values
+        setDistinctVals(prev => ({ ...prev, [col]: vals }))
+        initPending(vals)
+      } catch { /* ignore */ }
+    }
+  }, [activeFilters, distinctVals, selected, apiFetch])
+
+  const applyFilter = useCallback(() => {
+    if (!filterOpen) return
+    const vals = distinctVals[filterOpen] ?? []
+    const allChecked = vals.every(v => pendingFilter[v === null ? '__NULL__' : v] ?? false)
+
+    let newFilters: Record<string, (string | null)[]>
+    if (allChecked) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [filterOpen]: _removed, ...rest } = activeFilters
+      newFilters = rest
+    } else {
+      const checked: (string | null)[] = vals.filter(v => pendingFilter[v === null ? '__NULL__' : v])
+      newFilters = { ...activeFilters, [filterOpen]: checked }
+    }
+
+    setActiveFilters(newFilters)
+    setFilterOpen(null)
+    loadPage(0, { filters: newFilters })
+  }, [filterOpen, distinctVals, pendingFilter, activeFilters, loadPage])
+
+  const clearAllFilters = useCallback(() => {
+    setActiveFilters({})
+    setSortCol(null)
+    loadPage(0, { sort: { col: null, dir: 'asc' }, filters: {} })
+  }, [loadPage])
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  const pkCol      = schema?.columns.find(c => c.is_pk)?.name
+  const fkColSet   = new Set(schema?.foreign_keys.map(fk => fk.from_col) ?? [])
   const totalPages = data ? Math.ceil(data.total / 50) : 0
   const filteredTables = tables.filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
+  const activeFilterCols = Object.keys(activeFilters).filter(k => activeFilters[k].length > 0)
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -427,6 +572,15 @@ export default function DbEditorPage() {
               </div>
             ))}
           </div>
+          <div className={styles.sidebarFooter}>
+            <button
+              className={`${styles.btnFkToggle} ${showFkNames ? styles.btnFkToggleActive : ''}`}
+              onClick={() => setShowFkNames(v => !v)}
+              title="Показувати назви зв'язаних записів у FK-полях"
+            >
+              {showFkNames ? '● ' : '○ '}FK назви
+            </button>
+          </div>
         </div>
 
         {/* ── Center: data grid ────────────────────────────────────────── */}
@@ -441,6 +595,18 @@ export default function DbEditorPage() {
                 <h2 className={styles.tableTitleText}>{selected}</h2>
                 <span className={styles.rowCount}>{data.total} рядків</span>
                 {loadingData && <span className={styles.rowCount}>⏳</span>}
+                {(activeFilterCols.length > 0 || sortCol) && (
+                  <button className={styles.btnClearFilters} onClick={clearAllFilters} title="Скинути сортування і фільтри">
+                    ✕ скинути
+                  </button>
+                )}
+                {activeFilterCols.length > 0 && (
+                  <span className={styles.filterChips}>
+                    {activeFilterCols.map(col => (
+                      <span key={col} className={styles.filterChip}>{col}</span>
+                    ))}
+                  </span>
+                )}
               </div>
 
               {error && <div className={styles.error}>{error}</div>}
@@ -450,7 +616,25 @@ export default function DbEditorPage() {
                   <thead>
                     <tr>
                       {data.columns.map(col => (
-                        <th key={col} className={styles.th}>{col}</th>
+                        <th key={col} className={styles.th}>
+                          <div className={styles.thInner}>
+                            <span
+                              className={styles.thLabel}
+                              onClick={() => clickSort(col)}
+                              title="Сортувати"
+                            >
+                              {col}
+                              {sortCol === col && (
+                                <span className={styles.sortIndicator}>{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>
+                              )}
+                            </span>
+                            <button
+                              className={`${styles.filterBtn} ${activeFilters[col]?.length ? styles.filterBtnActive : ''}`}
+                              onClick={e => openFilter(col, e)}
+                              title="Фільтр"
+                            >▽</button>
+                          </div>
+                        </th>
                       ))}
                       <th className={styles.th} style={{ width: 64 }}>Дії</th>
                     </tr>
@@ -460,16 +644,29 @@ export default function DbEditorPage() {
                       const pk = pkCol != null ? row[pkCol] : i
                       return (
                         <tr key={String(pk ?? i)} className={styles.tr}>
-                          {data.columns.map(col => (
-                            <td key={col} className={styles.td} title={row[col] != null ? String(row[col]) : ''}>
-                              {row[col] == null
-                                ? <span className={styles.null}>NULL</span>
-                                : String(row[col]).length > 60
-                                  ? String(row[col]).slice(0, 60) + '…'
-                                  : String(row[col])
+                          {data.columns.map(col => {
+                            let cellContent: React.ReactNode
+                            if (row[col] == null) {
+                              cellContent = <span className={styles.null}>NULL</span>
+                            } else {
+                              const raw = String(row[col])
+                              if (showFkNames && fkColSet.has(col) && displayFkOpts[col]) {
+                                const opt = displayFkOpts[col].find(o => String(o.value) === raw)
+                                if (opt) {
+                                  cellContent = <>{raw} <span className={styles.fkName}>({opt.label})</span></>
+                                } else {
+                                  cellContent = raw.length > 60 ? raw.slice(0, 60) + '…' : raw
+                                }
+                              } else {
+                                cellContent = raw.length > 60 ? raw.slice(0, 60) + '…' : raw
                               }
-                            </td>
-                          ))}
+                            }
+                            return (
+                              <td key={col} className={styles.td} title={row[col] != null ? String(row[col]) : ''}>
+                                {cellContent}
+                              </td>
+                            )
+                          })}
                           <td className={styles.td}>
                             <button className={styles.btnEdit} onClick={() => startEdit(row)} title="Редагувати">✏️</button>
                             {pkCol != null && (
@@ -580,6 +777,103 @@ export default function DbEditorPage() {
 
       {/* ── ERD overlay ─────────────────────────────────────────────────── */}
       {showErd && <ErdView onClose={() => setShowErd(false)} />}
+
+      {/* ── Filter dropdown ─────────────────────────────────────────────── */}
+      {filterOpen && (
+        <div
+          ref={filterDropdownRef}
+          className={styles.filterDropdown}
+          style={{ top: filterPos.top, left: filterPos.left }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Sort buttons */}
+          <div className={styles.filterSortBtns}>
+            <button
+              className={`${styles.filterSortBtn} ${sortCol === filterOpen && sortDir === 'asc' ? styles.filterSortBtnActive : ''}`}
+              onClick={() => applySort(filterOpen, 'asc')}
+            >↑ A→Z</button>
+            <button
+              className={`${styles.filterSortBtn} ${sortCol === filterOpen && sortDir === 'desc' ? styles.filterSortBtnActive : ''}`}
+              onClick={() => applySort(filterOpen, 'desc')}
+            >↓ Z→A</button>
+            {sortCol === filterOpen && (
+              <button className={styles.filterSortBtn} onClick={() => applySort(null, 'asc')}>✕ скид</button>
+            )}
+          </div>
+
+          {/* Search */}
+          <input
+            className={styles.filterSearchInput}
+            placeholder="Пошук значення..."
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+            autoFocus
+          />
+
+          {/* Select all / none */}
+          <div className={styles.filterSelectLinks}>
+            <button onClick={() => {
+              const vals = distinctVals[filterOpen] ?? []
+              const next: Record<string, boolean> = {}
+              vals.forEach(v => { next[v === null ? '__NULL__' : v!] = true })
+              setPendingFilter(next)
+            }}>Всі</button>
+            <button onClick={() => {
+              const vals = distinctVals[filterOpen] ?? []
+              const next: Record<string, boolean> = {}
+              vals.forEach(v => { next[v === null ? '__NULL__' : v!] = false })
+              setPendingFilter(next)
+            }}>Жодного</button>
+          </div>
+
+          {/* Value list */}
+          <div className={styles.filterList}>
+            {!distinctVals[filterOpen] ? (
+              <div className={styles.filterLoading}>Завантаження...</div>
+            ) : (
+              (distinctVals[filterOpen] ?? [])
+                .filter(v => {
+                  if (!filterSearch) return true
+                  const s = filterSearch.toLowerCase()
+                  if (v === null) return 'null'.includes(s)
+                  const label = showFkNames
+                    ? (displayFkOpts[filterOpen]?.find(o => String(o.value) === v)?.label ?? v)
+                    : v
+                  return String(label).toLowerCase().includes(s)
+                })
+                .map(v => {
+                  const key = v === null ? '__NULL__' : v!
+                  const fkLabel = showFkNames && displayFkOpts[filterOpen]
+                    ? displayFkOpts[filterOpen].find(o => String(o.value) === v)?.label
+                    : undefined
+                  return (
+                    <label key={key} className={styles.filterItem}>
+                      <input
+                        type="checkbox"
+                        checked={pendingFilter[key] ?? false}
+                        onChange={e => setPendingFilter(prev => ({ ...prev, [key]: e.target.checked }))}
+                      />
+                      <span>
+                        {v === null
+                          ? <em className={styles.null}>NULL</em>
+                          : fkLabel
+                            ? <>{v} <span className={styles.fkName}>({fkLabel})</span></>
+                            : v
+                        }
+                      </span>
+                    </label>
+                  )
+                })
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className={styles.filterActions}>
+            <button className={styles.filterOkBtn} onClick={applyFilter}>OK</button>
+            <button className={styles.filterCancelBtn} onClick={() => setFilterOpen(null)}>Скасувати</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Edit modal ──────────────────────────────────────────────────── */}
       {editRow && schema && (

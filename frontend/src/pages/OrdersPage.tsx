@@ -322,11 +322,11 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const routeMap   = useMemo(() => new Map(routes.map(r => [r.id, r])),   [routes])
   const productMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products])
 
-  // Дочірні рядки: зняття нестачі (parent_order_id != null, origin_id == null)
+  // Дочірні рядки: зняття нестачі + переміщення (всі з parent_order_id != null)
   const childOrdersMap = useMemo(() => {
     const map = new Map<number, Order[]>()
     for (const o of orders) {
-      if (o.parent_order_id != null && o.origin_id == null) {
+      if (o.parent_order_id != null) {
         const arr = map.get(o.parent_order_id) ?? []
         arr.push(o)
         map.set(o.parent_order_id, arr)
@@ -383,8 +383,9 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   const ordersToShow = useMemo(() =>
     orders
       .filter(o => {
-        // Тільки кореневі рядки — виключаємо лише знімання нестачі (дочірні)
-        if (o.parent_order_id != null) return false
+        // Кореневі рядки + переміщення (origin_id != null) для цільового клієнта
+        // Виключаємо тільки знімання нестачі (parent_order_id != null && origin_id == null)
+        if (o.parent_order_id != null && o.origin_id == null) return false
         if (o.qty <= 0) return false
         if (selectedRouteId != null) {
           const c = clientMap.get(o.client_id)
@@ -741,7 +742,12 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
                       </td>
                       <td className={styles.tdSrc} title={(() => {
                         if (isSurplus) return 'Розподіл надлишку випічки'
-                        if (isMoved)   return 'Переміщено з іншого замовлення'
+                        if (isMoved) {
+                          const srcOrder = orders.find(o => o.id === order.origin_id)
+                          const srcClient = srcOrder ? clientMap.get(srcOrder.client_id) : null
+                          const srcName = srcClient?.short_name ?? srcClient?.full_name ?? '?'
+                          return `Переміщено від: ${srcName}`
+                        }
                         if (order.source !== 'bot') return order.source === 'paper' ? 'Паперове замовлення' : 'Оператор'
                         const lines: string[] = []
                         if (order.bot_status === 'pending')   lines.push('Очікує підтвердження оператора')
