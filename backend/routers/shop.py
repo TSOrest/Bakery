@@ -934,9 +934,10 @@ def update_reconciliation_line(
     if not line or line.reconciliation_id != rec_id:
         raise HTTPException(status_code=404, detail="Рядок не знайдено")
 
-    if body.entered_balance is not None:
+    # Використовуємо model_fields_set щоб відрізнити "не передано" від явного null
+    if 'entered_balance' in body.model_fields_set:
         line.entered_balance = body.entered_balance
-    if body.price is not None:
+    if 'price' in body.model_fields_set:
         line.price = body.price
 
     _recalc_line(line, from_disposal=bool(line.disposal_lines))

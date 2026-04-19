@@ -1041,7 +1041,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
   const [saving, setSaving]             = useState(false)
   const [products, setProducts]         = useState<{ id: number; name: string }[]>([])
   const [clients, setClients]           = useState<ClientOption[]>([])
-  const [posSales, setPosSales]         = useState<Record<number, { qty: number; amount: number }>>({})
+  const [posSales, setPosSales]         = useState<Record<string, { qty: number; amount: number }>>({})
   const posTotalRef                     = useRef(0)
 
   // Авто-відкриття: знайти відкриту звірку або POST ідемпотентний
@@ -1086,21 +1086,32 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     )
   }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Завантаження POS-продажів для дати звірки
+  // Завантаження POS-продажів за весь період звірки, по (product_id, batch_date)
   useEffect(() => {
     if (!activeRec) { setPosSales({}); return }
-    const date = activeRec.period_to
-    api.get<{ session_id: string; lines: { product_id: number; qty: number; amount: number }[]; total: number }[]>(
-      `/shop/sales?shop_client_id=${shopId}&date=${date}`
-    ).then(sessions => {
-      const agg: Record<number, { qty: number; amount: number }> = {}
-      let total = 0
-      for (const s of sessions) {
-        total += s.total
-        for (const ln of s.lines) {
-          if (!agg[ln.product_id]) agg[ln.product_id] = { qty: 0, amount: 0 }
-          agg[ln.product_id].qty    += ln.qty
-          agg[ln.product_id].amount += ln.amount
+    // Завантажуємо продажі за кожен день звірки (period_from..period_to)
+    const days: string[] = []
+    const cur = new Date(activeRec.period_from)
+    const end = new Date(activeRec.period_to)
+    while (cur <= end) { days.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 1) }
+    const agg: Record<string, { qty: number; amount: number }> = {}
+    let total = 0
+    Promise.all(
+      days.map(d =>
+        api.get<{ session_id: string; lines: { product_id: number; batch_date: string | null; qty: number; amount: number }[]; total: number }[]>(
+          `/shop/sales?shop_client_id=${shopId}&date=${d}`
+        ).catch(() => [] as never[])
+      )
+    ).then(results => {
+      for (const sessions of results) {
+        for (const s of sessions) {
+          total += s.total
+          for (const ln of s.lines) {
+            const key = `${ln.product_id}-${ln.batch_date ?? 'null'}`
+            if (!agg[key]) agg[key] = { qty: 0, amount: 0 }
+            agg[key].qty    += ln.qty
+            agg[key].amount += ln.amount
+          }
         }
       }
       posTotalRef.current = total
@@ -1108,8 +1119,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
       if (!activeRec.closed && cashActual === '' && total > 0) {
         setCashActual(total.toFixed(2))
       }
-    }).catch(() => {})
-  }, [activeRec?.id, activeRec?.period_to]) // eslint-disable-line react-hooks/exhaustive-deps
+    })
+  }, [activeRec?.id, activeRec?.period_from, activeRec?.period_to]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefreshReceived = async () => {
     if (!activeRec) return
@@ -1319,7 +1330,7 @@ function ReconciliationTable({
   clients: ClientOption[]
   productName: (id: number) => string
   workDate: string
-  posSales: Record<number, { qty: number; amount: number }>
+  posSales: Record<string, { qty: number; amount: number }>
   onUpdate: (lineId: number, field: 'entered_balance' | 'price', value: string) => void
   onAddDisposal: (lineId: number, type: string, qty: number, clientId: number | null, notes: string, price?: number | null) => Promise<void>
   onDeleteDisposal: (lineId: number, disposalId: number) => Promise<void>
@@ -1391,6 +1402,7 @@ function ReconciliationTable({
             <Th right>Відкр.</Th>
             <Th right>Надійшло</Th>
             <Th right>Доступно</Th>
+            <Th right title="Продано через POS (заблоковано)">📱 POS</Th>
             <Th right>Залишок</Th>
             <Th right>Списано</Th>
             <Th right>Продано</Th>
@@ -1400,11 +1412,13 @@ function ReconciliationTable({
         <tbody>
           {lines.map((line, idx) => {
             const available      = line.opening_balance + line.received
+            const posKey         = `${line.product_id}-${line.batch_date ?? 'null'}`
+            const posInfo        = posSales[posKey]
+            const posSold        = posInfo?.qty ?? 0
+            const maxBalance     = Math.max(0, available - posSold)
+            const overBalance    = line.entered_balance != null && line.entered_balance > maxBalance + 0.001
             const ageDays        = calcAgeDays(line.batch_date, workDate)
             const isDisposalOpen = disposalOpen === line.id
-            // POS-інфо показуємо лише в першому рядку для кожного продукту
-            const isFirstRowForProduct = idx === 0 || lines[idx - 1].product_id !== line.product_id
-            const posInfo = isFirstRowForProduct ? posSales[line.product_id] : undefined
 
             return (
               <React.Fragment key={line.id}>
@@ -1431,14 +1445,26 @@ function ReconciliationTable({
                   <Td right dim>{line.received > 0 ? `+${line.received.toFixed(1)}` : '—'}</Td>
                   <Td right><strong>{available.toFixed(1)}</strong></Td>
                   <Td right>
-                    <StreamInput
-                      ref={(el) => { inputRefs.current[idx] = el }}
-                      value={line.entered_balance ?? ''}
-                      disabled={disabled}
-                      placeholder="введіть"
-                      onCommit={(v) => onUpdate(line.id, 'entered_balance', v)}
-                      onKeyDown={(e) => handleKey(e, idx + 1)}
-                    />
+                    {posSold > 0
+                      ? <span style={{ color: '#0369a1', fontWeight: 600 }}>{posSold.toFixed(1)}</span>
+                      : <span style={{ color: '#ccc' }}>—</span>}
+                  </Td>
+                  <Td right>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <StreamInput
+                        ref={(el) => { inputRefs.current[idx] = el }}
+                        value={line.entered_balance ?? ''}
+                        disabled={disabled}
+                        placeholder="введіть"
+                        onCommit={(v) => onUpdate(line.id, 'entered_balance', v)}
+                        onKeyDown={(e) => handleKey(e, idx + 1)}
+                        error={overBalance}
+                      />
+                      {overBalance && (
+                        <span title={`Перевищує доступний залишок після POS (макс. ${maxBalance.toFixed(1)})`}
+                          style={{ color: '#c62828', fontSize: '0.8rem', cursor: 'help' }}>⚠</span>
+                      )}
+                    </div>
                   </Td>
 
                   {/* Списано: ▶/▼ стрілка + підсумок + ⊕ */}
@@ -1490,7 +1516,7 @@ function ReconciliationTable({
                 {/* ── Рядки disposal (розгорнуті) ── */}
                 {expandedLines.has(line.id) && line.disposal_lines.map((d) => (
                   <tr key={`d-${d.id}`} style={{ background: d.disposal_type === 'sale' ? '#f0faf0' : '#fff8f0', borderLeft: `2px solid ${d.disposal_type === 'sale' ? '#86efac' : '#e8c090'}` }}>
-                    <td colSpan={4} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#777', fontSize: '0.78rem' }}>
+                    <td colSpan={5} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#777', fontSize: '0.78rem' }}>
                       <span style={{ marginRight: '0.3rem', color: '#ccc' }}>└</span>
                       {DISPOSAL_LABELS[d.disposal_type] ?? d.disposal_type}
                       {d.client_id && (
@@ -1503,7 +1529,6 @@ function ReconciliationTable({
                         <span style={{ marginLeft: '0.3rem', fontStyle: 'italic', color: '#aaa' }}>{d.notes}</span>
                       )}
                     </td>
-                    <td style={tdStyle} />
                     <td style={{ ...tdStyle, textAlign: 'right', color: '#c62828', fontSize: '0.8rem' }}>
                       {d.qty.toFixed(1)}
                     </td>
@@ -1522,7 +1547,7 @@ function ReconciliationTable({
                 {/* ── Inline форма додавання disposal ── */}
                 {isDisposalOpen && !disabled && (
                   <tr style={{ background: '#f0f6ff', borderLeft: '3px solid #1a3a5c' }}>
-                    <td colSpan={8} style={{ padding: '0.5rem 0.7rem' }}>
+                    <td colSpan={9} style={{ padding: '0.5rem 0.7rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 600 }}>Тип:</span>
                         <select
@@ -1592,7 +1617,7 @@ function ReconciliationTable({
         </tbody>
         <tfoot>
           <tr style={{ background: '#f0f4f8', fontWeight: 700 }}>
-            <td colSpan={5} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
+            <td colSpan={6} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
             <td style={{ ...tdStyle, textAlign: 'right' }}>{totalSold.toFixed(1)}</td>
             <td style={{ ...tdStyle, textAlign: 'right', color: '#b45309' }}>{totalCash.toFixed(2)} грн</td>
           </tr>
@@ -1611,10 +1636,11 @@ const StreamInput = forwardRef<
     disabled?: boolean
     placeholder?: string
     step?: string
+    error?: boolean
     onCommit: (v: string) => void
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
   }
->(({ value, disabled, placeholder, step = '0.001', onCommit, onKeyDown }, ref) => {
+>(({ value, disabled, placeholder, step = '0.001', error, onCommit, onKeyDown }, ref) => {
   const [local, setLocal] = useState(value.toString())
   useEffect(() => setLocal(value.toString()), [value])
   return (
@@ -1626,9 +1652,9 @@ const StreamInput = forwardRef<
       onKeyDown={onKeyDown as any}
       style={{
         width: '80px', padding: '0.2rem 0.4rem',
-        border: '1px solid ' + (disabled ? '#e0e0e0' : '#bbb'),
+        border: '1px solid ' + (error ? '#c62828' : disabled ? '#e0e0e0' : '#bbb'),
         borderRadius: '3px', fontSize: '0.875rem', textAlign: 'right',
-        background: disabled ? '#f5f5f5' : '#fff', outline: 'none',
+        background: error ? '#fff5f5' : disabled ? '#f5f5f5' : '#fff', outline: 'none',
       }}
     />
   )
@@ -1637,8 +1663,8 @@ StreamInput.displayName = 'StreamInput'
 
 // ─── Допоміжні компоненти ────────────────────────────────────────────────────
 
-const Th = ({ children, right }: { children?: React.ReactNode; right?: boolean }) => (
-  <th style={{ padding: '0.45rem 0.7rem', textAlign: right ? 'right' : 'left', fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+const Th = ({ children, right, title }: { children?: React.ReactNode; right?: boolean; title?: string }) => (
+  <th title={title} style={{ padding: '0.45rem 0.7rem', textAlign: right ? 'right' : 'left', fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
     {children}
   </th>
 )
