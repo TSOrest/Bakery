@@ -12,8 +12,8 @@ interface Props {
 export default function Modal({ title, onClose, children, wide, xwide }: Props) {
   const sizeClass = xwide ? styles.modalXWide : wide ? styles.modalWide : ''
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={`${styles.modal} ${sizeClass}`} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.overlay}>
+      <div className={`${styles.modal} ${sizeClass}`}>
         <div className={styles.header}>
           <h3 className={styles.title}>{title}</h3>
           <button className={styles.close} onClick={onClose}>✕</button>

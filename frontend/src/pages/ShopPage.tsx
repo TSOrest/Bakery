@@ -366,7 +366,7 @@ function AddReceiptModal({
   }
 
   return (
-    <div style={overlayStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div style={overlayStyle} >
       <div style={{ background: '#fff', borderRadius: '10px', padding: '1.5rem', width: '400px', maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h3 style={{ margin: 0, color: '#1a3a5c', fontSize: '1rem' }}>Надходження у магазин</h3>
@@ -457,7 +457,7 @@ function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
   }
 
   return (
-    <div style={overlayStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div style={overlayStyle} >
       <div style={{ ...modalStyle, maxWidth: '520px', height: 'auto', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
           <h3 style={{ margin: 0, color: '#5b21b6' }}>◈ Початковий залишок магазину</h3>
@@ -1184,7 +1184,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
   const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
 
   return (
-    <div style={overlayStyle} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div style={overlayStyle} >
       <div style={modalStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h3 style={{ margin: 0, color: '#1a3a5c' }}>🏪 {shopName} — Звірка</h3>

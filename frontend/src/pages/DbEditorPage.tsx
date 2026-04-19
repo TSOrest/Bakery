@@ -879,7 +879,6 @@ export default function DbEditorPage() {
       {editRow && schema && (
         <div
           className={styles.modalOverlay}
-          onClick={e => { if (e.target === e.currentTarget) { setEditRow(null); setError(null) } }}
         >
           <div className={styles.modal}>
             <div className={styles.modalTitle}>✏️ Редагувати — {selected}</div>

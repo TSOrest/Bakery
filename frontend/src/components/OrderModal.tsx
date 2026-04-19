@@ -298,7 +298,7 @@ export default function OrderModal({
   const isNonWorkDate = orderForDate !== workDate
 
   return (
-    <div className={styles.overlay} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div className={styles.overlay}>
       <div className={styles.modal}>
 
         {/* Заголовок */}

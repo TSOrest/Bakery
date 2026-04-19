@@ -81,7 +81,7 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
   const keys = ['7','8','9','←', '4','5','6','C', '1','2','3','', '0','.','00','']
 
   return (
-    <div className={css.overlay} onClick={e => { if (e.target === e.currentTarget) onCancel() }}>
+    <div className={css.overlay}>
       <div className={css.payModal}>
         <div className={css.payModalTitle}>До оплати</div>
         <div className={css.payModalTotal}>{fmt(total)} грн</div>
