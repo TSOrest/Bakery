@@ -1460,6 +1460,10 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
             db.commit()
 
             # ── Validation ────────────────────────────────────────────────────
+            shop_client = (
+                db.query(Client).filter(Client.is_own_shop == 1).first()
+                or db.query(Client).filter(Client.client_kind == "shop").first()
+            )
             imported_product_ids = set(product_map.values())
             zero_price: list[ZeroPriceProduct] = []
             for p in db.query(Product).filter(Product.is_active == 1).all():
