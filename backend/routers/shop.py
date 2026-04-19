@@ -739,7 +739,10 @@ def _cash_actual_from_finances(db: Session, shop_client_id: int, period_from: st
 
 def _get_closing_cash(db: Session, shop_client_id: int, up_to_period_to: str) -> float:
     """Кінцевий залишок у касі станом на кінець up_to_period_to.
-    Акумулює ланцюжок від opening: opening_cash + Σ(expected_i − actual_i)."""
+    Акумулює ланцюжок від opening: opening_cash + Σ(sold_at_opening_price_i − actual_i).
+    Використовує ціни на period_from-1 (як фронтенд opPrice) — щоб уникнути розбіжності
+    при зміні ціни всередині звірки."""
+    from datetime import date as _dt, timedelta as _td
     recs = (
         db.query(ShopReconciliation)
         .filter(
@@ -760,7 +763,15 @@ def _get_closing_cash(db: Session, shop_client_id: int, up_to_period_to: str) ->
                     r.cash_actual = _cash_actual_from_finances(
                         db, shop_client_id, r.period_from, r.period_to
                     )
-                balance += (r.cash_expected or 0.0) - (r.cash_actual or 0.0)
+                # Ціни на початок звірки (день до period_from) — узгоджено з opPrice фронтенду
+                opening_date = (_dt.fromisoformat(r.period_from) - _td(days=1)).isoformat()
+                all_pids = {ln.product_id for ln in r.lines}
+                op_prices = _get_shop_prices_batch(db, shop_client_id, all_pids, opening_date)
+                sold_val = sum(
+                    (ln.calculated_sold or 0.0) * op_prices.get(ln.product_id, ln.price or 0.0)
+                    for ln in r.lines
+                )
+                balance += sold_val - (r.cash_actual or 0.0)
     return round(balance, 2)
 
 
