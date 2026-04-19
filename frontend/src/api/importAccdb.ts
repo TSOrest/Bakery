@@ -36,7 +36,6 @@ export interface AccdbPreview {
   prices:    TableDetail
   orders:    TableDetail
   finances:  TableDetail
-  stock:     TableDetail
   all_routes:               RoutePreview[]
   all_clients_preview:      ClientPreview[]
   suggested_route_skips:    string[]    // route names to auto-skip
@@ -96,7 +95,6 @@ export interface ImportMapping {
   default_client_kind:  string
   base_price_category:  string          // Access КодКатегорії for base prices
   invoice_draft_from:   string | null   // YYYY-MM-DD; накладні з цієї дати = draft
-  shop_initial_cash:    number | null   // початковий залишок каси магазину (null = авто)
 }
 
 // ─── Context types ────────────────────────────────────────────────────────────

@@ -51,7 +51,6 @@ class AccdbPreview(BaseModel):
     prices:    TableDetail = Field(default_factory=lambda: TableDetail(target_table="prices"))
     orders:    TableDetail = Field(default_factory=lambda: TableDetail(target_table="orders"))
     finances:  TableDetail = Field(default_factory=lambda: TableDetail(target_table="finances"))
-    stock:     TableDetail = Field(default_factory=lambda: TableDetail(target_table="shop_reconciliation_lines"))
 
     # Повні списки для wizard-маппінгу
     all_routes:           list[RoutePreview]  = []  # всі маршрути Access
@@ -101,7 +100,6 @@ class ImportMapping(BaseModel):
     default_client_kind: str = 'customer'
     base_price_category: str = ''                  # Access КодКатегорії для базових цін
     invoice_draft_from: str | None = None          # YYYY-MM-DD; накладні з цієї дати = draft
-    shop_initial_cash: Optional[float] = None      # початковий залишок каси магазину (None = авто)
 
 
 # ─── Звіт ─────────────────────────────────────────────────────────────────────

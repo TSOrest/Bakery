@@ -56,7 +56,6 @@ const ENTITY_LABELS: Record<string, string> = {
   prices:   'Ціни',
   orders:   'Замовлення',
   finances: 'Фінанси',
-  stock:    'Залишки магазину',
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -741,13 +740,7 @@ function StepOrders({
 
 // ─── Step 8: Finances ─────────────────────────────────────────────────────────
 
-function StepFinances({
-  preview, shopInitialCash, setShopInitialCash,
-}: {
-  preview: AccdbPreview
-  shopInitialCash: string
-  setShopInitialCash: (v: string) => void
-}) {
+function StepFinances({ preview }: { preview: AccdbPreview }) {
   return (
     <div>
       <h2 style={{ marginBottom: 4, fontSize: '1.1rem' }}>Крок 8 — Фінансова історія</h2>
@@ -757,43 +750,6 @@ function StepFinances({
       <div style={INFO_BOX}>
         <strong>Знайдено фінансових операцій: {preview.finances.count}</strong>
       </div>
-
-      <div style={{ marginTop: 24, padding: '16px 20px', background: '#f5f3ff', border: '1px solid #c4b5fd', borderRadius: 8 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Початковий залишок каси магазину</div>
-        <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '0 0 12px' }}>
-          Вкажіть суму готівки в касі магазину на момент початку обліку (колонка{' '}
-          <strong>«Зал. в касі»</strong> в рядку першого дня звірки старої програми).
-          Якщо залишити порожнім — сума буде розрахована автоматично як різниця між
-          боргом магазину та вартістю товару на початок (може бути неточним через
-          відсутність повної фінансової історії).
-        </p>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.9rem' }}>
-          <span style={{ whiteSpace: 'nowrap' }}>Каса на початок:</span>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            value={shopInitialCash}
-            onChange={e => setShopInitialCash(e.target.value)}
-            placeholder="напр. 1024.00"
-            style={{ padding: '0.3rem 0.5rem', border: '1px solid #c4b5fd', borderRadius: 4, fontSize: '0.9rem', width: 140 }}
-          />
-          <span style={{ color: '#6b7280' }}>грн</span>
-          {shopInitialCash !== '' && (
-            <button
-              onClick={() => setShopInitialCash('')}
-              style={{ fontSize: '0.8rem', color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-            >
-              очистити (авто)
-            </button>
-          )}
-        </label>
-        {shopInitialCash === '' && (
-          <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '8px 0 0' }}>
-            Сума не вказана — буде обчислена автоматично.
-          </p>
-        )}
-      </div>
     </div>
   )
 }
@@ -802,7 +758,7 @@ function StepFinances({
 
 function StepConfirm({
   preview, transDate,
-  routeMappings, catMappings, clientMappings, basePriceCat, invoiceDraftFrom, shopInitialCash,
+  routeMappings, catMappings, clientMappings, basePriceCat, invoiceDraftFrom,
 }: {
   preview: AccdbPreview
   transDate: string
@@ -811,7 +767,6 @@ function StepConfirm({
   clientMappings: ClientMapping[]
   basePriceCat: string
   invoiceDraftFrom: string
-  shopInitialCash: string
 }) {
   const importedRoutes = routeMappings.filter(r => r.import_it).length
   const skippedRoutes  = routeMappings.filter(r => !r.import_it).length
@@ -846,10 +801,6 @@ function StepConfirm({
         } />
         <SummaryRow label="Базова цінова категорія"
           value={baseCat ? `${baseCat.name} (${baseCat.price_count} цін)` : '— не вибрано —'} />
-        <SummaryRow
-          label="Каса магазину на початок"
-          value={shopInitialCash !== '' ? `${parseFloat(shopInitialCash).toFixed(2)} грн` : '— авто (розрахунок з балансів)'}
-        />
       </div>
 
       <div style={{ marginTop: 24, background: '#fff7ed', border: '1px solid #fed7aa',
@@ -1358,9 +1309,6 @@ export default function ImportPage({ onClose }: Props) {
   // Step 7: накладні-чернетки
   const [invoiceDraftFrom, setInvoiceDraftFrom] = useState<string>(today())
 
-  // Step 8: початковий залишок каси магазину
-  const [shopInitialCash, setShopInitialCash] = useState<string>('')
-
   // Execution state
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null)
   const [report, setReport]             = useState<ImportReport | null>(null)
@@ -1515,7 +1463,6 @@ export default function ImportPage({ onClose }: Props) {
         default_client_kind: 'customer',
         base_price_category: basePriceCat,
         invoice_draft_from:  invoiceDraftFrom || null,
-        shop_initial_cash:   shopInitialCash !== '' ? parseFloat(shopInitialCash) : null,
       })
       goTo(10)
     } catch (e: any) {
@@ -1620,11 +1567,7 @@ export default function ImportPage({ onClose }: Props) {
                 />
               )}
               {step === 8 && preview && (
-                <StepFinances
-                  preview={preview}
-                  shopInitialCash={shopInitialCash}
-                  setShopInitialCash={setShopInitialCash}
-                />
+                <StepFinances preview={preview} />
               )}
               {step === 9 && preview && (
                 <StepConfirm
@@ -1635,7 +1578,6 @@ export default function ImportPage({ onClose }: Props) {
                   clientMappings={clientMappings}
                   basePriceCat={basePriceCat}
                   invoiceDraftFrom={invoiceDraftFrom}
-                  shopInitialCash={shopInitialCash}
                 />
               )}
               {step === 10 && (

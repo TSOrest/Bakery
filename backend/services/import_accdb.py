@@ -25,7 +25,6 @@ from backend.models.finances import Finance, FinanceArticle
 from backend.models.orders import Order
 from backend.models.pricing import ClientPriceOverride, Price
 from backend.models.references import Category, Client, Product, Route, Unit
-from backend.models.shop import ShopDisposalLine, ShopReconciliation, ShopReconciliationLine
 from backend.schemas.import_accdb import (
     AccdbPreview,
     BalanceMismatch,
@@ -74,8 +73,6 @@ _EXACT_TABLES: dict[str, str] = {
     "finances":   "^Баланс",
     "articles":   "_Статті",        # фін. статті → визначаємо напрям (Прихід/Витрата)
     "price_cats": "_Категорії",     # цінові категорії клієнтів
-    "stock":      "tblDailyBalances",  # денні залишки → початковий залишок магазину
-    "writeoffs":  "tblMovements",      # рухи (MoveType='Списання') → written_off у звірці
 }
 
 # key → {target_field: access_column}
@@ -148,17 +145,6 @@ _EXACT_COLS: dict[str, dict[str, str]] = {
         "name":      "Стаття",
         "direction": "Напрям",   # Прихід=income, Витрата=expense
     },
-    "stock": {
-        "product_id":  "ProductID",
-        "date":        "BalanceDate",
-        "end_balance": "EndBalance",
-    },
-    "writeoffs": {
-        "product_id": "ProductID",
-        "date":       "MoveDate",
-        "qty":        "Qty",
-        "move_type":  "MoveType",
-    },
 }
 
 # Точна назва колонки обміну в таблиці ^Закази
@@ -193,9 +179,6 @@ _COL_DESC: dict[str, dict[str, str]] = {
     "finances": {
         "article_id": "Стаття (тип операції)", "client_id": "Контрагент",
         "date": "Дата операції", "notes": "Примітка", "amount": "Сума",
-    },
-    "stock": {
-        "product_id": "Виріб", "date": "Дата", "end_balance": "Залишок на кінець дня",
     },
 }
 
@@ -651,7 +634,6 @@ def read_accdb_preview(path: str, password: str = "") -> AccdbPreview:
         prices=_build_table_detail("prices", reader),
         orders=_build_table_detail("orders", reader),
         finances=_build_table_detail("finances", reader),
-        stock=_build_table_detail("stock", reader),
         all_routes=all_routes,
         all_clients_preview=all_clients_preview,
         suggested_route_skips=suggested_route_skips,
@@ -1471,311 +1453,6 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     computed_balance=round(actual, 2),
                     diff=diff,
                 ))
-
-            # ── 10. Залишки (tblDailyBalances) → щоденні звірки магазину ─────
-            # Для кожної дати в tblDailyBalances створюємо закриту ShopReconciliation.
-            # opening  = EndBalance попереднього дня
-            # received = замовлення на магазин за цей день (вже імпортовані в крок 7)
-            # entered  = EndBalance цього дня
-            # calculated_sold = max(0, opening + received - entered)
-            _update_state(step="Залишки магазину", progress=90)
-            ep = EntityReport()
-            stock_tname = _find_table_for("stock", tables)
-            if stock_tname:
-                cm = _cols_for("stock", reader.columns(stock_tname))
-                shop_client = (
-                    db.query(Client).filter(Client.is_own_shop == 1).first()
-                    or db.query(Client).filter(Client.client_kind == "shop").first()
-                )
-                # Зчитуємо всі рядки → {date_str: {prod_id: end_balance}}
-                daily: dict[str, dict[int, float]] = {}
-                if cm.get("product_id") and cm.get("date") and cm.get("end_balance"):
-                    for row in reader.rows(stock_tname):
-                        d = _safe_date(row.get(cm["date"]))
-                        if not d or d > tr_date:
-                            continue
-                        pid_raw = row.get(cm["product_id"])
-                        try:
-                            prod_id = product_map.get(int(float(pid_raw))) if pid_raw else None
-                        except (ValueError, TypeError):
-                            prod_id = None
-                        if not prod_id:
-                            continue
-                        bal = _safe_float(row.get(cm["end_balance"])) or 0.0
-                        daily.setdefault(d, {})[prod_id] = bal
-
-                if shop_client and daily:
-                    sorted_dates   = sorted(daily.keys())
-                    last_import_date = sorted_dates[-1]   # остання дата залишається ВІДКРИТОЮ
-
-                    # ── Genesis (стартова) звірка з initial_stock ─────────────
-                    from datetime import date as _date, timedelta as _td
-                    genesis_lines: dict[int, float] = {}
-                    for product in db.query(Product).filter(Product.is_active == 1).all():
-                        in_daily = any(product.id in day for day in daily.values())
-                        if in_daily and (product.initial_stock or 0) > 0:
-                            genesis_lines[product.id] = float(product.initial_stock or 0)
-
-                    if genesis_lines:
-                        genesis_date = (
-                            _date.fromisoformat(sorted_dates[0]) - _td(days=1)
-                        ).isoformat()
-
-                        # Готівка в касі = |борг магазину перед пекарнею| − вартість товару на полиці.
-                        # Борг = сума (накладних − оплат) за весь імпортований період до дати старту.
-                        # Вартість товару = initial_stock × ціна магазину на genesis_date.
-                        net_row = db.execute(
-                            text("SELECT COALESCE(SUM(amount * sign), 0) FROM finances WHERE client_id = :cid AND finance_date < :d"),
-                            {"cid": shop_client.id, "d": sorted_dates[0]},
-                        ).fetchone()
-                        net_balance = float(net_row[0] if net_row else 0.0)
-
-                        goods_value = 0.0
-                        for _gpid, _gqty in genesis_lines.items():
-                            # Спочатку шукаємо індивідуальну ціну магазину, потім базову ціну
-                            _price_row = db.execute(
-                                text("""
-                                    SELECT price FROM client_price_overrides
-                                    WHERE client_id = :cid AND product_id = :pid
-                                      AND valid_from <= :d
-                                      AND (valid_to IS NULL OR valid_to >= :d)
-                                    ORDER BY valid_from DESC LIMIT 1
-                                """),
-                                {"cid": shop_client.id, "pid": _gpid, "d": genesis_date},
-                            ).fetchone()
-                            if _price_row is None:
-                                _price_row = db.execute(
-                                    text("""
-                                        SELECT price FROM prices
-                                        WHERE product_id = :pid AND is_active = 1
-                                          AND valid_from <= :d
-                                          AND (valid_to IS NULL OR valid_to >= :d)
-                                        ORDER BY valid_from DESC LIMIT 1
-                                    """),
-                                    {"pid": _gpid, "d": genesis_date},
-                                ).fetchone()
-                            if _price_row is not None:
-                                goods_value += _gqty * float(_price_row[0])
-
-                        if mapping.shop_initial_cash is not None:
-                            initial_cash = float(mapping.shop_initial_cash)
-                        else:
-                            initial_cash = max(0.0, round(-net_balance - goods_value, 2))
-
-                        genesis_rec = ShopReconciliation(
-                            shop_client_id=shop_client.id,
-                            period_from=genesis_date,
-                            period_to=genesis_date,
-                            cash_expected=initial_cash,
-                            cash_actual=initial_cash,
-                            cash_diff=0.0,
-                            closed=1,
-                            closed_at=now_str,
-                            closed_by="import",
-                            created_at=now_str,
-                            rec_type='opening',
-                        )
-                        db.add(genesis_rec)
-                        db.flush()
-                        for pid, qty in genesis_lines.items():
-                            db.add(ShopReconciliationLine(
-                                reconciliation_id=genesis_rec.id,
-                                product_id=pid,
-                                batch_date=None,
-                                opening_balance=0.0,
-                                received=0.0,
-                                entered_balance=qty,
-                                written_off=0.0,
-                                calculated_sold=0.0,
-                                price=None,
-                                expected_cash=0.0,
-                            ))
-                            ep.imported += 1
-                        prev_balance: dict[int, float] = dict(genesis_lines)
-                    else:
-                        prev_balance = {}
-                    # ── Кінець genesis ─────────────────────────────────────────
-
-                    # ── Списання з tblMovements (MoveType = "Списання") ────────
-                    writeoffs_by_date_prod: dict[str, dict[int, float]] = {}
-                    wo_tname = _find_table_for("writeoffs", tables)
-                    if wo_tname:
-                        actual_wo_cols = reader.columns(wo_tname)
-
-                        def _try_col(*cands: str) -> str | None:
-                            return next((c for c in cands if c in actual_wo_cols), None)
-
-                        wo_type_col = _try_col("MoveType")
-                        wo_pid_col  = _try_col("ProductID", "ProductId", "Виріб", "КодВиробу", "Product_ID")
-                        wo_date_col = _try_col("MoveDate", "BalanceDate", "Date", "Дата", "ДатаОперації", "StockDate")
-                        wo_qty_col  = _try_col("Qty", "Quantity", "Amount", "Кількість", "Кіл-ть", "К-сть")
-
-                        if wo_type_col and wo_pid_col and wo_date_col and wo_qty_col:
-                            _wo_total = _wo_type_ok = _wo_date_ok = _wo_pid_ok = _wo_qty_ok = 0
-                            _wo_sample_type: list[str] = []
-                            for row in reader.rows(wo_tname):
-                                _wo_total += 1
-                                raw_type = (_safe_str(row.get(wo_type_col), 50) or "").strip()
-                                if len(_wo_sample_type) < 5 and raw_type not in _wo_sample_type:
-                                    _wo_sample_type.append(raw_type)
-                                if raw_type not in ("Списано", "Списання"):
-                                    continue
-                                _wo_type_ok += 1
-                                d = _safe_date(row.get(wo_date_col))
-                                if not d or d > tr_date:
-                                    continue
-                                _wo_date_ok += 1
-                                pid_raw = row.get(wo_pid_col)
-                                try:
-                                    wo_pid = product_map.get(int(float(pid_raw))) if pid_raw else None
-                                except (ValueError, TypeError):
-                                    wo_pid = None
-                                if not wo_pid:
-                                    continue
-                                _wo_pid_ok += 1
-                                wo_qty = _safe_float(row.get(wo_qty_col)) or 0.0
-                                if wo_qty <= 0:
-                                    continue
-                                _wo_qty_ok += 1
-                                day_wo = writeoffs_by_date_prod.setdefault(d, {})
-                                day_wo[wo_pid] = day_wo.get(wo_pid, 0.0) + wo_qty
-                            _debug_msg = (
-                                f"[DEBUG] tblMovements: всього={_wo_total}, "
-                                f"MoveType ok={_wo_type_ok}, дата ok={_wo_date_ok}, "
-                                f"продукт ok={_wo_pid_ok}, кількість ok={_wo_qty_ok}. "
-                                f"tr_date={tr_date}. product_map_size={len(product_map)}. "
-                                f"Зразки MoveType codepoints: {[[ord(c) for c in s] for s in _wo_sample_type[:3]]}. "
-                                f"writeoffs_by_date_prod: {sum(len(v) for v in writeoffs_by_date_prod.values())} позицій"
-                            )
-                            ep.warnings.append(_debug_msg)
-                            import pathlib as _pl
-                            _pl.Path("C:/Bakery/tmp/import_debug.txt").write_text(_debug_msg, encoding="utf-8")
-                        else:
-                            missing = [n for n, v in [
-                                ("MoveType", wo_type_col), ("ProductID", wo_pid_col),
-                                ("MoveDate", wo_date_col), ("Qty", wo_qty_col),
-                            ] if not v]
-                            ep.warnings.append(
-                                f"tblMovements знайдено, але колонки не розпізнано "
-                                f"({', '.join(missing)} — не знайдено). "
-                                f"Є в таблиці: {', '.join(actual_wo_cols)}"
-                            )
-                    else:
-                        ep.warnings.append("tblMovements не знайдено в базі Access — списання не імпортовано")
-
-                    for date_str in sorted_dates:
-                        day_bal = daily[date_str]
-                        is_last = date_str == last_import_date
-
-                        # Надходження: батьківські замовлення мінус передачі іншим + передачі від інших
-                        parent_recv = (
-                            db.query(Order.product_id, func.sum(Order.qty).label("q"))
-                            .filter(
-                                Order.client_id == shop_client.id,
-                                Order.parent_order_id.is_(None),
-                                Order.order_date == date_str,
-                            )
-                            .group_by(Order.product_id).all()
-                        )
-                        received_day: dict[int, float] = {r[0]: float(r[1] or 0) for r in parent_recv}
-
-                        # Передачі ВІД магазину іншим клієнтам (зменшують received)
-                        shop_parent_ids = [
-                            r[0] for r in db.query(Order.id).filter(
-                                Order.client_id == shop_client.id,
-                                Order.parent_order_id.is_(None),
-                                Order.order_date == date_str,
-                            ).all()
-                        ]
-                        if shop_parent_ids:
-                            out_rows = (
-                                db.query(Order.product_id, func.sum(Order.qty).label("q"))
-                                .filter(Order.parent_order_id.in_(shop_parent_ids))
-                                .group_by(Order.product_id).all()
-                            )
-                            for r in out_rows:
-                                received_day[r[0]] = max(0.0, received_day.get(r[0], 0.0) - float(r[1] or 0))
-
-                        # Передачі НА магазин від інших клієнтів (збільшують received)
-                        in_rows = (
-                            db.query(Order.product_id, func.sum(Order.qty).label("q"))
-                            .filter(
-                                Order.client_id == shop_client.id,
-                                Order.parent_order_id.isnot(None),
-                                Order.order_date == date_str,
-                            )
-                            .group_by(Order.product_id).all()
-                        )
-                        for r in in_rows:
-                            received_day[r[0]] = received_day.get(r[0], 0.0) + float(r[1] or 0)
-
-                        # Остання дата — залишається відкритою (може бути незавершена в старій системі)
-                        recon = ShopReconciliation(
-                            shop_client_id=shop_client.id,
-                            period_from=date_str, period_to=date_str,
-                            cash_expected=0,
-                            closed=0 if is_last else 1,
-                            closed_at=None if is_last else now_str,
-                            closed_by=None if is_last else "import",
-                            created_at=now_str,
-                        )
-                        db.add(recon)
-                        db.flush()
-
-                        day_writeoffs = writeoffs_by_date_prod.get(date_str, {})
-                        all_pids = (set(day_bal) | set(prev_balance)
-                                    | set(received_day) | set(day_writeoffs))
-                        for pid in all_pids:
-                            opening  = prev_balance.get(pid, 0.0)
-                            received = received_day.get(pid, 0.0)
-                            entered  = day_bal.get(pid, 0.0)
-                            wo       = day_writeoffs.get(pid, 0.0)
-                            c_sold   = max(0.0, opening + received - wo - entered)
-                            line = ShopReconciliationLine(
-                                reconciliation_id=recon.id,
-                                product_id=pid,
-                                batch_date=None,
-                                opening_balance=opening,
-                                received=received,
-                                entered_balance=entered,
-                                written_off=wo,
-                                calculated_sold=c_sold,
-                                price=None,
-                                expected_cash=0.0,
-                            )
-                            db.add(line)
-                            if wo > 0:
-                                db.flush()
-                                db.add(ShopDisposalLine(
-                                    reconciliation_line_id=line.id,
-                                    disposal_type="writeoff",
-                                    qty=wo,
-                                    notes="Імпорт з tblMovements",
-                                    created_at=now_str,
-                                ))
-                            ep.imported += 1
-
-                        # Оновлюємо prev_balance для наступного дня
-                        for pid, bal in day_bal.items():
-                            prev_balance[pid] = bal
-
-                    ep.found = len(daily)
-                    if daily:
-                        ep.warnings.append(
-                            f"Остання звірка ({last_import_date}) позначена як ВІДКРИТА — "
-                            "перевірте залишки і закрийте її вручну у вкладці Магазин."
-                        )
-                    wo_days = len(writeoffs_by_date_prod)
-                    if wo_days:
-                        wo_rows = sum(len(v) for v in writeoffs_by_date_prod.values())
-                        ep.warnings.append(
-                            f"Списання з tblMovements: {wo_rows} позицій за {wo_days} дн."
-                        )
-                elif not shop_client:
-                    ep.warnings.append(
-                        "Клієнта-магазин не знайдено (is_own_shop=1 або client_kind='shop')"
-                    )
-            entities["stock"] = ep
 
             # ── Commit ────────────────────────────────────────────────────────
             _update_state(step="Збереження даних", progress=95)
