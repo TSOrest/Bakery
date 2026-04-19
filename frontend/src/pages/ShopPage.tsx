@@ -600,7 +600,22 @@ function ReconciliationCalendar({
   const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
   const todayStr = today.toISOString().slice(0, 10)
 
-  if (recs.length === 0) return null
+  if (recs.length === 0) return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: '1.5rem', flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'flex-start', padding: '0.5rem 0' }}>
+        <div style={{ minWidth: '200px', flex: '0 0 auto' }}>
+          {leftFooter}
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', padding: '2rem' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📋</div>
+            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Звірок ще немає</div>
+            <div style={{ fontSize: '0.82rem' }}>Натисніть «◈ Початковий залишок» щоб розпочати облік</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ ...sectionBox, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
