@@ -24,10 +24,13 @@ interface PosProduct {
   category_name: string | null
   price: number | null
   current_balance: number
+  batch_date: string | null
+  age_days: number | null
 }
 
 interface CartItem {
   product_id: number
+  batch_date: string | null
   name: string
   price: number
   qty: number
@@ -135,13 +138,13 @@ export default function PosPage() {
   const [shopId, setShopId]         = useState<number | null>(null)
   const [products, setProducts]     = useState<PosProduct[]>([])
   const [cart, setCart]             = useState<CartItem[]>([])
-  const [flashIds, setFlashIds]     = useState<Set<number>>(new Set())
+  const [flashIds, setFlashIds]     = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed]   = useState<Set<string>>(new Set())
   const [showPay, setShowPay]       = useState(false)
   const [successAmt, setSuccessAmt] = useState<number | null>(null)
   const [dailyStat, setDailyStat]   = useState<DailyStat>({ receipts: 0, total: 0 })
   const [loading, setLoading]       = useState(true)
-  const flashTimers                 = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+  const flashTimers                 = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   const today = todayStr()
 
@@ -216,38 +219,42 @@ export default function PosPage() {
 
   // ─── Cart ────────────────────────────────────────────────────────
 
+  function cartKey(product_id: number, batch_date: string | null): string {
+    return `${product_id}-${batch_date ?? 'null'}`
+  }
+
   function addToCart(prod: PosProduct) {
     if (!prod.price) return
+    const key = cartKey(prod.product_id, prod.batch_date)
     setCart(prev => {
-      const idx = prev.findIndex(i => i.product_id === prod.product_id)
+      const idx = prev.findIndex(i => cartKey(i.product_id, i.batch_date) === key)
       if (idx >= 0) {
         const updated = [...prev]
         updated[idx] = { ...updated[idx], qty: updated[idx].qty + 1 }
         return updated
       }
-      return [...prev, { product_id: prod.product_id, name: prod.short_name || prod.name, price: prod.price!, qty: 1 }]
+      return [...prev, { product_id: prod.product_id, batch_date: prod.batch_date, name: prod.short_name || prod.name, price: prod.price!, qty: 1 }]
     })
-    // Flash анімація
-    if (flashTimers.current.has(prod.product_id)) {
-      clearTimeout(flashTimers.current.get(prod.product_id)!)
+    if (flashTimers.current.has(key)) {
+      clearTimeout(flashTimers.current.get(key)!)
     }
-    setFlashIds(prev => new Set(prev).add(prod.product_id))
-    flashTimers.current.set(prod.product_id, setTimeout(() => {
-      setFlashIds(prev => { const s = new Set(prev); s.delete(prod.product_id); return s })
+    setFlashIds(prev => new Set(prev).add(key))
+    flashTimers.current.set(key, setTimeout(() => {
+      setFlashIds(prev => { const s = new Set(prev); s.delete(key); return s })
     }, 220))
   }
 
-  function changeQty(product_id: number, delta: number) {
+  function changeQty(key: string, delta: number) {
     setCart(prev => {
       const updated = prev.map(i =>
-        i.product_id === product_id ? { ...i, qty: i.qty + delta } : i
+        cartKey(i.product_id, i.batch_date) === key ? { ...i, qty: i.qty + delta } : i
       ).filter(i => i.qty > 0)
       return updated
     })
   }
 
-  function removeFromCart(product_id: number) {
-    setCart(prev => prev.filter(i => i.product_id !== product_id))
+  function removeFromCart(key: string) {
+    setCart(prev => prev.filter(i => cartKey(i.product_id, i.batch_date) !== key))
   }
 
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0)
@@ -272,7 +279,7 @@ export default function PosPage() {
       await api.post('/shop/sales', {
         shop_client_id: shopId,
         sale_date: today,
-        lines: cart.map(i => ({ product_id: i.product_id, qty: i.qty, price: i.price })),
+        lines: cart.map(i => ({ product_id: i.product_id, qty: i.qty, price: i.price, batch_date: i.batch_date })),
       })
       setSuccessAmt(cartTotal)
       setCart([])
@@ -348,21 +355,31 @@ export default function PosPage() {
                   {isOpen && (
                     <div className={css.productGrid}>
                       {group.products.map(prod => {
-                        const inCart = cart.find(i => i.product_id === prod.product_id)
-                        const isFlash = flashIds.has(prod.product_id)
+                        const key = cartKey(prod.product_id, prod.batch_date)
+                        const inCart = cart.find(i => cartKey(i.product_id, i.batch_date) === key)
+                        const isFlash = flashIds.has(key)
                         const isLow = prod.current_balance <= 2
+                        const isStale = (prod.age_days ?? 0) > 1
                         return (
                           <div
-                            key={prod.product_id}
+                            key={key}
                             className={[
                               css.productCard,
                               inCart ? css.productCardInCart : '',
                               isFlash ? css.productCardFlash : '',
                             ].join(' ')}
+                            style={isStale ? { background: '#f5f5f5' } : undefined}
                             onClick={() => addToCart(prod)}
                           >
                             {inCart && <span className={css.cartBadge}>{inCart.qty}</span>}
-                            <span className={css.productName}>{prod.short_name || prod.name}</span>
+                            <span className={css.productName}>
+                              {prod.short_name || prod.name}
+                              {isStale && prod.age_days != null && (
+                                <span style={{ marginLeft: '4px', fontSize: '0.65em', background: '#e65100', color: '#fff', borderRadius: '8px', padding: '1px 5px' }}>
+                                  {prod.age_days}д
+                                </span>
+                              )}
+                            </span>
                             <span className={css.productPrice}>{fmt(prod.price!)}</span>
                             <span className={`${css.productBalance} ${isLow ? css.productBalanceLow : ''}`}>
                               залишок: {prod.current_balance} шт
@@ -386,18 +403,20 @@ export default function PosPage() {
             {cart.length === 0 ? (
               <div className={css.cartEmpty}>Торкніться товару щоб додати</div>
             ) : (
-              cart.map(item => (
-                <div key={item.product_id} className={css.cartItem}>
+              cart.map(item => {
+                const key = cartKey(item.product_id, item.batch_date)
+                return (
+                <div key={key} className={css.cartItem}>
                   <span className={css.cartItemName}>{item.name}</span>
                   <div className={css.cartQtyControls}>
-                    <button className={css.qtyBtn} onClick={() => changeQty(item.product_id, -1)}>−</button>
+                    <button className={css.qtyBtn} onClick={() => changeQty(key, -1)}>−</button>
                     <span className={css.qtyValue}>{item.qty}</span>
-                    <button className={css.qtyBtn} onClick={() => changeQty(item.product_id, +1)}>+</button>
+                    <button className={css.qtyBtn} onClick={() => changeQty(key, +1)}>+</button>
                   </div>
                   <span className={css.cartItemAmount}>{fmt(item.price * item.qty)}</span>
-                  <button className={css.removeBtn} onClick={() => removeFromCart(item.product_id)}>×</button>
+                  <button className={css.removeBtn} onClick={() => removeFromCart(key)}>×</button>
                 </div>
-              ))
+              )})
             )}
           </div>
 

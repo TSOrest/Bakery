@@ -95,14 +95,15 @@ class ShopReconciliationLine(Base):
 
 
 class ShopDisposalLine(Base):
-    """Рядок розподілу списань у звірці магазину (списання / пайок / передача клієнту)."""
+    """Рядок розподілу списань у звірці магазину (списання / пайок / передача клієнту / продаж поза POS)."""
     __tablename__ = "shop_disposal_lines"
 
     id                     = Column(Integer, primary_key=True, autoincrement=True)
     reconciliation_line_id = Column(Integer, ForeignKey("shop_reconciliation_lines.id"), nullable=False)
-    disposal_type          = Column(Text, nullable=False)  # writeoff | ration | client
+    disposal_type          = Column(Text, nullable=False)  # writeoff | ration | client | sale
     client_id              = Column(Integer, ForeignKey("clients.id"))
     qty                    = Column(Float, nullable=False)
+    price                  = Column(Float)    # ціна продажу (для disposal_type='sale')
     notes                  = Column(Text)
     created_at             = Column(Text)
 
@@ -139,6 +140,7 @@ class ShopSale(Base):
     price           = Column(Float, nullable=False)
     amount          = Column(Float, nullable=False)  # qty * price
     session_id      = Column(Text)                   # UUID: об'єднує позиції одного чека
+    batch_date      = Column(Text)                   # дата партії товару (яку партію продано)
     notes           = Column(Text)
     created_at      = Column(Text)
     created_by      = Column(Text)                   # username продавця

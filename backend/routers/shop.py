@@ -212,7 +212,9 @@ def _get_shop_prices_batch(
 
 def _recalc_line(line: ShopReconciliationLine, from_disposal: bool = False) -> None:
     """Перераховує calculated_sold і expected_cash рядка.
-    Якщо from_disposal=True — спочатку оновлює written_off як суму disposal_lines."""
+    Якщо from_disposal=True — спочатку оновлює written_off як суму disposal_lines.
+    Disposal типу 'sale' (продаж поза POS) входять у written_off, але їх виручка
+    (qty × disposal.price) додається до expected_cash окремо."""
     if from_disposal:
         line.written_off = sum(d.qty for d in line.disposal_lines)
     if line.entered_balance is not None:
@@ -223,8 +225,14 @@ def _recalc_line(line: ShopReconciliationLine, from_disposal: bool = False) -> N
         )
     else:
         line.calculated_sold = None
+    # Виручка від продажу поза POS (disposal_type='sale')
+    sale_disposal_cash = round(
+        sum(d.qty * (d.price or 0) for d in line.disposal_lines if d.disposal_type == 'sale'), 2
+    )
     if line.calculated_sold is not None and line.price is not None:
-        line.expected_cash = round(line.calculated_sold * line.price, 2)
+        line.expected_cash = round(line.calculated_sold * line.price, 2) + sale_disposal_cash
+    elif sale_disposal_cash:
+        line.expected_cash = sale_disposal_cash
     else:
         line.expected_cash = None
 
@@ -500,7 +508,8 @@ def list_reconciliations(
 @router.post("/reconciliations", response_model=ShopReconciliationOut, status_code=201)
 def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(get_db)):
     """
-    Створює нову звірку і автоматично заповнює рядки:
+    Ідемпотентний: якщо є відкрита звірка для цього магазину — повертає її.
+    Інакше створює нову і автоматично заповнює рядки:
     - відкриваючий залишок з попередньої закритої звірки
     - надходження з випічки (origin_id=0) і ззовні (shop_receipts)
     - ціну з client_price_overrides або базових цін
@@ -508,6 +517,19 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
     shop = db.get(Client, data.shop_client_id)
     if not shop or shop.client_kind != "shop":
         raise HTTPException(status_code=400, detail="Вказаний клієнт не є магазином")
+
+    # Якщо вже є відкрита — повернути без дублювання
+    existing = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == data.shop_client_id,
+            ShopReconciliation.closed == 0,
+        )
+        .first()
+    )
+    if existing:
+        _enrich_rec_in_memory(db, existing)
+        return existing
 
     rec = ShopReconciliation(
         shop_client_id=data.shop_client_id,
@@ -1114,16 +1136,19 @@ def add_disposal(
     if not line:
         raise HTTPException(status_code=404, detail="Рядок не знайдено")
 
-    if body.disposal_type not in ("writeoff", "ration", "client"):
+    if body.disposal_type not in ("writeoff", "ration", "client", "sale"):
         raise HTTPException(status_code=422, detail="Невірний тип розподілу")
     if body.disposal_type == "client" and not body.client_id:
         raise HTTPException(status_code=422, detail="Для типу 'клієнт' треба вказати client_id")
+    if body.disposal_type == "sale" and not body.price:
+        raise HTTPException(status_code=422, detail="Для типу 'продаж' треба вказати ціну")
 
     disposal = ShopDisposalLine(
         reconciliation_line_id=line_id,
         disposal_type=body.disposal_type,
         client_id=body.client_id,
         qty=body.qty,
+        price=body.price,
         notes=body.notes,
         created_at=datetime.now().isoformat(),
     )
@@ -1200,6 +1225,18 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db)):
     r = db.get(ShopReceipt, receipt_id)
     if not r:
         raise HTTPException(status_code=404, detail="Надходження не знайдено")
+    # Блокування: не можна видаляти надходження у закритому діапазоні
+    last_closed = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == r.shop_client_id,
+            ShopReconciliation.closed == 1,
+        )
+        .order_by(ShopReconciliation.period_to.desc())
+        .first()
+    )
+    if last_closed and r.receipt_date <= last_closed.period_to:
+        raise HTTPException(status_code=409, detail="Надходження у закритому діапазоні — видалення заборонено")
     db.delete(r)
     db.commit()
 
@@ -1273,79 +1310,106 @@ def delete_stock_in(stock_in_id: int, db: Session = Depends(get_db)):
 @router.get("/pos/products", response_model=List[PosProductRow])
 def pos_products(shop_client_id: int, date: str, db: Session = Depends(get_db)):
     """
-    Список товарів для POS-інтерфейсу з поточним балансом і ціною.
+    Список товарів для POS-інтерфейсу по партіях (product_id, batch_date).
+    Відкрита звірка або остання закрита визначає залишок кожної партії.
     """
-    # Поточний стан по товарах — беремо з summary-логіки
-    last_rec: Optional[ShopReconciliation] = (
+    from datetime import date as _date_type
+
+    # Знайти відкриту звірку (або останню закриту як базу)
+    open_rec: Optional[ShopReconciliation] = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == shop_client_id,
+            ShopReconciliation.closed == 0,
+        )
+        .first()
+    )
+    base_rec: Optional[ShopReconciliation] = open_rec or (
         db.query(ShopReconciliation)
         .filter(ShopReconciliation.shop_client_id == shop_client_id)
         .order_by(ShopReconciliation.period_to.desc())
         .first()
     )
-    if last_rec:
-        period_from = last_rec.period_from
-        period_to   = last_rec.period_to if last_rec.closed else date
-    else:
-        period_from = date
-        period_to   = date
+    period_from = base_rec.period_from if base_rec else date
 
-    bakery  = _received_from_bakery(db, shop_client_id, period_from, period_to)
-    ext     = _received_from_receipts(db, shop_client_id, period_from, period_to)
-    inv     = _received_from_invoices(db, shop_client_id, period_from, period_to)
-    all_pids = set(bakery) | set(ext) | set(inv)
-    if last_rec:
-        all_pids |= {ln.product_id for ln in last_rec.lines}
-
-    # POS-продажі за сьогодні (вже зняті з залишку)
+    # POS-продажі за поточний сеанс (від period_from до сьогодні) по (product_id, batch_date)
     pos_sold_rows = (
-        db.query(ShopSale.product_id, func.sum(ShopSale.qty).label("total"))
-        .filter(ShopSale.shop_client_id == shop_client_id, ShopSale.sale_date == date)
-        .group_by(ShopSale.product_id)
+        db.query(ShopSale.product_id, ShopSale.batch_date, func.sum(ShopSale.qty).label("total"))
+        .filter(
+            ShopSale.shop_client_id == shop_client_id,
+            ShopSale.sale_date >= period_from,
+            ShopSale.sale_date <= date,
+        )
+        .group_by(ShopSale.product_id, ShopSale.batch_date)
         .all()
     )
-    pos_sold = {r.product_id: float(r.total) for r in pos_sold_rows}
+    pos_sold: dict[tuple[int, str | None], float] = {
+        (r.product_id, r.batch_date): float(r.total) for r in pos_sold_rows
+    }
 
+    today = _date_type.fromisoformat(date)
     rows = []
-    for pid in sorted(all_pids):
-        product = db.get(Product, pid)
-        if not product or not product.is_active:
-            continue
-        opening = 0.0
-        if last_rec and last_rec.closed:
-            opening = sum(ln.entered_balance or 0 for ln in last_rec.lines if ln.product_id == pid)
-        elif not last_rec:
-            opening = (product.initial_stock or 0)
-        received = bakery.get(pid, 0) + ext.get(pid, 0) + inv.get(pid, 0)
-        sold = 0.0
-        if last_rec:
-            sold = sum((ln.calculated_sold or 0) for ln in last_rec.lines if ln.product_id == pid)
-        # Поточний залишок зменшується на POS-продажі сьогоднішнього дня
-        current = max(0.0, opening + received - sold - pos_sold.get(pid, 0))
-        price = _get_shop_price(db, shop_client_id, pid, date)
+    if base_rec:
+        for ln in base_rec.lines:
+            product = db.get(Product, ln.product_id)
+            if not product or not product.is_active:
+                continue
+            # Залишок партії = (entering balance або opening+received) мінус POS-продажі цієї партії
+            if base_rec.closed:
+                batch_balance = ln.entered_balance or 0
+            else:
+                batch_balance = (ln.opening_balance or 0) + (ln.received or 0)
+            batch_balance = max(0.0, batch_balance - pos_sold.get((ln.product_id, ln.batch_date), 0))
+            if batch_balance <= 0:
+                continue
 
-        # Категорія
-        cat_id = product.category_id
-        cat_name = None
-        if cat_id:
-            cat = db.get(Category, cat_id)
-            cat_name = cat.name if cat else None
+            price = _get_shop_price(db, shop_client_id, ln.product_id, date)
+            # Для старих партій підказка ціни — остання ціна реалізації
+            age_days: Optional[int] = None
+            if ln.batch_date:
+                age_days = (today - _date_type.fromisoformat(ln.batch_date)).days
+                if age_days > 0 and not price:
+                    # Шукаємо останній sale-disposal для цього продукту
+                    last_sale_d = (
+                        db.query(ShopDisposalLine)
+                        .join(ShopReconciliationLine)
+                        .filter(
+                            ShopReconciliationLine.product_id == ln.product_id,
+                            ShopDisposalLine.disposal_type == 'sale',
+                            ShopDisposalLine.price.isnot(None),
+                        )
+                        .order_by(ShopDisposalLine.id.desc())
+                        .first()
+                    )
+                    if last_sale_d:
+                        price = last_sale_d.price
 
-        rows.append(PosProductRow(
-            product_id=pid,
-            name=product.name,
-            short_name=product.short_name,
-            category_id=cat_id,
-            category_name=cat_name,
-            price=price,
-            current_balance=current,
-        ))
+            cat_id = product.category_id
+            cat_name = None
+            if cat_id:
+                cat = db.get(Category, cat_id)
+                cat_name = cat.name if cat else None
+
+            rows.append(PosProductRow(
+                product_id=ln.product_id,
+                name=product.name,
+                short_name=product.short_name,
+                category_id=cat_id,
+                category_name=cat_name,
+                price=price,
+                current_balance=batch_balance,
+                batch_date=ln.batch_date,
+                age_days=age_days,
+            ))
+    # Сортуємо: по product_id, потім NULL-партії після нових (старіші — нижче)
+    rows.sort(key=lambda r: (r.product_id, r.batch_date is None, r.batch_date or ''))
     return rows
 
 
 def _build_sale_out(session_id: str, lines: list[ShopSale]) -> ShopSaleOut:
     """Зібрати ShopSaleOut з рядків одного session_id."""
     line_outs = [
-        ShopSaleLineOut(id=ln.id, product_id=ln.product_id, qty=ln.qty, price=ln.price, amount=ln.amount)
+        ShopSaleLineOut(id=ln.id, product_id=ln.product_id, qty=ln.qty, price=ln.price, amount=ln.amount, batch_date=ln.batch_date)
         for ln in lines
     ]
     first = lines[0]
@@ -1380,6 +1444,7 @@ def create_sale(
             price=ln.price,
             amount=round(ln.qty * ln.price, 4),
             session_id=session_id,
+            batch_date=ln.batch_date,
             notes=data.notes,
             created_at=now,
             created_by=current_user.username,

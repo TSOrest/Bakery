@@ -17,6 +17,7 @@ interface DisposalLine {
   disposal_type: string
   client_id: number | null
   qty: number
+  price: number | null
   notes: string | null
 }
 
@@ -247,7 +248,7 @@ function ShopTabContent({
         onClick={() => setShowRecModal(true)}
         style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.35rem' }}
       >
-        Відкрити звірку
+        Звірка →
       </button>
       {!hasOpeningRec && (
         <button
@@ -1033,26 +1034,45 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
   workDate: string
   onClose: () => void
 }) {
-  const [recs, setRecs]           = useState<Reconciliation[]>([])
-  const [activeRec, setActiveRec] = useState<Reconciliation | null>(null)
-  const [creating, setCreating]   = useState(false)
-  const [cashActual, setCashActual] = useState('')
+  const [activeRec, setActiveRec]       = useState<Reconciliation | null>(null)
+  const [initializing, setInitializing] = useState(true)
+  const [cashActual, setCashActual]     = useState('')
   const [confirmNotes, setConfirmNotes] = useState('')
-  const [saving, setSaving]         = useState(false)
-  const [products, setProducts]     = useState<{ id: number; name: string }[]>([])
-  const [clients, setClients]       = useState<ClientOption[]>([])
-  // POS-продажі за день звірки
-  const [posSales, setPosSales]     = useState<Record<number, { qty: number; amount: number }>>({})
-  const posTotalRef                 = useRef(0)
+  const [saving, setSaving]             = useState(false)
+  const [products, setProducts]         = useState<{ id: number; name: string }[]>([])
+  const [clients, setClients]           = useState<ClientOption[]>([])
+  const [posSales, setPosSales]         = useState<Record<number, { qty: number; amount: number }>>({})
+  const posTotalRef                     = useRef(0)
 
-  const loadRecs = async () => {
-    const list = await api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}`)
-    setRecs(list)
-    if (list.length > 0 && !activeRec) setActiveRec(list[0])
+  // Авто-відкриття: знайти відкриту звірку або POST ідемпотентний
+  const initRec = async () => {
+    setInitializing(true)
+    try {
+      const list = await api.get<Reconciliation[]>(
+        `/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`
+      )
+      const open = list.find((r) => !r.closed && r.rec_type !== 'opening')
+      if (open) {
+        const full = await api.get<Reconciliation>(`/shop/reconciliations/${open.id}`)
+        setActiveRec(full)
+      } else {
+        // Обчислити period_from як день після останньої закритої
+        const lastClosed = list.filter((r) => r.closed).sort((a, b) => b.period_to.localeCompare(a.period_to))[0]
+        const periodFrom = lastClosed
+          ? (() => { const d = new Date(lastClosed.period_to); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
+          : workDate
+        const rec = await api.post<Reconciliation>('/shop/reconciliations', {
+          shop_client_id: shopId, period_from: periodFrom, period_to: workDate,
+        })
+        setActiveRec(rec)
+      }
+    } finally {
+      setInitializing(false)
+    }
   }
 
   useEffect(() => {
-    loadRecs()
+    initRec()
     api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
     api.get<{ id: number; full_name: string; short_name: string | null; client_kind: string }[]>(
       '/clients/?active_only=true'
@@ -1064,14 +1084,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
           .sort((a, b) => a.label.localeCompare(b.label, 'uk'))
       )
     )
-  }, [shopId])
-
-  useEffect(() => {
-    if (activeRec) {
-      const fresh = recs.find((r) => r.id === activeRec.id)
-      if (fresh) setActiveRec(fresh)
-    }
-  }, [recs])
+  }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Завантаження POS-продажів для дати звірки
   useEffect(() => {
@@ -1092,36 +1105,11 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
       }
       posTotalRef.current = total
       setPosSales(agg)
-      // Prefill cash_actual якщо поле порожнє і звірка відкрита
       if (!activeRec.closed && cashActual === '' && total > 0) {
         setCashActual(total.toFixed(2))
       }
     }).catch(() => {})
   }, [activeRec?.id, activeRec?.period_to]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Авто-обчислення дат нової звірки
-  const lastClosedRec = recs.find((r) => r.closed)
-  const hasOpenRec    = recs.some((r) => !r.closed)
-  const newPeriodTo   = workDate
-  const newPeriodFrom = (() => {
-    if (lastClosedRec) {
-      const d = new Date(lastClosedRec.period_to)
-      d.setDate(d.getDate() + 1)
-      return d.toISOString().slice(0, 10)
-    }
-    return workDate
-  })()
-
-  const handleCreate = async () => {
-    setCreating(true)
-    try {
-      const rec = await api.post<Reconciliation>('/shop/reconciliations', {
-        shop_client_id: shopId, period_from: newPeriodFrom, period_to: newPeriodTo,
-      })
-      await loadRecs()
-      setActiveRec(rec)
-    } finally { setCreating(false) }
-  }
 
   const handleRefreshReceived = async () => {
     if (!activeRec) return
@@ -1129,7 +1117,6 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
       `/shop/reconciliations/${activeRec.id}/refresh-received`, {}
     )
     setActiveRec(updated)
-    await loadRecs()
   }
 
   const handleLineUpdate = async (
@@ -1143,22 +1130,20 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     setActiveRec((prev) =>
       prev ? { ...prev, lines: prev.lines.map((l) => l.id === updated.id ? updated : l) } : prev
     )
-    await loadRecs()
   }
 
   const handleAddDisposal = async (
     lineId: number, disposal_type: string, qty: number,
-    client_id: number | null, notes: string,
+    client_id: number | null, notes: string, price: number | null = null,
   ) => {
     if (!activeRec) return
     const updated = await api.post<RecLine>(
       `/shop/reconciliations/${activeRec.id}/lines/${lineId}/disposals`,
-      { disposal_type, qty, client_id: client_id ?? null, notes: notes || null },
+      { disposal_type, qty, client_id: client_id ?? null, notes: notes || null, price: price ?? null },
     )
     setActiveRec((prev) =>
       prev ? { ...prev, lines: prev.lines.map((l) => l.id === updated.id ? updated : l) } : prev
     )
-    await loadRecs()
   }
 
   const handleDeleteDisposal = async (lineId: number, disposalId: number) => {
@@ -1168,7 +1153,6 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     )
     const freshRec = await api.get<Reconciliation>(`/shop/reconciliations/${activeRec.id}`)
     setActiveRec(freshRec)
-    await loadRecs()
   }
 
   const handleConfirm = async () => {
@@ -1181,7 +1165,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
         { cash_actual: cashActual !== '' ? Number(cashActual) : null, notes: confirmNotes || null },
       )
       setActiveRec(confirmed)
-      await loadRecs()
+      // Після закриття — авто-відкрити нову
+      setTimeout(() => initRec(), 300)
     } finally { setSaving(false) }
   }
 
@@ -1190,7 +1175,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     if (!confirm('Видалити цю звірку?')) return
     await api.delete(`/shop/reconciliations/${activeRec.id}`)
     setActiveRec(null)
-    await loadRecs()
+    onClose()
   }
 
   const productName = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
@@ -1199,90 +1184,49 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     <div style={overlayStyle} >
       <div style={modalStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h3 style={{ margin: 0, color: '#1a3a5c' }}>🏪 {shopName} — Звірка</h3>
-          <button onClick={onClose} style={closeBtnStyle}>✕</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <h3 style={{ margin: 0, color: '#1a3a5c' }}>🏪 {shopName}</h3>
+            {activeRec && (
+              <>
+                <span style={{ color: '#999', fontSize: '0.9rem' }}>
+                  {activeRec.period_from === activeRec.period_to
+                    ? activeRec.period_from
+                    : `${activeRec.period_from} – ${activeRec.period_to}`}
+                </span>
+                {activeRec.closed
+                  ? <span style={badgeClosed}>Закрита</span>
+                  : <span style={badgeOpen}>Відкрита</span>}
+              </>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+            {activeRec && !activeRec.closed && (
+              <button onClick={handleRefreshReceived} style={secondaryBtn} title="Оновити дані надходжень">⟳ Оновити</button>
+            )}
+            {activeRec && activeRec.closed && (
+              <button onClick={handleDelete} style={delBtn}>Видалити</button>
+            )}
+            <button onClick={onClose} style={closeBtnStyle}>✕</button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '1.25rem', height: 'calc(100% - 56px)', overflow: 'hidden' }}>
-
-          {/* ── Ліва панель ────────────────────────────────────────────────── */}
-          <div style={{ width: '180px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem', overflowY: 'auto' }}>
-            <div style={sectionBox}>
-              <div style={sectionTitle}>Нова звірка</div>
-              {hasOpenRec ? (
-                <div style={{ fontSize: '0.78rem', color: '#b45309', lineHeight: 1.5 }}>
-                  Закрийте поточну звірку перед створенням нової
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize: '0.78rem', color: '#555', marginBottom: '0.4rem' }}>
-                    {newPeriodFrom === newPeriodTo
-                      ? newPeriodFrom
-                      : `${newPeriodFrom} – ${newPeriodTo}`}
-                  </div>
-                  <button onClick={handleCreate} disabled={creating} style={primaryBtn}>
-                    {creating ? '…' : '+ Створити'}
-                  </button>
-                </>
-              )}
-            </div>
-
-            {recs.length > 0 && (
-              <div style={sectionBox}>
-                <div style={sectionTitle}>Попередні</div>
-                {recs.map((r) => (
-                  <button key={r.id} onClick={() => setActiveRec(r)} style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '0.35rem 0.5rem',
-                    background: activeRec?.id === r.id ? '#e8eef5' : 'transparent',
-                    border: '1px solid ' + (activeRec?.id === r.id ? '#1a3a5c' : '#e0e0e0'),
-                    borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', marginBottom: '0.3rem',
-                  }}>
-                    <div style={{ fontWeight: 600 }}>{r.period_from === r.period_to ? r.period_from : `${r.period_from} – ${r.period_to}`}</div>
-                    <div style={{ color: r.closed ? '#2e7d32' : '#b45309', fontSize: '0.72rem' }}>
-                      {r.closed ? '✓ Закрита' : '○ Відкрита'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-          </div>
-
-          {/* ── Права панель ───────────────────────────────────────────────── */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {!activeRec ? (
-              <div style={{ color: '#aaa', padding: '2rem', textAlign: 'center' }}>Оберіть або створіть звірку</div>
-            ) : (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                      {activeRec.period_from === activeRec.period_to
-                        ? activeRec.period_from
-                        : `${activeRec.period_from} – ${activeRec.period_to}`}
-                    </span>
-                    {activeRec.closed
-                      ? <span style={{ ...badgeClosed, marginLeft: '0.5rem' }}>Закрита</span>
-                      : <span style={{ ...badgeOpen, marginLeft: '0.5rem' }}>Відкрита</span>}
-                  </div>
-                  {!activeRec.closed && (
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <button onClick={handleRefreshReceived} style={secondaryBtn} title="Оновити дані надходжень">⟳ Оновити</button>
-                      <button onClick={handleDelete} style={delBtn}>Видалити</button>
-                    </div>
-                  )}
-                </div>
-
-                <ReconciliationTable
-                  rec={activeRec}
-                  clients={clients}
-                  productName={productName}
-                  workDate={workDate}
-                  posSales={posSales}
-                  onUpdate={handleLineUpdate}
-                  onAddDisposal={handleAddDisposal}
-                  onDeleteDisposal={handleDeleteDisposal}
-                />
+        <div style={{ height: 'calc(100% - 56px)', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {initializing ? (
+            <div style={{ color: '#999', padding: '2rem', textAlign: 'center' }}>Завантаження звірки…</div>
+          ) : !activeRec ? (
+            <div style={{ color: '#aaa', padding: '2rem', textAlign: 'center' }}>Звірку не знайдено</div>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <ReconciliationTable
+                rec={activeRec}
+                clients={clients}
+                productName={productName}
+                workDate={workDate}
+                posSales={posSales}
+                onUpdate={handleLineUpdate}
+                onAddDisposal={handleAddDisposal}
+                onDeleteDisposal={handleDeleteDisposal}
+              />
 
                 {/* Каса */}
                 <div style={{ ...sectionBox, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -1343,9 +1287,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
                     <div style={{ fontSize: '0.85rem', color: '#555' }}>Примітка: {activeRec.notes}</div>
                   )}
                 </div>
-              </>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1358,6 +1301,7 @@ const DISPOSAL_LABELS: Record<string, string> = {
   writeoff: 'Списання',
   ration:   'Пайок',
   client:   'До клієнта',
+  sale:     'Продано поза POS',
 }
 
 function calcAgeDays(batchDate: string | null, workDate: string): number | null {
@@ -1377,15 +1321,16 @@ function ReconciliationTable({
   workDate: string
   posSales: Record<number, { qty: number; amount: number }>
   onUpdate: (lineId: number, field: 'entered_balance' | 'price', value: string) => void
-  onAddDisposal: (lineId: number, type: string, qty: number, clientId: number | null, notes: string) => Promise<void>
+  onAddDisposal: (lineId: number, type: string, qty: number, clientId: number | null, notes: string, price?: number | null) => Promise<void>
   onDeleteDisposal: (lineId: number, disposalId: number) => Promise<void>
 }) {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
   const [disposalOpen, setDisposalOpen]   = useState<number | null>(null)
   const [expandedLines, setExpandedLines] = useState<Set<number>>(new Set())
-  const [dispType, setDispType]           = useState<'writeoff' | 'ration' | 'client'>('writeoff')
+  const [dispType, setDispType]           = useState<'writeoff' | 'ration' | 'client' | 'sale'>('writeoff')
   const [dispQty, setDispQty]             = useState('')
+  const [dispPrice, setDispPrice]         = useState('')
   const [dispClientId, setDispClientId]   = useState<number | null>(null)
   const [dispNotes, setDispNotes]         = useState('')
   const [dispSaving, setDispSaving]       = useState(false)
@@ -1399,9 +1344,10 @@ function ReconciliationTable({
 
   const openDisposal = (lineId: number) => {
     setDisposalOpen(lineId)
-    setExpandedLines((prev) => new Set(prev).add(lineId))  // автоматично розгортаємо
+    setExpandedLines((prev) => new Set(prev).add(lineId))
     setDispType('writeoff')
     setDispQty('')
+    setDispPrice('')
     setDispClientId(null)
     setDispNotes('')
   }
@@ -1410,10 +1356,13 @@ function ReconciliationTable({
     const qty = parseFloat(dispQty)
     if (!qty || qty <= 0) return
     if (dispType === 'client' && !dispClientId) return
+    if (dispType === 'sale' && !dispPrice) return
     setDispSaving(true)
     try {
-      await onAddDisposal(lineId, dispType, qty, dispType === 'client' ? dispClientId : null, dispNotes)
+      const price = dispType === 'sale' ? (parseFloat(dispPrice) || null) : null
+      await onAddDisposal(lineId, dispType, qty, dispType === 'client' ? dispClientId : null, dispNotes, price)
       setDispQty('')
+      setDispPrice('')
       setDispNotes('')
     } finally { setDispSaving(false) }
   }
@@ -1445,15 +1394,12 @@ function ReconciliationTable({
             <Th right>Залишок</Th>
             <Th right>Списано</Th>
             <Th right>Продано</Th>
-            <Th right>Ціна</Th>
             <Th right>Сума</Th>
           </tr>
         </thead>
         <tbody>
           {lines.map((line, idx) => {
             const available      = line.opening_balance + line.received
-            const balIdx         = idx * 2
-            const priceIdx       = idx * 2 + 1
             const ageDays        = calcAgeDays(line.batch_date, workDate)
             const isDisposalOpen = disposalOpen === line.id
             // POS-інфо показуємо лише в першому рядку для кожного продукту
@@ -1486,12 +1432,12 @@ function ReconciliationTable({
                   <Td right><strong>{available.toFixed(1)}</strong></Td>
                   <Td right>
                     <StreamInput
-                      ref={(el) => { inputRefs.current[balIdx] = el }}
+                      ref={(el) => { inputRefs.current[idx] = el }}
                       value={line.entered_balance ?? ''}
                       disabled={disabled}
                       placeholder="введіть"
                       onCommit={(v) => onUpdate(line.id, 'entered_balance', v)}
-                      onKeyDown={(e) => handleKey(e, priceIdx)}
+                      onKeyDown={(e) => handleKey(e, idx + 1)}
                     />
                   </Td>
 
@@ -1517,7 +1463,7 @@ function ReconciliationTable({
                       {!disabled && (
                         <button
                           onClick={() => isDisposalOpen ? setDisposalOpen(null) : openDisposal(line.id)}
-                          title="Додати списання"
+                          title="Додати розподіл"
                           style={{
                             padding: '1px 5px', fontSize: '0.72rem', lineHeight: '1.4',
                             background: isDisposalOpen ? '#1a3a5c' : '#f0f4f8',
@@ -1535,17 +1481,6 @@ function ReconciliationTable({
                     </strong>
                   </Td>
                   <Td right>
-                    <StreamInput
-                      ref={(el) => { inputRefs.current[priceIdx] = el }}
-                      value={line.price ?? ''}
-                      disabled={disabled}
-                      placeholder="0.00"
-                      onCommit={(v) => onUpdate(line.id, 'price', v)}
-                      onKeyDown={(e) => handleKey(e, balIdx + 2)}
-                      step="0.01"
-                    />
-                  </Td>
-                  <Td right>
                     {line.expected_cash != null && line.expected_cash > 0
                       ? line.expected_cash.toFixed(2)
                       : '—'}
@@ -1554,22 +1489,27 @@ function ReconciliationTable({
 
                 {/* ── Рядки disposal (розгорнуті) ── */}
                 {expandedLines.has(line.id) && line.disposal_lines.map((d) => (
-                  <tr key={`d-${d.id}`} style={{ background: '#fff8f0', borderLeft: '2px solid #e8c090' }}>
-                    <td colSpan={4} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#999', fontSize: '0.78rem' }}>
+                  <tr key={`d-${d.id}`} style={{ background: d.disposal_type === 'sale' ? '#f0faf0' : '#fff8f0', borderLeft: `2px solid ${d.disposal_type === 'sale' ? '#86efac' : '#e8c090'}` }}>
+                    <td colSpan={4} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#777', fontSize: '0.78rem' }}>
                       <span style={{ marginRight: '0.3rem', color: '#ccc' }}>└</span>
                       {DISPOSAL_LABELS[d.disposal_type] ?? d.disposal_type}
                       {d.client_id && (
                         <span style={{ marginLeft: '0.3rem' }}>→ {clientLabel(d.client_id)}</span>
                       )}
+                      {d.disposal_type === 'sale' && d.price != null && (
+                        <span style={{ marginLeft: '0.3rem', color: '#2e7d32', fontWeight: 600 }}>@ {d.price.toFixed(2)} грн</span>
+                      )}
                       {d.notes && (
-                        <span style={{ marginLeft: '0.3rem', fontStyle: 'italic' }}>{d.notes}</span>
+                        <span style={{ marginLeft: '0.3rem', fontStyle: 'italic', color: '#aaa' }}>{d.notes}</span>
                       )}
                     </td>
                     <td style={tdStyle} />
                     <td style={{ ...tdStyle, textAlign: 'right', color: '#c62828', fontSize: '0.8rem' }}>
                       {d.qty.toFixed(1)}
                     </td>
-                    <td colSpan={2} style={tdStyle} />
+                    <td style={{ ...tdStyle, textAlign: 'right', color: '#2e7d32', fontSize: '0.8rem' }}>
+                      {d.disposal_type === 'sale' && d.price != null ? (d.qty * d.price).toFixed(2) : ''}
+                    </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {!disabled && (
                         <button onClick={() => onDeleteDisposal(line.id, d.id)}
@@ -1582,17 +1522,18 @@ function ReconciliationTable({
                 {/* ── Inline форма додавання disposal ── */}
                 {isDisposalOpen && !disabled && (
                   <tr style={{ background: '#f0f6ff', borderLeft: '3px solid #1a3a5c' }}>
-                    <td colSpan={9} style={{ padding: '0.5rem 0.7rem' }}>
+                    <td colSpan={8} style={{ padding: '0.5rem 0.7rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 600 }}>Тип:</span>
                         <select
                           value={dispType}
-                          onChange={(e) => setDispType(e.target.value as 'writeoff' | 'ration' | 'client')}
+                          onChange={(e) => setDispType(e.target.value as 'writeoff' | 'ration' | 'client' | 'sale')}
                           style={{ ...inputStyle, width: 'auto', padding: '0.2rem 0.4rem' }}
                         >
                           <option value="writeoff">Списання</option>
                           <option value="ration">Пайок</option>
                           <option value="client">До клієнта</option>
+                          <option value="sale">Продано поза POS</option>
                         </select>
 
                         {dispType === 'client' && (
@@ -1606,6 +1547,18 @@ function ReconciliationTable({
                               <option value="">— оберіть клієнта —</option>
                               {clients.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                             </select>
+                          </>
+                        )}
+
+                        {dispType === 'sale' && (
+                          <>
+                            <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 600 }}>Ціна:</span>
+                            <input
+                              type="number" min="0.01" step="0.01" value={dispPrice}
+                              onChange={(e) => setDispPrice(e.target.value)}
+                              placeholder="0.00"
+                              style={{ ...inputStyle, width: '80px', padding: '0.2rem 0.4rem' }}
+                            />
                           </>
                         )}
 
@@ -1623,7 +1576,7 @@ function ReconciliationTable({
                         />
                         <button
                           onClick={() => handleAddDisposal(line.id)}
-                          disabled={dispSaving || !dispQty || (dispType === 'client' && !dispClientId)}
+                          disabled={dispSaving || !dispQty || (dispType === 'client' && !dispClientId) || (dispType === 'sale' && !dispPrice)}
                           style={{ ...primaryBtn, padding: '0.25rem 0.75rem', fontSize: '0.82rem' }}
                         >{dispSaving ? '…' : 'Додати'}</button>
                         <button onClick={() => setDisposalOpen(null)}
@@ -1639,9 +1592,8 @@ function ReconciliationTable({
         </tbody>
         <tfoot>
           <tr style={{ background: '#f0f4f8', fontWeight: 700 }}>
-            <td colSpan={6} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
+            <td colSpan={5} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
             <td style={{ ...tdStyle, textAlign: 'right' }}>{totalSold.toFixed(1)}</td>
-            <td style={tdStyle} />
             <td style={{ ...tdStyle, textAlign: 'right', color: '#b45309' }}>{totalCash.toFixed(2)} грн</td>
           </tr>
         </tfoot>

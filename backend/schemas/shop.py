@@ -48,9 +48,10 @@ class OtherStockInOut(BaseModel):
 # ─── Нові схеми (ShopReconciliation) ──────────────────────────────────────────
 
 class ShopDisposalLineCreate(BaseModel):
-    disposal_type: str  # writeoff | ration | client
+    disposal_type: str  # writeoff | ration | client | sale
     client_id: Optional[int] = None
     qty: float
+    price: Optional[float] = None   # для disposal_type='sale' — ціна продажу
     notes: Optional[str] = None
 
 
@@ -61,6 +62,7 @@ class ShopDisposalLineOut(BaseModel):
     disposal_type: str
     client_id: Optional[int]
     qty: float
+    price: Optional[float]
     notes: Optional[str]
 
 
@@ -180,6 +182,7 @@ class ShopSaleLineIn(BaseModel):
     product_id: int
     qty: float
     price: float
+    batch_date: Optional[str] = None   # яку партію продано (дата надходження)
 
 
 class ShopSaleCreate(BaseModel):
@@ -197,6 +200,7 @@ class ShopSaleLineOut(BaseModel):
     qty: float
     price: float
     amount: float
+    batch_date: Optional[str] = None
 
 
 class ShopSaleOut(BaseModel):
@@ -217,6 +221,8 @@ class PosProductRow(BaseModel):
     category_name: Optional[str]
     price: Optional[float]
     current_balance: float
+    batch_date: Optional[str] = None    # дата партії (None = стара без дати)
+    age_days: Optional[int] = None      # кількість днів з моменту надходження
 
 
 class ShopSummaryProductRow(BaseModel):
