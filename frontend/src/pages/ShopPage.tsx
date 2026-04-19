@@ -435,6 +435,15 @@ function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
   const [cashVal, setCashVal]     = useState('')
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState<string | null>(null)
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+
+  const handleQtyKey = (e: React.KeyboardEvent<HTMLInputElement>, idx: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const next = inputRefs.current[idx + 1]
+      if (next) { next.focus(); next.select() }
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -501,13 +510,16 @@ function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
+              {products.map((p, idx) => (
                 <tr key={p.id}>
                   <td style={miniTd}>{p.name}</td>
                   <td style={{ ...miniTd, textAlign: 'right' }}>
                     <input type="number" min="0" step="0.001" placeholder="0"
+                      ref={(el) => { inputRefs.current[idx] = el }}
                       value={qtys[p.id] ?? ''}
                       onChange={(e) => setQtys((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                      onKeyDown={(e) => handleQtyKey(e, idx)}
+                      onFocus={(e) => e.currentTarget.select()}
                       style={{ ...inputStyle, width: '80px', textAlign: 'right' }}
                     />
                   </td>
