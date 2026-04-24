@@ -7,6 +7,7 @@
   "background_color": "#1e293b",
   "theme_color": "#131c2e",
   "orientation": "any",
+  "launch_handler": { "client_mode": "focus-existing" },
   "icons": [
     {
       "src": "/pos-favicon.svg",

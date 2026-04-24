@@ -6,6 +6,7 @@
   "display": "standalone",
   "background_color": "#1a3a5c",
   "theme_color": "#122840",
+  "launch_handler": { "client_mode": "focus-existing" },
   "icons": [
     {
       "src": "/favicon.svg",
