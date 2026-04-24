@@ -1,0 +1,17 @@
+{
+  "name": "Пекарня",
+  "short_name": "Пекарня",
+  "description": "Система управління пекарнею",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#c8521a",
+  "theme_color": "#c8521a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

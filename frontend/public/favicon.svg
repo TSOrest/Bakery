@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Фон — кругле тепле коло -->
+  <circle cx="32" cy="32" r="32" fill="#c8521a"/>
+  <!-- Тіло хліба -->
+  <ellipse cx="32" cy="37" rx="20" ry="13" fill="#f5c07a"/>
+  <!-- Верхня скоринка — купол -->
+  <ellipse cx="32" cy="27" rx="18" ry="11" fill="#e8924a"/>
+  <!-- Блиск на скоринці -->
+  <ellipse cx="26" cy="23" rx="5" ry="3" fill="#f5c07a" opacity="0.45"/>
+  <!-- Надрізи -->
+  <line x1="24" y1="30" x2="28" y2="24" stroke="#c8521a" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="32" y1="31" x2="36" y2="25" stroke="#c8521a" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
