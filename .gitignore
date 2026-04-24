@@ -8,10 +8,10 @@ __pycache__/
 *.pyc
 .env
 
-# Generated distributable installer (contains embedded tokens — never commit)
+# Generated distributable installer — never commit (root-level, з вбудованими токенами)
 /Bakery-Setup.ps1
 /Bakery-Setup.bat
-scripts/Bakery-Setup.ps1
+# scripts/Bakery-Setup.ps1 — шаблон без секретів, відстежується в git
 bakery.db.bak-*
 DEV.md
 null
