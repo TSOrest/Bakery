@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Каса — Пекарня</title>
+    <link rel="icon" href="/pos-favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/pos.webmanifest" />
+    <meta name="theme-color" content="#131c2e" />
+    <script>
+      window.addEventListener('error', function(e) {
+        var el = document.getElementById('root')
+        if (el && !el.children.length) {
+          el.innerHTML = '<div style="padding:2rem;font-family:sans-serif;color:#721c24;background:#fdf0ef;border:1px solid #f5c6cb;border-radius:8px;margin:2rem">'
+            + '<b>Помилка завантаження:</b><br>' + e.message
+            + '<br><br><small>' + (e.filename || '') + ':' + (e.lineno || '') + '</small></div>'
+        }
+      })
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

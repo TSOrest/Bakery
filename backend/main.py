@@ -197,6 +197,13 @@ if _DIST.exists():
     # Статичні ресурси (js, css, assets)
     app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
+    # POS-додаток: /pos та /pos/ отримують pos.html (окремий PWA маніфест)
+    _POS_HTML = _DIST / "pos.html"
+    @app.get("/pos", include_in_schema=False)
+    @app.get("/pos/", include_in_schema=False)
+    async def pos_app():
+        return FileResponse(_POS_HTML if _POS_HTML.exists() else _DIST / "index.html")
+
     # SPA fallback: будь-який невідомий шлях → index.html (React Router)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
