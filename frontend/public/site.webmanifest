@@ -4,8 +4,8 @@
   "description": "Система управління пекарнею",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#c8521a",
-  "theme_color": "#c8521a",
+  "background_color": "#1a3a5c",
+  "theme_color": "#122840",
   "icons": [
     {
       "src": "/favicon.svg",
@@ -13,5 +13,11 @@
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    { "name": "Замовлення", "url": "/orders",   "description": "Замовлення клієнтів" },
+    { "name": "Випічка",    "url": "/baking",   "description": "Завдання на випічку" },
+    { "name": "Магазин",    "url": "/shop",     "description": "Звірка магазину" },
+    { "name": "Фінанси",    "url": "/finances", "description": "Баланси та рух коштів" }
   ]
 }
