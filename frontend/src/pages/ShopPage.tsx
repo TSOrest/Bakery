@@ -1385,10 +1385,18 @@ function ReconciliationTable({
     }
   }
 
-  const lines    = rec.lines
-  const disabled = !!rec.closed
-  const totalSold = lines.reduce((s, l) => s + (l.calculated_sold ?? 0), 0)
-  const totalCash = lines.reduce((s, l) => s + (l.expected_cash ?? 0), 0)
+  const lines        = rec.lines
+  const disabled     = !!rec.closed
+  const totalWrittenOff = lines.reduce((s, l) => s + (l.written_off ?? 0), 0)
+  const totalPosSold    = lines.reduce((s, l) => s + (posSales[`${l.product_id}-${l.batch_date ?? 'null'}`]?.qty ?? 0), 0)
+  const totalSold       = lines.reduce((s, l) => {
+    const posSold = posSales[`${l.product_id}-${l.batch_date ?? 'null'}`]?.qty ?? 0
+    return s + (l.calculated_sold ?? 0) + posSold
+  }, 0)
+  const totalCash       = lines.reduce((s, l) => {
+    const posAmount = posSales[`${l.product_id}-${l.batch_date ?? 'null'}`]?.amount ?? 0
+    return s + (l.expected_cash ?? 0) + posAmount
+  }, 0)
 
   const clientLabel = (id: number | null) =>
     id ? (clients.find((c) => c.id === id)?.label ?? `#${id}`) : ''
@@ -1402,11 +1410,11 @@ function ReconciliationTable({
             <Th right>Відкр.</Th>
             <Th right>Надійшло</Th>
             <Th right>Доступно</Th>
-            <Th right title="Продано через POS (заблоковано)">📱 POS</Th>
-            <Th right>Залишок</Th>
             <Th right>Списано</Th>
+            <Th right title="Продано через касу POS">📱 POS</Th>
             <Th right>Продано</Th>
             <Th right>Сума</Th>
+            <Th right>Залишок</Th>
           </tr>
         </thead>
         <tbody>
@@ -1415,6 +1423,9 @@ function ReconciliationTable({
             const posKey         = `${line.product_id}-${line.batch_date ?? 'null'}`
             const posInfo        = posSales[posKey]
             const posSold        = posInfo?.qty ?? 0
+            const posAmount      = posInfo?.amount ?? 0
+            const totalLineSold  = (line.calculated_sold ?? 0) + posSold
+            const totalLineCash  = (line.expected_cash ?? 0) + posAmount
             const maxBalance     = Math.max(0, available - posSold)
             const overBalance    = line.entered_balance != null && line.entered_balance > maxBalance + 0.001
             const ageDays        = calcAgeDays(line.batch_date, workDate)
@@ -1435,20 +1446,54 @@ function ReconciliationTable({
                         </span>
                     }
                     {ageDays != null && ageDays > 1 && <AgeBadge days={ageDays} />}
-                    {posInfo && (
-                      <span style={{ display: 'block', fontSize: '0.72rem', color: '#0369a1', marginTop: '1px' }}>
-                        📱 {posInfo.qty} шт · {posInfo.amount.toFixed(2)} грн
-                      </span>
-                    )}
                   </Td>
                   <Td right dim>{line.opening_balance.toFixed(1)}</Td>
                   <Td right dim>{line.received > 0 ? `+${line.received.toFixed(1)}` : '—'}</Td>
                   <Td right><strong>{available.toFixed(1)}</strong></Td>
+
+                  {/* Списано: ▶/▼ + підсумок + ⊕, відображати як мінус */}
+                  <Td right>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.25rem' }}>
+                      {line.disposal_lines.length > 0 && (
+                        <button
+                          onClick={() => toggleExpanded(line.id)}
+                          title={expandedLines.has(line.id) ? 'Сховати деталі' : 'Показати деталі'}
+                          style={{ padding: '0 3px', fontSize: '0.6rem', lineHeight: '1', background: 'none', border: 'none', cursor: 'pointer', color: '#888', opacity: 0.7 }}
+                        >{expandedLines.has(line.id) ? '▼' : '▶'}</button>
+                      )}
+                      {line.written_off > 0
+                        ? <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#c62828' }}>−{line.written_off.toFixed(1)}</span>
+                        : <span style={{ color: '#ddd' }}>—</span>}
+                      {!disabled && (
+                        <button
+                          onClick={() => isDisposalOpen ? setDisposalOpen(null) : openDisposal(line.id)}
+                          title="Додати розподіл"
+                          style={{ padding: '1px 5px', fontSize: '0.72rem', lineHeight: '1.4', background: isDisposalOpen ? '#1a3a5c' : '#f0f4f8', color: isDisposalOpen ? '#fff' : '#1a3a5c', border: '1px solid #c0d0e0', borderRadius: '3px', cursor: 'pointer' }}
+                        >⊕</button>
+                      )}
+                    </div>
+                  </Td>
+
+                  {/* POS: відображати як мінус */}
                   <Td right>
                     {posSold > 0
-                      ? <span style={{ color: '#0369a1', fontWeight: 600 }}>{posSold.toFixed(1)}</span>
-                      : <span style={{ color: '#ccc' }}>—</span>}
+                      ? <span style={{ color: '#0369a1', fontWeight: 600 }}>−{posSold.toFixed(1)}</span>
+                      : <span style={{ color: '#ddd' }}>—</span>}
                   </Td>
+
+                  {/* Продано = calculated_sold + POS */}
+                  <Td right>
+                    <strong style={{ color: line.calculated_sold != null || posSold > 0 ? '#1a3a5c' : '#aaa' }}>
+                      {line.calculated_sold != null || posSold > 0 ? totalLineSold.toFixed(1) : '—'}
+                    </strong>
+                  </Td>
+
+                  {/* Сума = expected_cash + POS amount */}
+                  <Td right>
+                    {totalLineCash > 0 ? totalLineCash.toFixed(2) : '—'}
+                  </Td>
+
+                  {/* Залишок — в кінці */}
                   <Td right>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <StreamInput
@@ -1466,75 +1511,33 @@ function ReconciliationTable({
                       )}
                     </div>
                   </Td>
-
-                  {/* Списано: ▶/▼ стрілка + підсумок + ⊕ */}
-                  <Td right>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.25rem' }}>
-                      {line.disposal_lines.length > 0 && (
-                        <button
-                          onClick={() => toggleExpanded(line.id)}
-                          title={expandedLines.has(line.id) ? 'Сховати деталі' : 'Показати деталі'}
-                          style={{
-                            padding: '0 3px', fontSize: '0.6rem', lineHeight: '1',
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: '#888', opacity: 0.7,
-                          }}
-                        >{expandedLines.has(line.id) ? '▼' : '▶'}</button>
-                      )}
-                      {line.written_off > 0 && (
-                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#c62828' }}>
-                          {line.written_off.toFixed(1)}
-                        </span>
-                      )}
-                      {!disabled && (
-                        <button
-                          onClick={() => isDisposalOpen ? setDisposalOpen(null) : openDisposal(line.id)}
-                          title="Додати розподіл"
-                          style={{
-                            padding: '1px 5px', fontSize: '0.72rem', lineHeight: '1.4',
-                            background: isDisposalOpen ? '#1a3a5c' : '#f0f4f8',
-                            color: isDisposalOpen ? '#fff' : '#1a3a5c',
-                            border: '1px solid #c0d0e0', borderRadius: '3px', cursor: 'pointer',
-                          }}
-                        >⊕</button>
-                      )}
-                    </div>
-                  </Td>
-
-                  <Td right>
-                    <strong style={{ color: line.calculated_sold != null ? '#1a3a5c' : '#aaa' }}>
-                      {line.calculated_sold != null ? line.calculated_sold.toFixed(1) : '—'}
-                    </strong>
-                  </Td>
-                  <Td right>
-                    {line.expected_cash != null && line.expected_cash > 0
-                      ? line.expected_cash.toFixed(2)
-                      : '—'}
-                  </Td>
                 </tr>
 
                 {/* ── Рядки disposal (розгорнуті) ── */}
                 {expandedLines.has(line.id) && line.disposal_lines.map((d) => (
                   <tr key={`d-${d.id}`} style={{ background: d.disposal_type === 'sale' ? '#f0faf0' : '#fff8f0', borderLeft: `2px solid ${d.disposal_type === 'sale' ? '#86efac' : '#e8c090'}` }}>
-                    <td colSpan={5} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#777', fontSize: '0.78rem' }}>
+                    <td colSpan={4} style={{ ...tdStyle, paddingLeft: '1.8rem', color: '#777', fontSize: '0.78rem' }}>
                       <span style={{ marginRight: '0.3rem', color: '#ccc' }}>└</span>
                       {DISPOSAL_LABELS[d.disposal_type] ?? d.disposal_type}
-                      {d.client_id && (
-                        <span style={{ marginLeft: '0.3rem' }}>→ {clientLabel(d.client_id)}</span>
-                      )}
+                      {d.client_id && <span style={{ marginLeft: '0.3rem' }}>→ {clientLabel(d.client_id)}</span>}
                       {d.disposal_type === 'sale' && d.price != null && (
                         <span style={{ marginLeft: '0.3rem', color: '#2e7d32', fontWeight: 600 }}>@ {d.price.toFixed(2)} грн</span>
                       )}
-                      {d.notes && (
-                        <span style={{ marginLeft: '0.3rem', fontStyle: 'italic', color: '#aaa' }}>{d.notes}</span>
-                      )}
+                      {d.notes && <span style={{ marginLeft: '0.3rem', fontStyle: 'italic', color: '#aaa' }}>{d.notes}</span>}
                     </td>
+                    {/* qty в колонці Списано */}
                     <td style={{ ...tdStyle, textAlign: 'right', color: '#c62828', fontSize: '0.8rem' }}>
-                      {d.qty.toFixed(1)}
+                      −{d.qty.toFixed(1)}
                     </td>
+                    {/* пусто POS */}
+                    <td style={tdStyle} />
+                    {/* пусто Продано */}
+                    <td style={tdStyle} />
+                    {/* sale-сума в колонці Сума */}
                     <td style={{ ...tdStyle, textAlign: 'right', color: '#2e7d32', fontSize: '0.8rem' }}>
                       {d.disposal_type === 'sale' && d.price != null ? (d.qty * d.price).toFixed(2) : ''}
                     </td>
+                    {/* кнопка видалення в колонці Залишок */}
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {!disabled && (
                         <button onClick={() => onDeleteDisposal(line.id, d.id)}
@@ -1617,9 +1620,12 @@ function ReconciliationTable({
         </tbody>
         <tfoot>
           <tr style={{ background: '#f0f4f8', fontWeight: 700 }}>
-            <td colSpan={6} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
+            <td colSpan={4} style={{ ...tdStyle, fontWeight: 700 }}>Разом:</td>
+            <td style={{ ...tdStyle, textAlign: 'right', color: '#c62828' }}>−{totalWrittenOff.toFixed(1)}</td>
+            <td style={{ ...tdStyle, textAlign: 'right', color: '#0369a1' }}>−{totalPosSold.toFixed(1)}</td>
             <td style={{ ...tdStyle, textAlign: 'right' }}>{totalSold.toFixed(1)}</td>
             <td style={{ ...tdStyle, textAlign: 'right', color: '#b45309' }}>{totalCash.toFixed(2)} грн</td>
+            <td style={tdStyle} />
           </tr>
         </tfoot>
       </table>
