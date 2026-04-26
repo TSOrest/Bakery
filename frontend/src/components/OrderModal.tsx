@@ -421,20 +421,20 @@ export default function OrderModal({
                             : '—'}
                         </td>
                         <td className={styles.tdAct}>
-                          {!locked && !hasExchange && exchangeOpen !== product.id && (
-                            <button
-                              className={styles.btnAddLine}
-                              style={{ marginRight: 2, color: '#16a34a', borderColor: '#86efac' }}
-                              title="Додати рядок обміну (безкоштовно)"
-                              onClick={() => { setExchangeOpen(product.id); setAddLine(null) }}
-                            >↔</button>
-                          )}
                           {!locked && !showAdd && (
                             <button
                               className={styles.btnAddLine}
                               title="Додати рядок зі знижкою / своєю ціною"
                               onClick={() => { setAddLine({ productId: product.id, qty: '', price: '' }); setExchangeOpen(null) }}
                             >%</button>
+                          )}
+                          {!locked && !hasExchange && exchangeOpen !== product.id && (
+                            <button
+                              className={styles.btnAddLine}
+                              style={{ marginLeft: 2, color: '#16a34a', borderColor: '#86efac' }}
+                              title="Додати рядок обміну (безкоштовно)"
+                              onClick={() => { setExchangeOpen(product.id); setAddLine(null) }}
+                            >⇆</button>
                           )}
                         </td>
                         <td className={styles.tdInput}>
