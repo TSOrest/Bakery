@@ -708,10 +708,27 @@ Write-Step 'Збірка фронтенду'
 # Перенаправляємо у ASCII-шлях — той самий $SAFE_TEMP що і для решти операцій.
 $env:npm_config_cache = "$SAFE_TEMP\npm-cache"
 
+# Node.js 24 + OpenSSL 3 + Windows FIPS-policy → ERR_SSL_CIPHER_OPERATION_FAILED.
+# OPENSSL_CONF='' скидає будь-який кастомний конфіг (включаючи FIPS-провайдер)
+# і дозволяє npm використовувати стандартні шифри.
+$env:OPENSSL_CONF = ''
+
+# Прибираємо залишки node_modules від попередньої (невдалої) спроби.
+# npm не може видалити заблоковані директорії → EPERM rmdir → збій.
+$oldModules = "$InstallDir\frontend\node_modules"
+if (Test-Path $oldModules) {
+    Write-Info 'Видалення старих node_modules...'
+    Remove-Item $oldModules -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Очищаємо кеш щоб уникнути corrupt-записів від попередньої спроби.
+Write-Info 'npm cache clean...'
+Invoke-Native $npmExe @('cache', 'clean', '--force') | Out-Null
+
 Push-Location "$InstallDir\frontend"
 try {
     Write-Info 'npm install...'
-    $npmOut = Invoke-Native $npmExe @('install', '--prefer-offline')
+    $npmOut = Invoke-Native $npmExe @('install')
     $npmOut | ForEach-Object { Write-Info $_ }
     if ($LASTEXITCODE -ne 0) { Abort 'npm install завершився з помилкою. Деталі вище.' }
 
