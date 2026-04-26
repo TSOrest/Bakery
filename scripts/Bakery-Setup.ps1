@@ -115,19 +115,29 @@ function Invoke-Uninstall {
 
     Write-Step 'Зупинка служб'
 
-    # Зупиняємо процеси
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { ($_.Name -like 'python*' -and $_.CommandLine -like '*uvicorn*') -or
-                       ($_.Name -eq 'pythonw.exe' -and $_.CommandLine -like '*tray.py*') } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Milliseconds 500
-
-    # Зупиняємо і видаляємо завдання планувальника
+    # Спочатку знімаємо Task Scheduler завдання — щоб watchdog не перезапустив процеси
     Stop-ScheduledTask  $APP_TASK  -ErrorAction SilentlyContinue
     Stop-ScheduledTask  $TRAY_TASK -ErrorAction SilentlyContinue
     Unregister-ScheduledTask $APP_TASK  -Confirm:$false -ErrorAction SilentlyContinue
     Unregister-ScheduledTask $TRAY_TASK -Confirm:$false -ErrorAction SilentlyContinue
     Write-OK 'Завдання планувальника видалено'
+
+    # Вбиваємо усі python/pythonw процеси з папки застосунку + uvicorn/tray
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { ($_.Name -like 'python*' -or $_.Name -eq 'pythonw.exe') -and
+                       ($_.ExecutablePath -like "$Dir*" -or
+                        $_.CommandLine    -like '*uvicorn*' -or
+                        $_.CommandLine    -like '*tray.py*' -or
+                        $_.CommandLine    -like '*bakery*') } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    # Додатково — Kill будь-який pythonw.exe та uvicorn без фільтру по шляху
+    Stop-Process -Name 'pythonw' -Force -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*uvicorn*' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    Start-Sleep -Seconds 3   # чекаємо повного завершення (раніше було 500 мс — замало)
 
     # Пропонуємо зберегти базу даних
     $dbFile = "$Dir\bakery.db"
@@ -526,7 +536,21 @@ if ($isUpdate -and $gitExe -and (Test-Path "$InstallDir\.git")) {
 if (-not $useGit) {
     if ($gitExe) {
         Write-Info 'git clone --depth 1 ...'
-        if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+        if (Test-Path $InstallDir) {
+            # Ще раз вбиваємо python-процеси — на випадок якщо watchdog перезапустив після Invoke-Uninstall
+            Stop-Process -Name 'pythonw' -Force -ErrorAction SilentlyContinue
+            Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'python*' -and $_.ExecutablePath -like "$InstallDir*" } |
+                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 2
+            Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $InstallDir) {
+                # Якщо папка все ще існує — прибираємо файл venv вручну і пробуємо ще раз
+                Remove-Item "$InstallDir\backend\venv" -Recurse -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 1
+                Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
         $gitOut = Invoke-Native $gitExe @('clone','--depth','1',$cloneUrl,$InstallDir)
         $gitOut | ForEach-Object { Write-Info $_ }
         if ($LASTEXITCODE -eq 0) {
