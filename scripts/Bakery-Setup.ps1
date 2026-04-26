@@ -508,8 +508,12 @@ if ($gitExe) {
 
 if ($isUpdate -and $gitExe -and (Test-Path "$InstallDir\.git")) {
     Write-Info 'git pull --rebase ...'
+    # Тимчасово підставляємо authenticated URL — Windows Credential Manager може
+    # повертати застарілий токен із попереднього сеансу, тому передаємо явно.
+    & $gitExe -C $InstallDir remote set-url origin $cloneUrl 2>$null
     $gitOut = Invoke-Native $gitExe @('-C',$InstallDir,'pull','--rebase')
     $gitOut | ForEach-Object { Write-Info $_ }
+    & $gitExe -C $InstallDir remote set-url origin $REPO_URL 2>$null
     if ($LASTEXITCODE -eq 0) {
         $useGit = $true
         Write-OK 'Код оновлено'
@@ -700,13 +704,24 @@ Write-OK 'База даних готова'
 # ── КРОК 8: Збірка фронтенду ──────────────────────────────────────────────────
 Write-Step 'Збірка фронтенду'
 
-Write-Info 'npm install...'
-$p = Start-Process $npmExe 'install' -WorkingDirectory "$InstallDir\frontend" -Wait -PassThru -WindowStyle Hidden
-if ($p.ExitCode -ne 0) { Abort 'npm install завершився з помилкою.' }
+# npm кеш за замовчуванням у %APPDATA%\npm-cache (кирилиця у username → падає).
+# Перенаправляємо у ASCII-шлях — той самий $SAFE_TEMP що і для решти операцій.
+$env:npm_config_cache = "$SAFE_TEMP\npm-cache"
 
-Write-Info 'npm run build...'
-$p = Start-Process $npmExe 'run build' -WorkingDirectory "$InstallDir\frontend" -Wait -PassThru -WindowStyle Hidden
-if ($p.ExitCode -ne 0) { Abort 'npm run build завершився з помилкою.' }
+Push-Location "$InstallDir\frontend"
+try {
+    Write-Info 'npm install...'
+    $npmOut = Invoke-Native $npmExe @('install', '--prefer-offline')
+    $npmOut | ForEach-Object { Write-Info $_ }
+    if ($LASTEXITCODE -ne 0) { Abort 'npm install завершився з помилкою. Деталі вище.' }
+
+    Write-Info 'npm run build...'
+    $npmOut2 = Invoke-Native $npmExe @('run', 'build')
+    $npmOut2 | ForEach-Object { Write-Info $_ }
+    if ($LASTEXITCODE -ne 0) { Abort 'npm run build завершився з помилкою. Деталі вище.' }
+} finally {
+    Pop-Location
+}
 
 Write-OK 'Фронтенд зібрано'
 
