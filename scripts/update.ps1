@@ -159,19 +159,48 @@ print('Migrations OK')
 " 2>&1
 Write-Log $migResult
 
-# Build frontend
+# Build frontend — спочатку завантажуємо готовий dist з release assets,
+# якщо недоступно — збираємо локально через npm.
 Write-Log 'Building frontend...' Yellow
-$build = Start-Process -FilePath $npm `
-    -ArgumentList 'run build' `
-    -WorkingDirectory (Join-Path $ROOT 'frontend') `
-    -WindowStyle Hidden -Wait -PassThru
 
-if ($build.ExitCode -ne 0) {
-    Write-Log 'ERROR: Frontend build failed.' Red
-    # Rollback
-    & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
-    Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
-    Read-Host 'Press Enter'; exit 1
+$SAFE_TEMP     = 'C:\Windows\Temp'
+$distDownloaded = $false
+
+if ($oauthToken) {
+    try {
+        $apiHdrs = @{ Authorization="Bearer $oauthToken"; 'User-Agent'='BakeryApp-Updater/1.0'; Accept='application/vnd.github+json' }
+        $relInfo  = Invoke-WebRequest "https://api.github.com/repos/TSOrest/Bakery/releases/tags/$TargetTag" `
+            -UseBasicParsing -Headers $apiHdrs | ConvertFrom-Json
+        $distAsset = $relInfo.assets | Where-Object { $_.name -eq 'frontend-dist.zip' } | Select-Object -First 1
+        if ($distAsset) {
+            Write-Log "  Завантаження frontend-dist.zip ($([Math]::Round($distAsset.size/1MB,1)) MB)..."
+            $distZip    = "$SAFE_TEMP\bakery-frontend-dist.zip"
+            $distTarget = Join-Path $ROOT 'frontend\dist'
+            $dlHdrs = $apiHdrs.Clone(); $dlHdrs['Accept'] = 'application/octet-stream'
+            Invoke-WebRequest $distAsset.url -OutFile $distZip -UseBasicParsing -Headers $dlHdrs
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            if (Test-Path $distTarget) { Remove-Item $distTarget -Recurse -Force }
+            New-Item -ItemType Directory -Path $distTarget -Force | Out-Null
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($distZip, $distTarget)
+            Remove-Item $distZip -Force -ErrorAction SilentlyContinue
+            $distDownloaded = $true
+            Write-Log '  Фронтенд завантажено з release assets' Green
+        }
+    } catch {
+        Write-Log "  dist download failed: $_ — спробуємо npm" Yellow
+    }
+}
+
+if (-not $distDownloaded) {
+    $env:npm_config_cache = "$SAFE_TEMP\npm-cache"
+    $build = Start-Process -FilePath $npm -ArgumentList 'run build' `
+        -WorkingDirectory (Join-Path $ROOT 'frontend') -Wait -PassThru
+    if ($build.ExitCode -ne 0) {
+        Write-Log 'ERROR: Frontend build failed.' Red
+        & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
+        Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
+        Read-Host 'Press Enter'; exit 1
+    }
 }
 
 # Regenerate run-server.ps1 in ProgramData (not in git, must be updated manually on each update)
