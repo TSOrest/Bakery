@@ -42,6 +42,8 @@ export default function OrderModal({
 
   // Inline обмін: productId → значення поля вводу
   const [exchangeInputs, setExchangeInputs] = useState<Record<number, string>>({})
+  // Який продукт зараз відкритий для введення обміну (незалежно від qty)
+  const [exchangeOpen, setExchangeOpen] = useState<number | null>(null)
   const ownTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
 
   // effectiveOrders — те що показує модалка
@@ -419,11 +421,19 @@ export default function OrderModal({
                             : '—'}
                         </td>
                         <td className={styles.tdAct}>
+                          {!locked && !hasExchange && exchangeOpen !== product.id && (
+                            <button
+                              className={styles.btnAddLine}
+                              style={{ marginRight: 2, color: '#16a34a', borderColor: '#86efac' }}
+                              title="Додати рядок обміну (безкоштовно)"
+                              onClick={() => { setExchangeOpen(product.id); setAddLine(null) }}
+                            >↔</button>
+                          )}
                           {!locked && !showAdd && (
                             <button
                               className={styles.btnAddLine}
                               title="Додати рядок зі знижкою / своєю ціною"
-                              onClick={() => setAddLine({ productId: product.id, qty: '', price: '' })}
+                              onClick={() => { setAddLine({ productId: product.id, qty: '', price: '' }); setExchangeOpen(null) }}
                             >%</button>
                           )}
                         </td>
@@ -460,16 +470,23 @@ export default function OrderModal({
                         </td>
                       </tr>
 
-                      {/* ── Inline Обмін (якщо є qty і ще немає рядка обміну) ── */}
-                      {qty > 0 && !hasExchange && !locked && (
+                      {/* ── Inline Обмін — відкривається кнопкою ↔, незалежно від qty ── */}
+                      {exchangeOpen === product.id && !hasExchange && !locked && (
                         <tr style={{ background: '#f0fdf4' }}>
                           <td colSpan={2} style={{ paddingLeft: 20, fontSize: '0.78rem', color: '#16a34a', fontWeight: 600 }}>
                             ↔ Обмін
                           </td>
                           <td />
-                          <td />
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '0.9rem', padding: '0 4px' }}
+                              title="Скасувати"
+                              onClick={() => { setExchangeOpen(null); setExchangeInputs(p => ({ ...p, [product.id]: '' })) }}
+                            >✕</button>
+                          </td>
                           <td className={styles.tdInput}>
                             <input
+                              autoFocus
                               type="number"
                               min={0}
                               step={1}
@@ -480,13 +497,17 @@ export default function OrderModal({
                               onChange={e => setExchangeInputs(p => ({ ...p, [product.id]: e.target.value }))}
                               onBlur={() => {
                                 const v = exchangeInputs[product.id]
-                                if (v && Number(v) > 0) handleInlineExchange(product.id, v)
+                                if (v && Number(v) > 0) { handleInlineExchange(product.id, v); setExchangeOpen(null) }
                               }}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
                                   const v = exchangeInputs[product.id]
-                                  if (v && Number(v) > 0) handleInlineExchange(product.id, v)
+                                  if (v && Number(v) > 0) { handleInlineExchange(product.id, v); setExchangeOpen(null) }
                                   e.preventDefault()
+                                }
+                                if (e.key === 'Escape') {
+                                  setExchangeOpen(null)
+                                  setExchangeInputs(p => ({ ...p, [product.id]: '' }))
                                 }
                               }}
                             />
