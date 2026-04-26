@@ -8,3 +8,4 @@ aiofiles==23.2.1
 pystray==0.19.5
 Pillow==10.3.0
 xhtml2pdf==0.2.17
+pyodbc==5.1.0

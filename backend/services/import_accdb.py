@@ -203,8 +203,9 @@ class _Reader:
         return self._data.get(table, {}).get("rows", [])
 
 
-# ─── PowerShell 32-bit reader (OleDb ACE) ─────────────────────────────────────
+# ─── PowerShell OleDb ACE reader (32-bit і 64-bit) ───────────────────────────
 
+_PS64      = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 _PS32      = r"C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
 _SAFE_TEMP = r"C:\Windows\Temp"   # завжди ASCII, без кирилиці у username
 
@@ -269,13 +270,8 @@ $json = $out | ConvertTo-Json -Depth 10 -Compress
 """
 
 
-def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
-    if not Path(_PS32).exists():
-        raise RuntimeError(
-            "32-bit PowerShell не знайдено. "
-            "Встановіть Microsoft Access Database Engine Redistributable."
-        )
-
+def _run_ps_reader(ps_exe: str, path: str, password: str, top_n: int) -> _Reader:
+    """Запускає PowerShell-скрипт читання Access через OleDb ACE."""
     ps_fd,  ps_path  = tempfile.mkstemp(suffix=".ps1",  prefix="bakery_", dir=_SAFE_TEMP)
     out_fd, out_path = tempfile.mkstemp(suffix=".json", prefix="bakery_", dir=_SAFE_TEMP)
     try:
@@ -283,7 +279,7 @@ def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
         Path(ps_path).write_text(_PS_SCRIPT, encoding="utf-8")
 
         result = subprocess.run(
-            [_PS32, "-NoProfile", "-NonInteractive",
+            [ps_exe, "-NoProfile", "-NonInteractive",
              "-ExecutionPolicy", "Bypass", "-File", ps_path,
              "-DbPath", path, "-Password", password or "",
              "-TopN", str(top_n), "-OutFile", out_path],
@@ -315,6 +311,10 @@ def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
                 os.unlink(p)
             except OSError:
                 pass
+
+
+def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
+    return _run_ps_reader(_PS32, path, password, top_n)
 
 
 # ─── pyodbc reader (64-bit fallback, якщо встановлений) ───────────────────────
@@ -354,13 +354,45 @@ def _open_pyodbc_reader(path: str, password: str, top_n: int) -> _Reader:
 
 
 def _open_reader(path: str, password: str, top_n: int) -> _Reader:
+    """Пробує всі доступні методи читання .accdb по черзі."""
+    last_err: Exception | None = None
+
+    # 1. pyodbc — 64-bit ODBC Driver (Access Database Engine 2016+ 64-bit)
     try:
         import pyodbc  # noqa: PLC0415
         if any("Access" in d for d in pyodbc.drivers()):
             return _open_pyodbc_reader(path, password, top_n)
     except ImportError:
         pass
-    return _open_ps32_reader(path, password, top_n)
+
+    # 2. 64-bit PowerShell + 64-bit ACE (Access Database Engine 64-bit)
+    if Path(_PS64).exists():
+        try:
+            return _run_ps_reader(_PS64, path, password, top_n)
+        except RuntimeError as e:
+            if "provider is not registered" in str(e).lower() or "not registered" in str(e).lower():
+                last_err = e  # ACE не встановлено — пробуємо далі
+            else:
+                raise  # інша помилка (пароль, тощо) — одразу вгору
+
+    # 3. 32-bit PowerShell + 32-bit ACE (Office 32-bit або ADE 32-bit)
+    if Path(_PS32).exists():
+        try:
+            return _run_ps_reader(_PS32, path, password, top_n)
+        except RuntimeError as e:
+            if "provider is not registered" in str(e).lower() or "not registered" in str(e).lower():
+                last_err = e
+            else:
+                raise
+
+    raise RuntimeError(
+        "Microsoft Access Database Engine не знайдено (ні 32-bit, ні 64-bit).\n\n"
+        "Встановіть відповідний драйвер:\n"
+        "• Якщо Office 32-bit встановлено → Access Database Engine 2016 (32-bit)\n"
+        "• Якщо Office 64-bit або Office відсутній → Access Database Engine 2016 (64-bit)\n"
+        "https://www.microsoft.com/en-us/download/details.aspx?id=54920\n\n"
+        f"Остання помилка: {last_err}"
+    )
 
 
 def check_access_driver() -> str | None:
@@ -373,26 +405,37 @@ def check_access_driver() -> str | None:
     except ImportError:
         pass
 
-    # 2. 32-bit PowerShell + ACE OleDb (32-bit)
-    if Path(_PS32).exists():
-        # Перевіряємо реєстр у 32-bit поданні — саме там реєструється ACE 32-bit
-        try:
-            import winreg  # noqa: PLC0415
-            winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0",
-                access=winreg.KEY_READ | winreg.KEY_WOW64_32KEY,
-            )
-            return None  # ACE встановлено
-        except (FileNotFoundError, OSError):
-            pass
+    # 2. Перевіряємо реєстр — 64-bit ACE (Office 64-bit або ADE 64-bit)
+    try:
+        import winreg  # noqa: PLC0415
+        winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0",
+            access=winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        )
+        return None  # 64-bit ACE є
+    except (FileNotFoundError, OSError):
+        pass
 
-    # Нічого не знайдено — повертаємо інструкцію
+    # 3. Перевіряємо реєстр — 32-bit ACE (Office 32-bit або ADE 32-bit)
+    try:
+        import winreg  # noqa: PLC0415
+        winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0",
+            access=winreg.KEY_READ | winreg.KEY_WOW64_32KEY,
+        )
+        return None  # 32-bit ACE є
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Нічого не знайдено
     return (
         "Microsoft Access Database Engine не знайдено на цьому комп'ютері.\n\n"
-        "Завантажте та встановіть безкоштовний драйвер:\n"
-        "Microsoft Access Database Engine 2016 Redistributable (32-bit)\n"
+        "Встановіть відповідний драйвер (безкоштовно):\n"
         "https://www.microsoft.com/en-us/download/details.aspx?id=54920\n\n"
+        "• Якщо встановлено Office 32-bit → завантажте 32-bit версію драйвера\n"
+        "• Якщо Office 64-bit або Office відсутній → завантажте 64-bit версію\n\n"
         "Після встановлення перезапустіть застосунок і спробуйте знову."
     )
 
