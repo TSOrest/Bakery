@@ -205,7 +205,8 @@ class _Reader:
 
 # ─── PowerShell 32-bit reader (OleDb ACE) ─────────────────────────────────────
 
-_PS32 = r"C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+_PS32      = r"C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+_SAFE_TEMP = r"C:\Windows\Temp"   # завжди ASCII, без кирилиці у username
 
 _PS_SCRIPT = r"""
 param([string]$DbPath, [string]$Password = "", [int]$TopN = 0, [string]$OutFile)
@@ -275,8 +276,8 @@ def _open_ps32_reader(path: str, password: str, top_n: int) -> _Reader:
             "Встановіть Microsoft Access Database Engine Redistributable."
         )
 
-    ps_fd,  ps_path  = tempfile.mkstemp(suffix=".ps1",  prefix="bakery_")
-    out_fd, out_path = tempfile.mkstemp(suffix=".json", prefix="bakery_")
+    ps_fd,  ps_path  = tempfile.mkstemp(suffix=".ps1",  prefix="bakery_", dir=_SAFE_TEMP)
+    out_fd, out_path = tempfile.mkstemp(suffix=".json", prefix="bakery_", dir=_SAFE_TEMP)
     try:
         os.close(ps_fd); os.close(out_fd)
         Path(ps_path).write_text(_PS_SCRIPT, encoding="utf-8")
@@ -363,21 +364,36 @@ def _open_reader(path: str, password: str, top_n: int) -> _Reader:
 
 
 def check_access_driver() -> str | None:
+    """None = є драйвер, str = повідомлення про помилку для користувача."""
+    # 1. pyodbc з Access ODBC Driver (64-bit)
     try:
         import pyodbc  # noqa: PLC0415
         if any("Access" in d for d in pyodbc.drivers()):
             return None
     except ImportError:
         pass
+
+    # 2. 32-bit PowerShell + ACE OleDb (32-bit)
     if Path(_PS32).exists():
-        return None
-    import struct
-    bits = struct.calcsize("P") * 8
-    exe  = "AccessDatabaseEngine_X64.exe" if bits == 64 else "AccessDatabaseEngine.exe"
+        # Перевіряємо реєстр у 32-bit поданні — саме там реєструється ACE 32-bit
+        try:
+            import winreg  # noqa: PLC0415
+            winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Classes\Microsoft.ACE.OLEDB.12.0",
+                access=winreg.KEY_READ | winreg.KEY_WOW64_32KEY,
+            )
+            return None  # ACE встановлено
+        except (FileNotFoundError, OSError):
+            pass
+
+    # Нічого не знайдено — повертаємо інструкцію
     return (
-        f"Неможливо відкрити .accdb. Встановіть:\n"
-        f"Microsoft Access Database Engine 2016 Redistributable ({bits}-bit)\n"
-        f"Файл: {exe}"
+        "Microsoft Access Database Engine не знайдено на цьому комп'ютері.\n\n"
+        "Завантажте та встановіть безкоштовний драйвер:\n"
+        "Microsoft Access Database Engine 2016 Redistributable (32-bit)\n"
+        "https://www.microsoft.com/en-us/download/details.aspx?id=54920\n\n"
+        "Після встановлення перезапустіть застосунок і спробуйте знову."
     )
 
 

@@ -86,6 +86,10 @@ async def upload_accdb(
     if not file.filename or not file.filename.lower().endswith(".accdb"):
         raise HTTPException(400, "Файл повинен мати розширення .accdb")
 
+    driver_err = svc.check_access_driver()
+    if driver_err:
+        raise HTTPException(503, driver_err)
+
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_old_tmp()
 
