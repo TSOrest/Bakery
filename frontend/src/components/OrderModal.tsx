@@ -434,7 +434,7 @@ export default function OrderModal({
                               style={{ marginLeft: 2, color: '#16a34a', borderColor: '#86efac' }}
                               title="Додати рядок обміну (безкоштовно)"
                               onClick={() => { setExchangeOpen(product.id); setAddLine(null) }}
-                            >⇆</button>
+                            >↩</button>
                           )}
                         </td>
                         <td className={styles.tdInput}>

@@ -354,9 +354,9 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       .filter(o =>
         o.client_id === clientId &&
         o.parent_order_id == null &&
-        (o.origin_id == null || o.origin_id === 0) &&
-        o.exchange_type === 'none' &&
-        o.price_override == null
+        (o.origin_id == null || o.origin_id === 0)
+        // обмін (exchange_type !== 'none') і знижка (price_override != null) враховуються —
+        // це реальні вироби які треба спекти
       )
       .reduce((s, o) => s + (productMap.get(o.product_id)?.category_id === categoryId ? o.qty : 0), 0)
 
