@@ -704,43 +704,69 @@ Write-OK 'База даних готова'
 # ── КРОК 8: Збірка фронтенду ──────────────────────────────────────────────────
 Write-Step 'Збірка фронтенду'
 
-# npm кеш за замовчуванням у %APPDATA%\npm-cache (кирилиця у username → падає).
-# Перенаправляємо у ASCII-шлях — той самий $SAFE_TEMP що і для решти операцій.
-$env:npm_config_cache = "$SAFE_TEMP\npm-cache"
+# Основний шлях: завантажуємо готовий dist з GitHub Release Assets.
+# Це повністю обходить npm install і вирішує проблеми:
+#   - ERR_SSL_CIPHER_OPERATION_FAILED (Node 24 + OpenSSL 3 + FIPS)
+#   - EPERM rmdir node_modules (блоковані файли від попередньої спроби)
+#   - кирилиця у %APPDATA%\npm-cache
 
-# Node.js 24 + OpenSSL 3 + Windows FIPS-policy → ERR_SSL_CIPHER_OPERATION_FAILED.
-# OPENSSL_CONF='' скидає будь-який кастомний конфіг (включаючи FIPS-провайдер)
-# і дозволяє npm використовувати стандартні шифри.
-$env:OPENSSL_CONF = ''
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# Прибираємо залишки node_modules від попередньої (невдалої) спроби.
-# npm не може видалити заблоковані директорії → EPERM rmdir → збій.
-$oldModules = "$InstallDir\frontend\node_modules"
-if (Test-Path $oldModules) {
-    Write-Info 'Видалення старих node_modules...'
-    Remove-Item $oldModules -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Очищаємо кеш щоб уникнути corrupt-записів від попередньої спроби.
-Write-Info 'npm cache clean...'
-Invoke-Native $npmExe @('cache', 'clean', '--force') | Out-Null
-
-Push-Location "$InstallDir\frontend"
+$distDownloaded = $false
 try {
-    Write-Info 'npm install...'
-    $npmOut = Invoke-Native $npmExe @('install')
-    $npmOut | ForEach-Object { Write-Info $_ }
-    if ($LASTEXITCODE -ne 0) { Abort 'npm install завершився з помилкою. Деталі вище.' }
+    Write-Info 'Пошук готового фронтенду у release assets...'
+    $releaseJson = Invoke-WebRequest "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" `
+        -UseBasicParsing `
+        -Headers @{ Authorization = "Bearer $accessToken"; 'User-Agent' = 'BakeryApp-Installer/1.0' } |
+        ConvertFrom-Json
+    $distAsset = $releaseJson.assets | Where-Object { $_.name -eq 'frontend-dist.zip' } | Select-Object -First 1
 
-    Write-Info 'npm run build...'
-    $npmOut2 = Invoke-Native $npmExe @('run', 'build')
-    $npmOut2 | ForEach-Object { Write-Info $_ }
-    if ($LASTEXITCODE -ne 0) { Abort 'npm run build завершився з помилкою. Деталі вище.' }
-} finally {
-    Pop-Location
+    if ($distAsset) {
+        Write-Info "Завантаження $($distAsset.name) ($([Math]::Round($distAsset.size/1MB,1)) MB)..."
+        $distZip    = "$SAFE_TEMP\bakery-frontend-dist.zip"
+        $distTarget = "$InstallDir\frontend\dist"
+        Invoke-WebRequest $distAsset.url -OutFile $distZip -UseBasicParsing `
+            -Headers @{ Authorization = "Bearer $accessToken"; Accept = 'application/octet-stream'; 'User-Agent' = 'BakeryApp-Installer/1.0' }
+        if (Test-Path $distTarget) { Remove-Item $distTarget -Recurse -Force }
+        New-Item -ItemType Directory -Path $distTarget -Force | Out-Null
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($distZip, $distTarget)
+        Remove-Item $distZip -Force -ErrorAction SilentlyContinue
+        $distDownloaded = $true
+        Write-OK 'Фронтенд завантажено з release assets'
+    }
+} catch {
+    Write-Warn "Не вдалося завантажити dist: $_"
 }
 
-Write-OK 'Фронтенд зібрано'
+# Fallback: локальна збірка через npm (може не працювати на FIPS-системах з Node 24+)
+if (-not $distDownloaded) {
+    Write-Warn 'frontend-dist.zip не знайдено — збираємо локально через npm...'
+
+    $env:npm_config_cache = "$SAFE_TEMP\npm-cache"
+
+    $oldModules = "$InstallDir\frontend\node_modules"
+    if (Test-Path $oldModules) {
+        Write-Info 'Видалення старих node_modules...'
+        Remove-Item $oldModules -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Invoke-Native $npmExe @('cache', 'clean', '--force') | Out-Null
+
+    Push-Location "$InstallDir\frontend"
+    try {
+        Write-Info 'npm install...'
+        $npmOut = Invoke-Native $npmExe @('install')
+        $npmOut | ForEach-Object { Write-Info $_ }
+        if ($LASTEXITCODE -ne 0) { Abort 'npm install завершився з помилкою. Деталі вище.' }
+
+        Write-Info 'npm run build...'
+        $npmOut2 = Invoke-Native $npmExe @('run', 'build')
+        $npmOut2 | ForEach-Object { Write-Info $_ }
+        if ($LASTEXITCODE -ne 0) { Abort 'npm run build завершився з помилкою. Деталі вище.' }
+    } finally {
+        Pop-Location
+    }
+    Write-OK 'Фронтенд зібрано локально'
+}
 
 # ── КРОК 9: Налаштування автозапуску ─────────────────────────────────────────
 Write-Step 'Налаштування автозапуску (Task Scheduler)'
