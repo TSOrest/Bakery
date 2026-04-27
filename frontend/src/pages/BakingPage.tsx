@@ -636,7 +636,22 @@ export default function BakingPage() {
   // underbakedOrders → НЕ показуємо окремого блоку коли baked=ordered:
   //   якщо спечено рівно замовленому — записи зняття застарілі й не впливають на доставку;
   //   вони з'являться в блоці нестачі якщо оператор знову зменшить Спечено
-  const withDiscrepancy = tasks.filter(t => {
+
+  // Продукти без замовлень де оператор вже ввів "Спечено", але БД-задача ще не збережена
+  // (дебаунс 600мс — до завершення вони не потрапляють у tasks).
+  const pendingVirtual: BakingTask[] = Object.entries(bakedMap)
+    .filter(([pidStr, baked]) => {
+      const pid = Number(pidStr)
+      if (baked == null || baked <= 0) return false
+      if (!enteredIds.has(pid)) return false
+      return !tasks.some(t => t.product_id === pid)
+    })
+    .map(([pidStr]) => ({
+      id: 0, task_date: workDate, product_id: Number(pidStr),
+      ordered_qty: 0, recommended_qty: 0, baked_qty: 0,
+    } as BakingTask))
+
+  const withDiscrepancy = [...tasks, ...pendingVirtual].filter(t => {
     // Показуємо тільки після того як оператор ввів "Спечено" (нульове поле — не рахується)
     const bakedEntered = loadedBakedQty[t.product_id] != null || enteredIds.has(t.product_id)
     if (!bakedEntered) return false
