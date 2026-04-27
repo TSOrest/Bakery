@@ -741,6 +741,7 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
         if not aggregated:
             raise HTTPException(status_code=404, detail="Замовлень на цю дату не знайдено")
 
+        from types import SimpleNamespace
         tasks = []
         for row in aggregated:
             product = db.get(Product, row["product_id"])
@@ -749,13 +750,13 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
             cat = all_cats.get(product.category_id) if product.category_id else None
             if not cat:
                 continue  # пропускаємо невипечені категорії
-            reserve_pct = cat.reserve_pct
-            t = BakingTask.__new__(BakingTask)
-            t.product_id      = row["product_id"]
-            t.ordered_qty     = row["ordered_qty"]
-            t.recommended_qty = math.ceil(row["ordered_qty"] * (1 + reserve_pct / 100))
-            t.baked_qty       = 0
-            tasks.append(t)
+            reserve_pct = cat.reserve_pct or 0
+            tasks.append(SimpleNamespace(
+                product_id      = row["product_id"],
+                ordered_qty     = row["ordered_qty"],
+                recommended_qty = math.ceil(row["ordered_qty"] * (1 + reserve_pct / 100)),
+                baked_qty       = 0,
+            ))
 
     cfg         = get_settings(db)
     bakery_name = cfg.get("bakery_name", "Пекарня")
