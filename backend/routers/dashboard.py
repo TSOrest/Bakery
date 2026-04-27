@@ -55,51 +55,62 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
 
     # ── Випічка сьогодні ──────────────────────────────────────────────────────
     baking_today = db.query(BakingTask).filter(BakingTask.task_date == today).all()
-    baking_ordered  = sum(t.ordered_qty for t in baking_today)
-    baking_baked    = sum(t.baked_qty for t in baking_today)
+    baking_ordered  = sum(t.ordered_qty or 0 for t in baking_today)
+    baking_baked    = sum(t.baked_qty   or 0 for t in baking_today)
     baking_products = len(baking_today)
+
+    # ── Артикли для фільтрів (підтримка і старого finance_type і нового article_id) ──
+    def _payment_filter(q):
+        """Фільтр оплат: article.name LIKE '%лата%' АБО legacy finance_type='payment'."""
+        payment_ids = [
+            a.id for a in db.query(FinanceArticle).filter(
+                FinanceArticle.name.in_(['Оплата', 'Готівка від водія', 'Внесення в касу'])
+            ).all()
+        ]
+        from sqlalchemy import or_
+        return q.filter(or_(
+            Finance.article_id.in_(payment_ids) if payment_ids else False,
+            Finance.finance_type == 'payment',
+        ))
+
+    def _invoice_filter(q):
+        invoice_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == 'Накладна').all()]
+        from sqlalchemy import or_
+        return q.filter(or_(
+            Finance.article_id.in_(invoice_ids) if invoice_ids else False,
+            Finance.finance_type == 'invoice',
+        ))
 
     # ── Надходження за тиждень ────────────────────────────────────────────────
     payments_week = (
-        db.query(func.sum(Finance.amount))
-        .filter(
-            Finance.finance_date >= week_ago,
-            Finance.finance_type == 'payment',
-            Finance.sign == 1,
-        )
-        .scalar() or 0.0
+        _payment_filter(
+            db.query(func.sum(Finance.amount))
+            .filter(Finance.finance_date >= week_ago, Finance.sign == 1)
+        ).scalar() or 0.0
     )
 
     # ── Надходження за місяць ─────────────────────────────────────────────────
     payments_month = (
-        db.query(func.sum(Finance.amount))
-        .filter(
-            Finance.finance_date >= month_ago,
-            Finance.finance_type == 'payment',
-            Finance.sign == 1,
-        )
-        .scalar() or 0.0
+        _payment_filter(
+            db.query(func.sum(Finance.amount))
+            .filter(Finance.finance_date >= month_ago, Finance.sign == 1)
+        ).scalar() or 0.0
     )
 
     # ── Виручка сьогодні (накладні) ──────────────────────────────────────────
     revenue_today = (
-        db.query(func.sum(Finance.amount))
-        .filter(
-            Finance.finance_date == today,
-            Finance.finance_type == 'invoice',
-        )
-        .scalar() or 0.0
+        _invoice_filter(
+            db.query(func.sum(Finance.amount))
+            .filter(Finance.finance_date == today)
+        ).scalar() or 0.0
     )
 
     # ── Оплати сьогодні ───────────────────────────────────────────────────────
     payments_today_rows = (
-        db.query(Finance)
-        .filter(
-            Finance.finance_date == today,
-            Finance.finance_type == 'payment',
-            Finance.sign == 1,
-        )
-        .all()
+        _payment_filter(
+            db.query(Finance)
+            .filter(Finance.finance_date == today, Finance.sign == 1)
+        ).all()
     )
     payments_today_sum   = sum(p.amount for p in payments_today_rows)
     payments_today_count = len(payments_today_rows)
