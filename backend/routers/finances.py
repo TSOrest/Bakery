@@ -198,12 +198,20 @@ def client_history(
 
 @router.post("/", response_model=FinanceOut, status_code=201)
 def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
-    # Клієнт-залежні типи потребують client_id
-    client_required = {"invoice", "payment", "writeoff", "exchange_credit"}
-    if data.finance_type in client_required and not data.client_id:
+    # Перевірка: чи потрібен client_id для цієї операції
+    if data.article_id:
+        # Нова логіка: визначаємо за needs_client статті
+        article = db.get(FinanceArticle, data.article_id)
+        needs_client = bool(article and article.needs_client == 1)
+    else:
+        # Legacy: визначаємо за finance_type
+        client_required = {"invoice", "payment", "writeoff", "exchange_credit"}
+        needs_client = data.finance_type in client_required
+
+    if needs_client and not data.client_id:
         raise HTTPException(
             status_code=422,
-            detail=f"Тип '{data.finance_type}' потребує client_id",
+            detail="Ця стаття потребує вказання клієнта",
         )
     if data.client_id and not db.get(Client, data.client_id):
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
