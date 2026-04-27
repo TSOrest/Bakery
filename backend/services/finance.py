@@ -116,6 +116,24 @@ def get_summary(db: Session, as_of: Optional[str] = None) -> FinanceSummary:
     )
 
 
+def create_payment_finance_entry(db: Session, invoice: Invoice, amount: float) -> None:
+    """Записує оплату клієнта при прийнятті накладної (знак +1, finance_type='payment')."""
+    from backend.models.finances import FinanceArticle
+    article = db.query(FinanceArticle).filter(FinanceArticle.name == 'Оплата').first()
+    entry = Finance(
+        finance_date = invoice.invoice_date,
+        client_id    = invoice.client_id,
+        finance_type = "payment",
+        article_id   = article.id if article else None,
+        amount       = round(amount, 2),
+        sign         = 1,
+        notes        = f"Оплата по {invoice.invoice_number}",
+        created_at   = datetime.now().isoformat(),
+        created_by   = "system",
+    )
+    db.add(entry)
+
+
 def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
     """
     Створює запис у finances коли накладна переходить у статус delivered.

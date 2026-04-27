@@ -333,13 +333,14 @@ interface DetailPanelProps {
   bakeryName: string
   director: string
   accountant: string
+  paymentAmount: number
   onStatusChange: (inv: Invoice) => void
   onRefresh: () => void
 }
 
 function InvoiceDetailPanel({
   invoice, corrective, client, products, categories, routes,
-  bakeryName, director, accountant, onStatusChange, onRefresh,
+  bakeryName, director, accountant, paymentAmount, onStatusChange, onRefresh,
 }: DetailPanelProps) {
   const productName = (id: number) => {
     const p = products.find((p) => p.id === id)
@@ -362,23 +363,17 @@ function InvoiceDetailPanel({
 
   const handleAccept = async () => {
     setAccepting(true)
-    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=accepted`, {})
+    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=accepted`, { payment_amount: paymentAmount })
     setAccepting(false)
     onStatusChange(updated)
   }
 
-  // ── Перехід в Опрацювання (sent → processing) ────────────────────────────────
-  const handleProcess = async () => {
-    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=processing`, {})
-    onStatusChange(updated)
-  }
 
-  // ── Форма Опрацювання ─────────────────────────────────────────────────────────
-  const [showProc, setShowProc]       = useState(false)
-  const [procQtys, setProcQtys]       = useState<Record<number, number>>({})
-  const [cashReceived, setCashReceived] = useState(0)
-  const [procNotes, setProcNotes]     = useState('')
-  const [confirming, setConfirming]   = useState(false)
+  // ── Форма Опрацювання (корекції) ─────────────────────────────────────────────
+  const [showProc, setShowProc]   = useState(false)
+  const [procQtys, setProcQtys]   = useState<Record<number, number>>({})
+  const [procNotes, setProcNotes] = useState('')
+  const [confirming, setConfirming] = useState(false)
 
   const openProc = () => {
     const qtys: Record<number, number> = {}
@@ -394,7 +389,7 @@ function InvoiceDetailPanel({
       qty_delivered: qty,
     }))
     await api.post<Invoice>(`/invoices/${invoice.id}/corrective`, {
-      cash_received: cashReceived,
+      payment_amount: paymentAmount,
       notes: procNotes,
       lines,
     })
@@ -461,17 +456,7 @@ function InvoiceDetailPanel({
                 {sending ? 'Відправляємо...' : '▶ Відправити'}
               </button>
             )}
-            {status === 'sent' && (
-              <>
-                <button className={styles.btnProcess} onClick={handleProcess}>
-                  📦 Опрацювати
-                </button>
-                <button className={styles.btnAccept} onClick={handleAccept} disabled={accepting}>
-                  {accepting ? '...' : '✓ Прийнято'}
-                </button>
-              </>
-            )}
-            {status === 'processing' && (
+            {(status === 'sent' || status === 'processing') && (
               <>
                 <button className={styles.btnProcess} onClick={openProc}>
                   ✏ Внести корекції
@@ -614,16 +599,6 @@ function InvoiceDetailPanel({
         <div className={styles.processingPanel} style={{ maxWidth: 640, margin: '1rem auto 0' }}>
           <div className={styles.processingTitle}>Опрацювання після повернення водія</div>
           <div className={styles.cashRow}>
-            <span className={styles.cashLabel}>Готівка від водія (₴):</span>
-            <input
-              type="number"
-              min={0}
-              step={0.01}
-              value={cashReceived || ''}
-              onChange={(e) => setCashReceived(Number(e.target.value))}
-              className={styles.cashInput}
-              placeholder="0.00"
-            />
             <span className={styles.cashLabel}>Нотатка:</span>
             <input
               type="text"
@@ -698,7 +673,12 @@ function InvoiceDetailPanel({
       {corrective && (
         <div className={styles.correctivePaper}>
           <div className={styles.correctiveHeader}>
-            ↩ Коригуюча накладна №{corrective.invoice_number}
+            <span>↩ Коригуюча накладна №{corrective.invoice_number}</span>
+            <button
+              className={styles.btnPrintSmall}
+              title="Друкувати коригуючу накладну"
+              onClick={() => window.open(`/api/v1/print/invoice/${corrective.id}`, '_blank')}
+            >🖨</button>
           </div>
           <table className={styles.paperTable}>
             <thead>
@@ -756,6 +736,8 @@ export default function RoutesPage() {
   const [checkedIds,       setCheckedIds]       = useState<Set<number>>(new Set())
   const [checkedDraftIds,  setCheckedDraftIds]  = useState<Set<number>>(new Set())
   const [sendingDrafts,    setSendingDrafts]    = useState(false)
+  const [paymentAmounts,   setPaymentAmounts]   = useState<Record<number, number>>({})
+  const [acceptingBulk,    setAcceptingBulk]    = useState(false)
 
   // ── Resizable split ───────────────────────────────────────────────────────────
   const [leftWidth, setLeftWidth] = useState(50)
@@ -819,6 +801,14 @@ export default function RoutesPage() {
         .map((i) => i.id)
     )
     setCheckedIds(ids)
+    // Ініціалізуємо суми оплат: для нових накладних — total_sum, для вже прийнятих — не змінюємо
+    setPaymentAmounts(prev => {
+      const next = { ...prev }
+      invoices.forEach(inv => {
+        if (!(inv.id in next)) next[inv.id] = inv.total_sum
+      })
+      return next
+    })
   }, [invoices])
 
   // ── Допоміжні ─────────────────────────────────────────────────────────────────
@@ -966,6 +956,11 @@ export default function RoutesPage() {
     || allDraftCheckable.some((c) => checkedDraftIds.has(c.id))
   const checkedCount = [...checkedIds].filter((id) => invoices.some((i) => i.id === id)).length
 
+  const acceptableChecked = [...checkedIds].filter(id => {
+    const inv = invoices.find(i => i.id === id)
+    return inv && (inv.status === 'sent' || inv.status === 'processing')
+  })
+
   const headerCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (headerCheckRef.current) {
@@ -1048,6 +1043,23 @@ export default function RoutesPage() {
       })
     )
     await load(workDate)
+  }
+
+  // ── Масове прийняття ─────────────────────────────────────────────────────────────
+
+  const acceptChecked = async () => {
+    const toAccept = [...checkedIds].filter(id => {
+      const inv = invoices.find(i => i.id === id)
+      return inv && (inv.status === 'sent' || inv.status === 'processing')
+    })
+    if (!toAccept.length) return
+    setAcceptingBulk(true)
+    for (const id of toAccept) {
+      const paymentAmount = paymentAmounts[id] ?? 0
+      await api.put(`/invoices/${id}/status?status=accepted`, { payment_amount: paymentAmount })
+    }
+    await load(workDate)
+    setAcceptingBulk(false)
   }
 
   // ── Оновлення одного invoice ──────────────────────────────────────────────────
@@ -1151,6 +1163,11 @@ export default function RoutesPage() {
                   {sendingDrafts ? '...' : `▶ Відправити (${checkedDraftIds.size})`}
                 </button>
               )}
+              {acceptableChecked.length > 0 && (
+                <button className={styles.acceptSelBtn} onClick={acceptChecked} disabled={acceptingBulk}>
+                  {acceptingBulk ? '...' : `✓ Прийняти (${acceptableChecked.length})`}
+                </button>
+              )}
               {checkedCount > 0 && (
                 <button className={styles.printSelBtn} onClick={printChecked}>
                   🖨 Друкувати ({checkedCount})
@@ -1242,6 +1259,22 @@ export default function RoutesPage() {
                     )}
                   </span>
                   <span className={styles.rowSum}>{inv ? `${inv.total_sum.toFixed(2)} ₴` : ''}</span>
+                  {inv && inv.status !== 'cancelled' && (
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={paymentAmounts[inv.id] ?? inv.total_sum}
+                      disabled={inv.status === 'accepted'}
+                      className={styles.paymentInput}
+                      style={{ background: (paymentAmounts[inv.id] ?? inv.total_sum) > 0 ? '#f0fdf4' : '#f9fafb' }}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => {
+                        const v = Math.max(0, Number(e.target.value))
+                        setPaymentAmounts(prev => ({ ...prev, [inv.id]: v }))
+                      }}
+                    />
+                  )}
                 </div>
               )
             })}
@@ -1285,6 +1318,7 @@ export default function RoutesPage() {
               bakeryName={bakeryName}
               director={director}
               accountant={accountant}
+              paymentAmount={paymentAmounts[selectedInvoice.id] ?? selectedInvoice.total_sum}
               onStatusChange={handleStatusChange}
               onRefresh={() => load(workDate)}
             />

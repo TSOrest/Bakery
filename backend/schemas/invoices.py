@@ -61,10 +61,16 @@ class CorrectiveLineIn(BaseModel):
 
 
 class ProcessingUpdate(BaseModel):
-    """Дані при завершенні Опрацювання: сума від водія + фактичні кількості."""
-    cash_received: float = 0.0
+    """Дані при завершенні Опрацювання: фактичні кількості + оплата."""
+    payment_amount: float = 0.0   # оплата клієнта (0 = не оплачено)
+    cash_received: float = 0.0    # deprecated, залишено для сумісності
     notes: Optional[str] = None
     lines: List[CorrectiveLineIn] = []
+
+
+class AcceptBody(BaseModel):
+    """Тіло для прийняття накладної з сумою оплати."""
+    payment_amount: float = 0.0
 
 
 class InvoiceOut(BaseModel):

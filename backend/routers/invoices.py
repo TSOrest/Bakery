@@ -9,7 +9,7 @@ from backend.database import get_db
 from backend.models.invoices import Invoice, InvoiceLine
 from backend.schemas.invoices import (
     InvoiceCreate, InvoiceOut,
-    InvoiceLinesUpdate, ProcessingUpdate,
+    InvoiceLinesUpdate, ProcessingUpdate, AcceptBody,
 )
 from backend.services.invoices import generate_invoice_number, generate_corrective_number
 from backend.services.prices import get_price
@@ -297,12 +297,13 @@ def update_invoice_lines(
 def update_invoice_status(
     invoice_id: int,
     status: str,
+    body: AcceptBody = AcceptBody(),
     db: Session = Depends(get_db),
 ):
     """
     Переводить накладну у новий статус.
     draft → sent: заморожує (lines вже є), повертає should_print=True у полі notes (frontend обробляє)
-    sent/processing → accepted: автоматично створює фінансовий запис
+    sent/processing → accepted: створює фінансовий запис (борг) + оплату якщо payment_amount > 0
     """
     inv = db.get(Invoice, invoice_id)
     if not inv:
@@ -318,8 +319,10 @@ def update_invoice_status(
     inv.status = status
 
     if status == "accepted":
-        from backend.services.finance import create_invoice_finance_entry
+        from backend.services.finance import create_invoice_finance_entry, create_payment_finance_entry
         create_invoice_finance_entry(db, inv)
+        if body.payment_amount > 0:
+            create_payment_finance_entry(db, inv, body.payment_amount)
 
     db.commit()
     db.refresh(inv)
@@ -405,21 +408,13 @@ def create_corrective_invoice(
     # Приймаємо оригінальну накладну
     inv.status = "accepted"
 
-    from backend.services.finance import create_invoice_finance_entry
+    from backend.services.finance import create_invoice_finance_entry, create_payment_finance_entry
     create_invoice_finance_entry(db, inv)
 
-    # Фіксуємо готівку від водія
-    if data.cash_received and data.cash_received > 0:
-        from backend.models.finances import Finance
-        db.add(Finance(
-            finance_date=inv.invoice_date,
-            client_id=inv.client_id,
-            finance_type="route_cash",
-            amount=data.cash_received,
-            sign=1,
-            notes=f"Готівка по {inv.invoice_number}",
-            created_at=datetime.now().isoformat(),
-        ))
+    # Фіксуємо оплату клієнта (нове поле) або готівку від водія (legacy)
+    payment = data.payment_amount if data.payment_amount > 0 else (data.cash_received or 0.0)
+    if payment > 0:
+        create_payment_finance_entry(db, inv, payment)
 
     db.commit()
     if corr_inv:

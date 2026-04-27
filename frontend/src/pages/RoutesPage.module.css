@@ -348,6 +348,46 @@
 .printSelBtn:hover { background: #486282; }
 .printSelBtn:disabled { opacity: 0.5; cursor: default; }
 
+/* Кнопка "Прийняти вибрані" */
+.acceptSelBtn {
+  padding: 0.25rem 0.75rem;
+  background: #27ae60;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.acceptSelBtn:hover { background: #219a52; }
+.acceptSelBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* Поле оплати в рядку клієнта */
+.paymentInput {
+  width: 72px;
+  font-size: 0.78rem;
+  border: 1px solid #c8d8e8;
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  text-align: right;
+  color: #1a3a5c;
+}
+.paymentInput:disabled { color: #555; background: #f0fdf4 !important; cursor: default; }
+
+/* Кнопка друку (мала, в заголовку коригуючої) */
+.btnPrintSmall {
+  background: none;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #555;
+  margin-left: 0.5rem;
+}
+.btnPrintSmall:hover { background: #f0f4f8; }
+
 /* ─── Права панель ───────────────────────────────────────────────────────── */
 
 .invoiceDetail {
