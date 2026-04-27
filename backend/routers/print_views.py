@@ -218,78 +218,78 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
 
 BASE_CSS = """<style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, sans-serif; font-size: 9pt; color: #000; background: #fff; }
+body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background: #fff; }
 
 /* ── Дві накладні поряд ── */
 .page-pair {
   display: flex;
-  gap: 6mm;
-  padding: 6mm 8mm;
+  gap: 5mm;
+  padding: 3mm 5mm;
   page-break-after: always;
 }
 .inv-block {
   flex: 1;
   border: 1px solid #aaa;
-  padding: 5mm 4mm;
+  padding: 4mm 3mm;
   min-width: 0;
   position: relative;
 }
 
 /* ── Шапка ── */
-.inv-top { display: flex; justify-content: space-between; font-size: 8pt; margin-bottom: 1mm; }
-.city { font-size: 8.5pt; }
-.inv-date { font-size: 8.5pt; font-style: italic; }
-.copy-label { font-size: 8pt; color: #555; margin-bottom: 0; }
+.inv-top { display: flex; justify-content: space-between; font-size: 9pt; margin-bottom: 1mm; }
+.city { font-size: 9.5pt; }
+.inv-date { font-size: 9.5pt; font-style: italic; }
+.copy-label { font-size: 9pt; color: #555; margin-bottom: 0; }
 .inv-title {
-  font-size: 13pt; font-weight: bold; text-align: center;
-  margin: 2mm 0 3mm;
+  font-size: 14pt; font-weight: bold; text-align: center;
+  margin: 1.5mm 0 2mm;
   border-bottom: 2px solid #000;
-  padding-bottom: 2mm;
+  padding-bottom: 1.5mm;
 }
 .inv-num { border-bottom: 1px solid #000; min-width: 30mm; display: inline-block; }
 
 /* ── Мета-поля ── */
-.meta-tbl { width: 100%; border: none; margin-bottom: 2mm; }
-.meta-tbl td { border: none; padding: 0.8mm 0; font-size: 8.5pt; }
+.meta-tbl { width: 100%; border: none; margin-bottom: 1.5mm; }
+.meta-tbl td { border: none; padding: 0.5mm 0; font-size: 9.5pt; }
 .ml { width: 28mm; color: #333; white-space: nowrap; }
 .mv { border-bottom: 1px solid #000; }
 
 /* ── Таблиця товарів ── */
-.lines-tbl { width: 100%; border-collapse: collapse; margin-bottom: 2mm; font-size: 8.5pt; }
+.lines-tbl { width: 100%; border-collapse: collapse; margin-bottom: 1.5mm; font-size: 9.5pt; }
 .lines-tbl th {
   background: #d8d8d8; border: 1px solid #777;
-  padding: 1.5mm 1.5mm; font-size: 8pt; font-weight: bold;
+  padding: 1mm 1mm; font-size: 9pt; font-weight: bold;
 }
-.lines-tbl td { border: 1px solid #aaa; padding: 1mm 1.5mm; }
+.lines-tbl td { border: 1px solid #aaa; padding: 0.7mm 1mm; }
 .lines-tbl tr.subtotal td { background: #f0f0f0; border-top: 1px solid #888; }
 .c { text-align: center; }
 .r { text-align: right; }
 .n { }
 
 /* ── Секція обміну ── */
-.exch-section { margin-top: 2mm; }
+.exch-section { margin-top: 1.5mm; }
 .exch-title {
-  font-size: 8pt; font-weight: bold; text-transform: uppercase; color: #555;
-  border-top: 1px dashed #aaa; padding-top: 1.5mm; margin-bottom: 1mm;
+  font-size: 9pt; font-weight: bold; text-transform: uppercase; color: #555;
+  border-top: 1px dashed #aaa; padding-top: 1mm; margin-bottom: 1mm;
 }
 
 /* ── Підсумок ── */
 .total-line {
-  font-size: 8.5pt; margin: 2mm 0 0.5mm;
+  font-size: 9.5pt; margin: 1.5mm 0 0.5mm;
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 1mm;
 }
 .total-box {
-  font-size: 12pt; font-weight: bold;
+  font-size: 13pt; font-weight: bold;
   border: 2px solid #000; padding: 0.5mm 3mm;
   margin-left: 2mm;
 }
-.kopiyky { font-size: 8pt; color: #555; margin-bottom: 3mm; }
+.kopiyky { font-size: 9pt; color: #555; margin-bottom: 2mm; }
 
 /* ── Підписи ── */
 .sigs {
   display: flex; justify-content: space-between;
-  font-size: 8pt; margin-top: 2mm;
-  border-top: 1px solid #bbb; padding-top: 1.5mm;
+  font-size: 9pt; margin-top: 1.5mm;
+  border-top: 1px solid #bbb; padding-top: 1mm;
 }
 
 /* ── Бейкінг ── */
