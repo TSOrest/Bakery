@@ -109,6 +109,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className={styles.headerRight}>
+          <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
           <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
             <span>Дата роботи:</span>
             <input

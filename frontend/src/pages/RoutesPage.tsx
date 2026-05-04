@@ -7,6 +7,7 @@ import type {
 } from '../types'
 import styles from './RoutesPage.module.css'
 import PriceTypeBadge from '../components/PriceTypeBadge'
+import HelpTip from '../components/HelpTip'
 
 // ─── Лейбли статусів ───────────────────────────────────────────────────────────
 
@@ -1168,6 +1169,12 @@ export default function RoutesPage() {
                   {acceptingBulk ? '...' : `✓ Прийняти (${acceptableChecked.length})`}
                 </button>
               )}
+              <HelpTip width={300}>
+                <strong>Поле «Оплата» (зелений інпут)</strong> — сума отримана від клієнта. За замовч. = сума накладної.<br />
+                Змініть якщо клієнт оплатив частково або не оплатив (введіть 0).<br /><br />
+                <strong>✓ Прийняти (N)</strong> — масово приймає відмічені накладні і записує оплату у баланс кожного клієнта.<br /><br />
+                <strong>✏ Внести корекції</strong> — відкриває форму де можна змінити фактично доставлену кількість. Система створить коригуючу накладну.
+              </HelpTip>
               {checkedCount > 0 && (
                 <button className={styles.printSelBtn} onClick={printChecked}>
                   🖨 Друкувати ({checkedCount})

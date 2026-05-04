@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import type { Category, Client, Order, Product } from '../types'
 import styles from './OrderModal.module.css'
 import PriceTypeBadge, { type PriceSource } from './PriceTypeBadge'
+import HelpTip from './HelpTip'
 
 type EffectivePriceInfo = { price: number; source: PriceSource }
 
@@ -384,7 +385,14 @@ export default function OrderModal({
                   <th className={styles.thName}>Виріб</th>
                   <th className={styles.thWeight}>Вага</th>
                   <th className={styles.thPrice}>Ціна</th>
-                  <th className={styles.thAct}></th>
+                  <th className={styles.thAct}>
+                    <HelpTip width={280}>
+                      <strong>% — Знижка / своя ціна</strong><br />
+                      Додає рядок з індивідуальною ціною або знижкою для цього виробу.<br /><br />
+                      <strong>↩ — Обмін</strong><br />
+                      Клієнт повертає черствий товар і отримує свіжий безкоштовно. Введіть кількість на обмін — вона передається безплатно.
+                    </HelpTip>
+                  </th>
                   <th className={styles.thQtyH}>Кількість</th>
                   <th className={styles.thSum}>Сума</th>
                 </tr>

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import HelpPage from './pages/HelpPage'
 import { useEffect, useRef, useState } from 'react'
 import { DateProvider } from './context/DateContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -163,6 +164,7 @@ function AppRoutes() {
           <Route path="shop"      element={<ShopPage />} />
           <Route path="finances"  element={<FinancesPage />} />
           <Route path="admin"     element={<AdminPage />} />
+          <Route path="help"      element={<HelpPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

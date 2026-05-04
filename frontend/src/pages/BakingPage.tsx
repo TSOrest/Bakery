@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
+import HelpTip from '../components/HelpTip'
 import type {
   BakingTask, Category, Client, Order, Product, ShortageClientInfo,
 } from '../types'
@@ -951,7 +952,16 @@ export default function BakingPage() {
 
             {withDiscrepancy.length > 0 && (
               <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Розбіжності</h3>
+                <h3 className={styles.sectionTitle}>
+                  Розбіжності{' '}
+                  <HelpTip width={300}>
+                    <strong>Надлишок</strong> — спечено більше ніж замовлено.<br />
+                    Потрібно розподілити: до магазину, маршруту або списати.<br /><br />
+                    <strong>Нестача</strong> — спечено менше ніж замовлено.<br />
+                    Зменшіть кількість у замовленнях або домовтесь з клієнтами.<br /><br />
+                    Для незамовленого виробу: натисніть «Показати всі» і введіть кількість у полі «Спечено».
+                  </HelpTip>
+                </h3>
                 <p className={styles.hint}>
                   Вироби де спечено ≠ замовлено або є нерозподілені записи.
                 </p>
