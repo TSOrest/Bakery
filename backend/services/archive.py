@@ -164,21 +164,23 @@ def run_archive(db: Session, cutoff_date: str) -> dict[str, Any]:
         )
 
     # ── 2. Cascade: cancellation_lines → route_cancellations ──────────────────
-    r = db.execute(
-        text("""
-            DELETE FROM cancellation_lines
-            WHERE cancellation_id IN (
-                SELECT id FROM route_cancellations WHERE cancel_date < :c
-            )
-        """),
-        {"c": c},
-    )
-    deleted["cancellation_lines"] = r.rowcount
+    if _table_exists(db, "cancellation_lines"):
+        r = db.execute(
+            text("""
+                DELETE FROM cancellation_lines
+                WHERE cancellation_id IN (
+                    SELECT id FROM route_cancellations WHERE cancel_date < :c
+                )
+            """),
+            {"c": c},
+        )
+        deleted["cancellation_lines"] = r.rowcount
 
-    r = db.execute(
-        text("DELETE FROM route_cancellations WHERE cancel_date < :c"), {"c": c}
-    )
-    deleted["route_cancellations"] = r.rowcount
+    if _table_exists(db, "route_cancellations"):
+        r = db.execute(
+            text("DELETE FROM route_cancellations WHERE cancel_date < :c"), {"c": c}
+        )
+        deleted["route_cancellations"] = r.rowcount
 
     # ── 3. Прості таблиці ──────────────────────────────────────────────────────
     for table, col in [
