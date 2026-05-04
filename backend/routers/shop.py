@@ -1365,12 +1365,24 @@ def pos_products(shop_client_id: int, date: str, db: Session = Depends(get_db)):
                 continue
 
             price = _get_shop_price(db, shop_client_id, ln.product_id, date)
-            # Для старих партій підказка ціни — остання ціна реалізації
+
+            cat_id = product.category_id
+            cat_name = None
+            is_baked_cat = False
+            if cat_id:
+                cat = db.get(Category, cat_id)
+                cat_name = cat.name if cat else None
+                is_baked_cat = bool(cat and cat.is_baked)
+
+            # age_days — тільки для виробів що випікаються (Хліб/Булки).
+            # Товари категорії "Інше" (is_baked=0) не черствіють → age_days=None.
+            # Для NULL-партій (залишок з попередньої звірки) рахуємо від period_from.
             age_days: Optional[int] = None
-            if ln.batch_date:
-                age_days = (today - _date_type.fromisoformat(ln.batch_date)).days
+            if is_baked_cat:
+                ref_date = ln.batch_date or period_from
+                age_days = (today - _date_type.fromisoformat(ref_date)).days
+                # Підказка ціни для старих партій
                 if age_days > 0 and not price:
-                    # Шукаємо останній sale-disposal для цього продукту
                     last_sale_d = (
                         db.query(ShopDisposalLine)
                         .join(ShopReconciliationLine)
@@ -1384,12 +1396,6 @@ def pos_products(shop_client_id: int, date: str, db: Session = Depends(get_db)):
                     )
                     if last_sale_d:
                         price = last_sale_d.price
-
-            cat_id = product.category_id
-            cat_name = None
-            if cat_id:
-                cat = db.get(Category, cat_id)
-                cat_name = cat.name if cat else None
 
             rows.append(PosProductRow(
                 product_id=ln.product_id,
