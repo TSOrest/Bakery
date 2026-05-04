@@ -99,14 +99,26 @@ def get_archive_preview(db: Session, cutoff_date: str) -> dict[str, Any]:
         {"c": c},
     ).scalar() or 0
 
+    # Фінанси: NULL article_id також видаляються (крім snapshot)
     counts["finances"] = db.execute(
         text("""
             SELECT COUNT(*) FROM finances
             WHERE finance_date < :c
-              AND (SELECT name FROM finance_articles WHERE id = article_id) != :snap
+              AND (article_id IS NULL
+                   OR (SELECT name FROM finance_articles WHERE id = article_id) != :snap)
         """),
         {"c": c, "snap": ARCHIVE_SNAPSHOT_ARTICLE_NAME},
     ).scalar() or 0
+
+    # Магазин: закриті звірки (period_to < cutoff)
+    if _table_exists(db, "shop_reconciliations"):
+        counts["shop_reconciliations"] = db.execute(
+            text("SELECT COUNT(*) FROM shop_reconciliations WHERE closed = 1 AND period_to < :c"),
+            {"c": c},
+        ).scalar() or 0
+
+    counts["shop_receipts"] = _count_if_exists(db, "shop_receipts", "receipt_date", c)
+    counts["shop_sales"]    = _count_if_exists(db, "shop_sales",    "sale_date",    c)
 
     total = sum(counts.values())
     return {"cutoff_date": c, "tables": counts, "total": total}
@@ -242,12 +254,58 @@ def run_archive(db: Session, cutoff_date: str) -> dict[str, Any]:
     deleted["invoices"] = r.rowcount
     # invoice_lines видаляються каскадно через ON DELETE CASCADE
 
-    # ── 7. Finances (крім щойно доданих snapshot) ─────────────────────────────
+    # ── 7. Магазин: cascade shop_disposal_lines → lines → reconciliations ───────
+    if _table_exists(db, "shop_disposal_lines") and _table_exists(db, "shop_reconciliation_lines"):
+        r = db.execute(
+            text("""
+                DELETE FROM shop_disposal_lines
+                WHERE reconciliation_line_id IN (
+                    SELECT l.id FROM shop_reconciliation_lines l
+                    JOIN shop_reconciliations r ON r.id = l.reconciliation_id
+                    WHERE r.closed = 1 AND r.period_to < :c
+                )
+            """),
+            {"c": c},
+        )
+        deleted["shop_disposal_lines"] = r.rowcount
+
+    if _table_exists(db, "shop_reconciliation_lines"):
+        r = db.execute(
+            text("""
+                DELETE FROM shop_reconciliation_lines
+                WHERE reconciliation_id IN (
+                    SELECT id FROM shop_reconciliations WHERE closed = 1 AND period_to < :c
+                )
+            """),
+            {"c": c},
+        )
+        deleted["shop_reconciliation_lines"] = r.rowcount
+
+    if _table_exists(db, "shop_reconciliations"):
+        r = db.execute(
+            text("DELETE FROM shop_reconciliations WHERE closed = 1 AND period_to < :c"),
+            {"c": c},
+        )
+        deleted["shop_reconciliations"] = r.rowcount
+
+    if _table_exists(db, "shop_receipts"):
+        r = db.execute(
+            text("DELETE FROM shop_receipts WHERE receipt_date < :c"), {"c": c}
+        )
+        deleted["shop_receipts"] = r.rowcount
+
+    if _table_exists(db, "shop_sales"):
+        r = db.execute(
+            text("DELETE FROM shop_sales WHERE sale_date < :c"), {"c": c}
+        )
+        deleted["shop_sales"] = r.rowcount
+
+    # ── 8. Finances (крім щойно доданих snapshot) — включно з NULL article_id ──
     r = db.execute(
         text("""
             DELETE FROM finances
             WHERE finance_date < :c
-              AND article_id != :aid
+              AND (article_id IS NULL OR article_id != :aid)
         """),
         {"c": c, "aid": snap_article_id},
     )
