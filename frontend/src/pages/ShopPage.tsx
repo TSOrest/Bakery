@@ -103,6 +103,9 @@ export default function ShopPage() {
   const [loading, setLoading]           = useState(false)
   const [loadError, setLoadError]       = useState<string | null>(null)
   const [activeShopId, setActiveShopId] = useState<number | null>(null)
+  const [posUrl, setPosUrl]             = useState<string>('')
+  const [showPosUrl, setShowPosUrl]     = useState(false)
+  const [urlCopied, setUrlCopied]       = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -115,6 +118,27 @@ export default function ShopPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Формуємо POS URL з реальним IP сервера
+  useEffect(() => {
+    const host = window.location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      // Вже підключено через IP — використовуємо його
+      setPosUrl(`http://${host}:${window.location.port || 8000}/pos`)
+    } else {
+      // Запитуємо реальний IP з бекенду
+      api.get<{ local_ip: string; port: number }>('/settings/server-info')
+        .then(info => setPosUrl(`http://${info.local_ip}:${info.port}/pos`))
+        .catch(() => setPosUrl(`http://${host}:${window.location.port || 8000}/pos`))
+    }
+  }, [])
+
+  const copyPosUrl = () => {
+    navigator.clipboard.writeText(posUrl).then(() => {
+      setUrlCopied(true)
+      setTimeout(() => setUrlCopied(false), 2000)
+    })
   }
 
   useEffect(() => { load() }, [workDate]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -146,17 +170,48 @@ export default function ShopPage() {
         </div>
       ) : (
         <>
-          {/* Горизонтальні вкладки магазинів */}
-          <div style={{ ...shopTabsBarStyle, flexShrink: 0 }}>
-            {shops.map((shop) => (
+          {/* Горизонтальні вкладки магазинів + POS-кнопки */}
+          <div style={{ ...shopTabsBarStyle, flexShrink: 0, justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              {shops.map((shop) => (
+                <button
+                  key={shop.id}
+                  onClick={() => setActiveShopId(shop.id)}
+                  style={activeShopId === shop.id ? shopTabActiveStyle : shopTabStyle}
+                >
+                  🏪 {shop.short_name ?? shop.name}
+                </button>
+              ))}
+            </div>
+            {/* POS-блок */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
               <button
-                key={shop.id}
-                onClick={() => setActiveShopId(shop.id)}
-                style={activeShopId === shop.id ? shopTabActiveStyle : shopTabStyle}
+                onClick={() => window.open(posUrl, '_blank')}
+                title={`Відкрити POS: ${posUrl}`}
+                style={{ padding: '0.3rem 0.75rem', background: '#1e293b', color: '#f1f5f9', border: 'none', borderRadius: 6, fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
               >
-                🏪 {shop.short_name ?? shop.name}
+                🖥 Відкрити касу
               </button>
-            ))}
+              <button
+                onClick={() => setShowPosUrl(v => !v)}
+                title="Показати URL для підключення з іншого пристрою"
+                style={{ padding: '0.3rem 0.6rem', background: showPosUrl ? '#334155' : '#475569', color: '#e2e8f0', border: 'none', borderRadius: 6, fontSize: '0.82rem', cursor: 'pointer' }}
+              >
+                🔗
+              </button>
+              {showPosUrl && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 6, padding: '0.2rem 0.4rem 0.2rem 0.6rem' }}>
+                  <span style={{ fontSize: '0.78rem', color: '#334155', fontFamily: 'monospace', userSelect: 'all' }}>{posUrl}</span>
+                  <button
+                    onClick={copyPosUrl}
+                    title="Скопіювати URL"
+                    style={{ padding: '0.15rem 0.45rem', background: urlCopied ? '#16a34a' : '#e2e8f0', color: urlCopied ? '#fff' : '#475569', border: 'none', borderRadius: 4, fontSize: '0.75rem', cursor: 'pointer', flexShrink: 0 }}
+                  >
+                    {urlCopied ? '✓' : '⎘'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>

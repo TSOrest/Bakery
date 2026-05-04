@@ -181,6 +181,27 @@ def reset_database(db: Session = Depends(get_db)):
     return {"status": "ok"}
 
 
+@router.get("/server-info")
+def server_info():
+    """Повертає локальну IP-адресу сервера та порт для формування POS URL."""
+    import socket
+    import os
+    ip = "127.0.0.1"
+    try:
+        # Надійний спосіб отримати IP локальної мережі (без реального пакету)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            pass
+    port = int(os.environ.get("BAKERY_PORT", 8000))
+    return {"local_ip": ip, "port": port}
+
+
 @router.delete("/telegram/authorized/{chat_id}")
 def telegram_revoke(chat_id: str, db: Session = Depends(get_db)):
     """Відкликає доступ у конкретного чату."""
