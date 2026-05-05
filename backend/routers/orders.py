@@ -9,6 +9,7 @@ from backend.database import get_db
 from backend.models.orders import Order
 from backend.schemas.orders import OrderCreate, OrderUpdate, OrderOut, TransferRequest, OrderWithChildrenOut
 from backend.services.orders import copy_orders
+from backend.routers.auth import require_user
 
 router = APIRouter(prefix="/orders", tags=["Замовлення"])
 
@@ -73,7 +74,7 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=OrderOut, status_code=201)
-def create_order(data: OrderCreate, db: Session = Depends(get_db)):
+def create_order(data: OrderCreate, db: Session = Depends(get_db), _=Depends(require_user)):
     o = Order(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(o)
     db.commit()
@@ -82,7 +83,7 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{order_id}", response_model=OrderOut)
-def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)):
+def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db), _=Depends(require_user)):
     o = db.get(Order, order_id)
     if not o:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
@@ -94,7 +95,7 @@ def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{order_id}", status_code=204)
-def delete_order(order_id: int, db: Session = Depends(get_db)):
+def delete_order(order_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     o = db.get(Order, order_id)
     if not o:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
@@ -107,6 +108,7 @@ def transfer_order(
     order_id: int,
     data: TransferRequest,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """
     Переміщує частину замовлення іншому клієнту.
@@ -155,6 +157,7 @@ def copy_orders_endpoint(
     target_date: str,
     client_ids: Optional[List[int]] = None,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """Копіює замовлення з однієї дати на іншу."""
     count = copy_orders(db, source_date, target_date, client_ids)

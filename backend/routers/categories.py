@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.references import Category, Unit
 from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate
+from backend.routers.auth import require_admin
 
 router = APIRouter(tags=["Довідники"])
 
@@ -20,7 +21,7 @@ def list_categories(active_only: bool = False, db: Session = Depends(get_db)):
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
-def create_category(name: str, db: Session = Depends(get_db)):
+def create_category(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = Category(name=name)
     db.add(c)
     try:
@@ -33,7 +34,7 @@ def create_category(name: str, db: Session = Depends(get_db)):
 
 
 @router.put("/categories/{category_id}", response_model=CategoryOut)
-def update_category(category_id: int, body: CategoryUpdate, db: Session = Depends(get_db)):
+def update_category(category_id: int, body: CategoryUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = db.get(Category, category_id)
     if not c:
         raise HTTPException(status_code=404, detail="Категорію не знайдено")
@@ -57,7 +58,7 @@ def update_category(category_id: int, body: CategoryUpdate, db: Session = Depend
 
 
 @router.delete("/categories/{category_id}", status_code=204)
-def delete_category(category_id: int, db: Session = Depends(get_db)):
+def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = db.get(Category, category_id)
     if not c:
         raise HTTPException(status_code=404, detail="Категорію не знайдено")
@@ -74,7 +75,7 @@ def list_units(active_only: bool = False, db: Session = Depends(get_db)):
 
 
 @router.post("/units", response_model=UnitOut, status_code=201)
-def create_unit(name: str, db: Session = Depends(get_db)):
+def create_unit(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
     u = Unit(name=name)
     db.add(u)
     try:
@@ -87,7 +88,7 @@ def create_unit(name: str, db: Session = Depends(get_db)):
 
 
 @router.put("/units/{unit_id}", response_model=UnitOut)
-def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db)):
+def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     u = db.get(Unit, unit_id)
     if not u:
         raise HTTPException(status_code=404, detail="Одиницю не знайдено")
@@ -105,7 +106,7 @@ def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/units/{unit_id}", status_code=204)
-def delete_unit(unit_id: int, db: Session = Depends(get_db)):
+def delete_unit(unit_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
     u = db.get(Unit, unit_id)
     if not u:
         raise HTTPException(status_code=404, detail="Одиницю не знайдено")

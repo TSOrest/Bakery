@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.references import Route
 from backend.schemas.references import RouteCreate, RouteOut
+from backend.routers.auth import require_user, require_admin
 
 router = APIRouter(prefix="/routes", tags=["Маршрути"])
 
@@ -19,7 +20,7 @@ def list_routes(active_only: bool = True, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=RouteOut, status_code=201)
-def create_route(data: RouteCreate, db: Session = Depends(get_db)):
+def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     r = Route(**data.model_dump())
     db.add(r)
     db.commit()
@@ -28,7 +29,7 @@ def create_route(data: RouteCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{route_id}", response_model=RouteOut)
-def update_route(route_id: int, data: RouteCreate, db: Session = Depends(get_db)):
+def update_route(route_id: int, data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     r = db.get(Route, route_id)
     if not r:
         raise HTTPException(status_code=404, detail="Маршрут не знайдено")

@@ -15,6 +15,7 @@ from backend.schemas.finance import (
     FinanceCreate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
 )
 from backend.services.finance import get_all_balances, get_summary
+from backend.routers.auth import require_user
 
 router = APIRouter(prefix="/finances", tags=["Фінанси"])
 
@@ -197,7 +198,7 @@ def client_history(
 # ── Додавання операцій ─────────────────────────────────────────────────────────
 
 @router.post("/", response_model=FinanceOut, status_code=201)
-def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
+def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends(require_user)):
     # Перевірка: чи потрібен client_id для цієї операції
     if data.article_id:
         # Нова логіка: визначаємо за needs_client статті
@@ -236,7 +237,7 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db)):
 # ── Видалення ─────────────────────────────────────────────────────────────────
 
 @router.delete("/{finance_id}", status_code=204)
-def delete_finance(finance_id: int, db: Session = Depends(get_db)):
+def delete_finance(finance_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     entry = db.get(Finance, finance_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Запис не знайдено")

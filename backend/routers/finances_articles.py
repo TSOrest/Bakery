@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.finances import Finance, FinanceArticle
 from backend.schemas.finance import FinanceArticleCreate, FinanceArticleUpdate, FinanceArticleOut
+from backend.routers.auth import require_admin
 
 router = APIRouter(prefix="/finances/articles", tags=["Статті фінансів"])
 
@@ -17,7 +18,7 @@ def list_articles(db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=FinanceArticleOut, status_code=201)
-def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db)):
+def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     article = FinanceArticle(name=data.name, direction=data.direction, is_system=0, needs_client=data.needs_client)
     db.add(article)
     db.commit()
@@ -26,7 +27,7 @@ def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{article_id}", response_model=FinanceArticleOut)
-def update_article(article_id: int, data: FinanceArticleUpdate, db: Session = Depends(get_db)):
+def update_article(article_id: int, data: FinanceArticleUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     article = db.get(FinanceArticle, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Статтю не знайдено")
@@ -38,7 +39,7 @@ def update_article(article_id: int, data: FinanceArticleUpdate, db: Session = De
 
 
 @router.delete("/{article_id}", status_code=204)
-def delete_article(article_id: int, db: Session = Depends(get_db)):
+def delete_article(article_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
     article = db.get(FinanceArticle, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Статтю не знайдено")

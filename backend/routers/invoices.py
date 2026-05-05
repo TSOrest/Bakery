@@ -13,6 +13,7 @@ from backend.schemas.invoices import (
 )
 from backend.services.invoices import generate_invoice_number, generate_corrective_number
 from backend.services.prices import get_price
+from backend.routers.auth import require_user
 
 router = APIRouter(prefix="/invoices", tags=["Накладні"])
 
@@ -62,6 +63,7 @@ def generate_from_orders(
     client_id: Optional[int] = None,
     initial_status: str = "sent",
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """
     Генерує накладні на основі замовлень.
@@ -226,7 +228,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=InvoiceOut, status_code=201)
-def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
+def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db), _=Depends(require_user)):
     number = generate_invoice_number(db, data.invoice_date)
 
     inv = Invoice(
@@ -268,6 +270,7 @@ def update_invoice_lines(
     invoice_id: int,
     data: InvoiceLinesUpdate,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """Оновлює кількості рядків накладної. Тільки в статусі draft."""
     inv = db.get(Invoice, invoice_id)
@@ -299,6 +302,7 @@ def update_invoice_status(
     status: str,
     body: AcceptBody = AcceptBody(),
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """
     Переводить накладну у новий статус.
@@ -343,6 +347,7 @@ def create_corrective_invoice(
     invoice_id: int,
     data: ProcessingUpdate,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """
     Завершує Опрацювання:
@@ -430,6 +435,7 @@ def process_return(
     invoice_id: int,
     body: dict,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """
     Застарілий ендпоінт — залишається для сумісності.

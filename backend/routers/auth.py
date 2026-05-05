@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import secrets
 from datetime import datetime
 from typing import Optional
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.auth import User, UserSession
 from backend.models.settings import Setting
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Авторизація"])
 
@@ -28,9 +31,52 @@ ROLE_LABELS = {
 
 
 # ─── Хешування ───────────────────────────────────────────────────────────────
+# Нові паролі хешуються через bcrypt. Старі (SHA256+salt) — залишаємось
+# сумісними при login, з автоматичним апгрейдом до bcrypt.
 
-def _hash(password: str, salt: str) -> str:
+try:
+    import bcrypt
+    _BCRYPT_AVAILABLE = True
+except ImportError:
+    _BCRYPT_AVAILABLE = False
+    log.warning("bcrypt не встановлено — нові паролі хешуватимуться SHA256 (legacy fallback)")
+
+
+def _hash_legacy(password: str, salt: str) -> str:
+    """Legacy SHA256 — використовується тільки якщо bcrypt недоступний."""
     return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+
+
+def _hash_bcrypt(password: str) -> str:
+    """Хешує пароль через bcrypt (cost=12). Salt вбудований у hash."""
+    h = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12))
+    return h.decode("utf-8")
+
+
+def _hash_password(password: str, salt: str) -> str:
+    """Створює новий хеш — bcrypt (нове) або SHA256 (fallback)."""
+    if _BCRYPT_AVAILABLE:
+        return _hash_bcrypt(password)
+    return _hash_legacy(password, salt)
+
+
+def _is_bcrypt_hash(h: str) -> bool:
+    return isinstance(h, str) and h.startswith(("$2a$", "$2b$", "$2y$"))
+
+
+def _verify_password(password: str, password_hash: str, salt: str) -> bool:
+    """Перевіряє пароль проти збереженого хешу — підтримує bcrypt і legacy SHA256."""
+    if not password_hash:
+        return False
+    if _is_bcrypt_hash(password_hash):
+        if not _BCRYPT_AVAILABLE:
+            return False
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except Exception:
+            return False
+    # Legacy SHA256
+    return _hash_legacy(password, salt) == password_hash
 
 
 def _make_salt() -> str:
@@ -145,8 +191,17 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
         .filter(User.username == body.username, User.is_active == 1)
         .first()
     )
-    if not user or _hash(body.password, user.salt) != user.password_hash:
+    if not user or not _verify_password(body.password, user.password_hash, user.salt):
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
+
+    # Auto-upgrade legacy SHA256 → bcrypt при успішному login
+    if _BCRYPT_AVAILABLE and not _is_bcrypt_hash(user.password_hash):
+        try:
+            user.password_hash = _hash_bcrypt(body.password)
+            user.salt = _make_salt()  # salt тепер не потрібен але залишаємо для сумісності
+            db.flush()
+        except Exception as exc:
+            log.warning("Failed to upgrade password hash for user %s: %s", user.username, exc)
 
     token = secrets.token_hex(32)
     db.add(UserSession(token=token, user_id=user.id, created_at=datetime.now().isoformat()))
@@ -215,7 +270,7 @@ def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Sess
     salt = _make_salt()
     user = User(
         username=body.username,
-        password_hash=_hash(body.password, salt),
+        password_hash=_hash_password(body.password, salt),
         salt=salt,
         full_name=body.full_name,
         role=body.role,
@@ -250,6 +305,6 @@ def update_user(
         user.is_active = body.is_active
     if body.password:
         user.salt = _make_salt()
-        user.password_hash = _hash(body.password, user.salt)
+        user.password_hash = _hash_password(body.password, user.salt)
     db.commit()
     return {"id": user.id, "username": user.username, "role": user.role}

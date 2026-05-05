@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.references import Client
 from backend.schemas.references import ClientCreate, ClientUpdate, ClientOut
+from backend.routers.auth import require_admin
 
 router = APIRouter(prefix="/clients", tags=["Клієнти"])
 
@@ -33,7 +34,7 @@ def get_client(client_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=ClientOut, status_code=201)
-def create_client(data: ClientCreate, db: Session = Depends(get_db)):
+def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     from datetime import datetime
     c = Client(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(c)
@@ -43,7 +44,7 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{client_id}", response_model=ClientOut)
-def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db)):
+def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
@@ -55,7 +56,7 @@ def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{client_id}", status_code=204)
-def deactivate_client(client_id: int, db: Session = Depends(get_db)):
+def deactivate_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")

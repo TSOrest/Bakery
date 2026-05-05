@@ -11,6 +11,7 @@ from backend.database import get_db
 from backend.models.baking import BakingTask
 from backend.schemas.baking import BakingTaskOut, BakingTaskUpdate
 from backend.services.orders import aggregate_for_baking
+from backend.routers.auth import require_user
 
 router = APIRouter(prefix="/baking", tags=["Випічка"])
 
@@ -23,7 +24,7 @@ def get_baking_tasks(task_date: str, db: Session = Depends(get_db)):
 
 
 @router.post("/tasks/generate")
-def generate_tasks(task_date: str, db: Session = Depends(get_db)):
+def generate_tasks(task_date: str, db: Session = Depends(get_db), _=Depends(require_user)):
     """
     Генерує завдання на випічку на основі замовлень.
     Резерв (category.reserve_pct) додається і заокруглюється вгору
@@ -100,7 +101,7 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db)):
 
 
 @router.post("/tasks/ensure", response_model=BakingTaskOut)
-def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db)):
+def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     """Створює задачу на випічку для виробу без замовлень якщо вона ще не існує."""
     existing = db.query(BakingTask).filter(
         BakingTask.task_date == task_date,
@@ -122,7 +123,7 @@ def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/tasks/{task_id}", response_model=BakingTaskOut)
-def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_db)):
+def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_db), _=Depends(require_user)):
     task = db.get(BakingTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Завдання не знайдено")

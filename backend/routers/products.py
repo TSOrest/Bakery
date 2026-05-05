@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.references import Product
 from backend.schemas.references import ProductCreate, ProductUpdate, ProductOut
+from backend.routers.auth import require_admin
 
 router = APIRouter(prefix="/products", tags=["Вироби"])
 
@@ -57,7 +58,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=ProductOut, status_code=201)
-def create_product(data: ProductCreate, db: Session = Depends(get_db)):
+def create_product(data: ProductCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     from datetime import datetime
     p = Product(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)
@@ -67,7 +68,7 @@ def create_product(data: ProductCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{product_id}", response_model=ProductOut)
-def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(get_db)):
+def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     p = db.get(Product, product_id)
     if not p:
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
@@ -79,7 +80,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
 
 
 @router.delete("/{product_id}", status_code=204)
-def deactivate_product(product_id: int, db: Session = Depends(get_db)):
+def deactivate_product(product_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
     """М'яке видалення — ставимо is_active=0."""
     p = db.get(Product, product_id)
     if not p:

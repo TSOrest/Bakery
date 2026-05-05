@@ -108,13 +108,14 @@ def _seed_initial_data() -> None:
             for name, direction, is_system in DEFAULT_FINANCE_ARTICLES:
                 db.add(FinanceArticle(name=name, direction=direction, is_system=is_system))
 
-        # Користувачі
+        # Користувачі — використовуємо bcrypt через _hash_password з auth.py
         if db.query(User).count() == 0:
+            from backend.routers.auth import _hash_password
             for username, password, full_name, role in DEFAULT_USERS:
                 salt = secrets.token_hex(16)
                 db.add(User(
                     username=username,
-                    password_hash=hashlib.sha256(f"{salt}{password}".encode()).hexdigest(),
+                    password_hash=_hash_password(password, salt),
                     salt=salt,
                     full_name=full_name,
                     role=role,
