@@ -51,8 +51,33 @@ def get_db():
         db.close()
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    """Чи існує колонка в таблиці (для ідемпотентності ALTER TABLE ADD COLUMN)."""
+    try:
+        rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        return any(r[1] == column for r in rows)
+    except Exception:
+        return False
+
+
+def _should_skip_alter_add_column(conn, stmt: str) -> bool:
+    """Перевіряє чи це ALTER TABLE ADD COLUMN для вже існуючої колонки."""
+    import re
+    m = re.match(
+        r"^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)",
+        stmt, re.IGNORECASE
+    )
+    if not m:
+        return False
+    return _column_exists(conn, m.group(1), m.group(2))
+
+
 def run_migrations() -> None:
-    """Автоматично застосовує нові SQL-міграції з database/migrations/."""
+    """Автоматично застосовує нові SQL-міграції з database/migrations/.
+
+    Логіка ідемпотентна: кожен statement обгорнуто окремим try/except,
+    ALTER TABLE ADD COLUMN для існуючих колонок пропускається без помилки.
+    """
     migrations_dir = Path(__file__).parent.parent / "database" / "migrations"
     if not migrations_dir.exists():
         return
@@ -69,15 +94,33 @@ def run_migrations() -> None:
         for sql_file in sorted(migrations_dir.glob("*.sql")):
             if sql_file.name in applied:
                 continue
+            sql = sql_file.read_text(encoding="utf-8")
+            errors: list[str] = []
+            for raw_stmt in sql.split(";"):
+                # Прибираємо коментарі окремими рядками
+                lines = [ln for ln in raw_stmt.splitlines() if not ln.strip().startswith("--")]
+                stmt = "\n".join(lines).strip()
+                if not stmt:
+                    continue
+                # Пропустити ALTER TABLE ADD COLUMN якщо колонка вже існує
+                if _should_skip_alter_add_column(conn, stmt):
+                    continue
+                try:
+                    conn.execute(text(stmt))
+                except Exception as exc:
+                    # Логуємо кожну помилку — попередньо мовчазно ховались
+                    errors.append(f"{stmt[:120]}... → {exc}")
+                    conn.rollback()
+                    continue
             try:
-                sql = sql_file.read_text(encoding="utf-8")
-                for statement in sql.split(";"):
-                    stmt = statement.strip()
-                    if stmt:
-                        conn.execute(text(stmt))
                 conn.execute(text("INSERT INTO schema_migrations (name) VALUES (:n)"), {"n": sql_file.name})
                 conn.commit()
-                log.info("Migration applied: %s", sql_file.name)
+                if errors:
+                    log.warning("Migration %s applied with %d statement errors:", sql_file.name, len(errors))
+                    for e in errors:
+                        log.warning("  %s", e)
+                else:
+                    log.info("Migration applied: %s", sql_file.name)
             except Exception as exc:
-                log.warning("Migration %s skipped: %s", sql_file.name, exc)
+                log.warning("Could not mark migration %s as applied: %s", sql_file.name, exc)
                 conn.rollback()

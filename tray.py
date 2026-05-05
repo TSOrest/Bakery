@@ -273,14 +273,33 @@ def _backup_db() -> str:
     dst = backup_dir / f"bakery_{ts}.db"
     meta_dst = backup_dir / f"bakery_{ts}.meta.json"
 
-    # SQLite online backup — безпечно при активних з'єднаннях
+    # SQLite online backup — безпечно при активних з'єднаннях.
+    # Спочатку checkpoint(TRUNCATE) щоб скинути WAL у основний файл —
+    # це гарантує що бекап і його хмарна копія міститимуть найсвіжіші дані.
     try:
         src_con = sqlite3.connect(str(DB_FILE))
+        try:
+            src_con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
         dst_con = sqlite3.connect(str(dst))
         with dst_con:
             src_con.backup(dst_con)
         dst_con.close()
         src_con.close()
+
+        # Перевірка цілісності щойно створеного бекапу
+        try:
+            chk_con = sqlite3.connect(str(dst))
+            res = chk_con.execute("PRAGMA integrity_check").fetchone()
+            chk_con.close()
+            if res and res[0] != "ok":
+                # Невалідний бекап — видаляємо щоб не вводити в оману
+                try: dst.unlink()
+                except Exception: pass
+                return ""
+        except Exception:
+            pass
     except Exception:
         # Fallback: звичайна копія (якщо сервер вже зупинений)
         shutil.copy2(DB_FILE, dst)
