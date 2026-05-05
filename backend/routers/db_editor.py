@@ -26,6 +26,10 @@ def _require_admin(user=Depends(get_current_user)):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _validate_table(db: Session, table: str) -> None:
+    """Валідує що таблиця існує і має безпечну назву (тільки [a-zA-Z0-9_])."""
+    import re
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table or ""):
+        raise HTTPException(400, "Невалідна назва таблиці")
     exists = db.execute(
         text("SELECT name FROM sqlite_master WHERE type='table' AND name=:n"),
         {"n": table}
@@ -37,6 +41,12 @@ def _validate_table(db: Session, table: str) -> None:
 def _get_pk_col(db: Session, table: str) -> Optional[str]:
     cols = db.execute(text(f'PRAGMA table_info("{table}")')).fetchall()
     return next((c[1] for c in cols if c[5] > 0), None)
+
+
+def _get_column_names(db: Session, table: str) -> set[str]:
+    """Повертає set назв колонок таблиці — для валідації user input."""
+    cols = db.execute(text(f'PRAGMA table_info("{table}")')).fetchall()
+    return {c[1] for c in cols}
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -267,13 +277,25 @@ def update_row(
     if not pk_col:
         raise HTTPException(400, "Таблиця без PRIMARY KEY")
 
-    update_data = {k: v for k, v in body.items() if k != pk_col}
+    # Валідуємо що всі ключі body — це реальні колонки таблиці.
+    # Без цього зловмисник міг би передати key з SQL, наприклад:
+    # {'name"; DROP TABLE users; --': 'x'} → injection через f-string у set_clause.
+    valid_cols = _get_column_names(db, table)
+    update_data = {k: v for k, v in body.items() if k != pk_col and k in valid_cols}
+    invalid_keys = [k for k in body if k != pk_col and k not in valid_cols]
+    if invalid_keys:
+        raise HTTPException(400, f"Невалідні колонки: {', '.join(invalid_keys)}")
     if not update_data:
         return {"ok": True}
 
-    set_clause = ", ".join(f'"{k}" = :p_{k}' for k in update_data)
-    params = {f"p_{k}": v for k, v in update_data.items()}
-    params["pk_val"] = pk_value
+    # Параметри: безпечний індекс замість назви колонки в плейсхолдері
+    set_parts = []
+    params: dict[str, Any] = {"pk_val": pk_value}
+    for i, (k, v) in enumerate(update_data.items()):
+        # k уже в valid_cols (whitelist), тож безпечно для f-string з "..."
+        set_parts.append(f'"{k}" = :p{i}')
+        params[f"p{i}"] = v
+    set_clause = ", ".join(set_parts)
 
     try:
         db.execute(
