@@ -51,6 +51,36 @@ def get_db():
         db.close()
 
 
+def safe_commit(db, *, conflict_msg: str = "Конфлікт даних: запис із такими параметрами вже існує"):
+    """
+    Безпечний commit з обробкою IntegrityError → 409 Conflict.
+    Решта помилок логуються і піднімаються як 500.
+    Завжди робить rollback на помилці.
+
+    Використання замість db.commit():
+        from backend.database import safe_commit
+        safe_commit(db)  # замість db.commit()
+        # або з кастомним повідомленням:
+        safe_commit(db, conflict_msg="Клієнт з таким логіном існує")
+    """
+    from fastapi import HTTPException
+    from sqlalchemy.exc import IntegrityError, OperationalError
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        log.info("IntegrityError у commit: %s", exc)
+        raise HTTPException(status_code=409, detail=conflict_msg)
+    except OperationalError as exc:
+        db.rollback()
+        log.exception("OperationalError у commit (БД заблокована або disk full)")
+        raise HTTPException(status_code=503, detail="Тимчасова помилка БД, спробуйте ще раз")
+    except Exception as exc:
+        db.rollback()
+        log.exception("Невідома помилка у commit: %s", exc)
+        raise HTTPException(status_code=500, detail="Помилка збереження даних")
+
+
 def _column_exists(conn, table: str, column: str) -> bool:
     """Чи існує колонка в таблиці (для ідемпотентності ALTER TABLE ADD COLUMN)."""
     try:

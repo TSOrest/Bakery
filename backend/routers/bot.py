@@ -5,10 +5,13 @@ API для роботи з Telegram-ботом:
 - Масова розсилка (нагадування, стоп-прийом)
 """
 
+import logging
 from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+
+log = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -50,8 +53,8 @@ def _send_to_client(chat_id: str, text: str) -> None:
     from backend.services.telegram_bot import send_to_chat
     try:
         send_to_chat(int(chat_id), text)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Failed to send Telegram message to chat %s: %s", chat_id, exc)
 
 
 def _all_chat_ids_for_client(db: Session, client_id: int) -> list[str]:
@@ -277,8 +280,8 @@ def _bot_accepting(db: Session) -> tuple[bool, str]:
         try:
             if datetime.now() < datetime.fromisoformat(closed_until):
                 return False, closed_until
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Invalid bot_orders_closed_until value %r: %s", closed_until, exc)
     return True, ""
 
 

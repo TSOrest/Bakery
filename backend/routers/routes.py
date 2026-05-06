@@ -3,7 +3,7 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.references import Route
 from backend.schemas.references import RouteCreate, RouteOut
 from backend.routers.auth import require_user, require_admin
@@ -23,7 +23,7 @@ def list_routes(active_only: bool = True, db: Session = Depends(get_db)):
 def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     r = Route(**data.model_dump())
     db.add(r)
-    db.commit()
+    safe_commit(db, conflict_msg="Маршрут із такою назвою вже існує")
     db.refresh(r)
     return r
 
@@ -35,6 +35,6 @@ def update_route(route_id: int, data: RouteCreate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Маршрут не знайдено")
     for field, value in data.model_dump().items():
         setattr(r, field, value)
-    db.commit()
+    safe_commit(db, conflict_msg="Маршрут із такою назвою вже існує")
     db.refresh(r)
     return r

@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.finances import Finance
 from backend.models.shop import ShopCount
 from backend.models.references import Client
@@ -229,7 +229,7 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends
         created_by   = data.created_by,
     )
     db.add(entry)
-    db.commit()
+    safe_commit(db)
     db.refresh(entry)
     return _batch_enrich([entry], db)[0]
 
@@ -248,4 +248,4 @@ def delete_finance(finance_id: int, db: Session = Depends(get_db), _=Depends(req
             detail="Автоматичний запис накладної не можна видалити вручну",
         )
     db.delete(entry)
-    db.commit()
+    safe_commit(db)

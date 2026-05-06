@@ -3,7 +3,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.references import Client
 from backend.schemas.references import ClientCreate, ClientUpdate, ClientOut
 from backend.routers.auth import require_admin
@@ -38,7 +38,7 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(r
     from datetime import datetime
     c = Client(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(c)
-    db.commit()
+    safe_commit(db, conflict_msg="Клієнт із такими даними вже існує")
     db.refresh(c)
     return c
 
@@ -50,7 +50,7 @@ def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(c, field, value)
-    db.commit()
+    safe_commit(db, conflict_msg="Клієнт із такими даними вже існує")
     db.refresh(c)
     return c
 
@@ -61,4 +61,4 @@ def deactivate_client(client_id: int, db: Session = Depends(get_db), _=Depends(r
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     c.is_active = 0
-    db.commit()
+    safe_commit(db)

@@ -5,7 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.references import Product
 from backend.schemas.references import ProductCreate, ProductUpdate, ProductOut
 from backend.routers.auth import require_admin
@@ -62,7 +62,7 @@ def create_product(data: ProductCreate, db: Session = Depends(get_db), _=Depends
     from datetime import datetime
     p = Product(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)
-    db.commit()
+    safe_commit(db)
     db.refresh(p)
     return p
 
@@ -74,7 +74,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(p, field, value)
-    db.commit()
+    safe_commit(db)
     db.refresh(p)
     return p
 
@@ -86,4 +86,4 @@ def deactivate_product(product_id: int, db: Session = Depends(get_db), _=Depends
     if not p:
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
     p.is_active = 0
-    db.commit()
+    safe_commit(db)

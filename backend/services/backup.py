@@ -1,11 +1,14 @@
 """Сервіс резервного копіювання БД."""
 import json
+import logging
 import shutil
 import sqlite3
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 
 def _backup_dir(root: Path, custom_dir: str) -> Path:
@@ -62,8 +65,8 @@ def do_backup(
                 cloud_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(dst, cloud_dir / name)
                 shutil.copy2(meta_dst, cloud_dir / meta_dst.name)
-            except Exception:
-                pass  # Хмарна копія не критична
+            except Exception as exc:
+                log.warning("Cloud backup copy to %s failed: %s", cp, exc)
 
     # Ротація: видаляти зайві бекапи
     rotate(backup_dir, keep_count)
@@ -88,8 +91,8 @@ def list_backups(root: Path, custom_dir: str = "") -> list:
                 meta = json.loads(meta_file.read_text(encoding="utf-8"))
                 app_version = meta.get("app_version", "").lstrip("\ufeff")
                 created_at = meta.get("created_at", "")
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("Failed to parse backup meta %s: %s", meta_file, exc)
         if not created_at:
             # Fallback: з mtime файлу
             created_at = datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")
@@ -116,14 +119,14 @@ def rotate(backup_dir: Path, keep_count: int) -> int:
         try:
             old.unlink()
             deleted += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Failed to delete old backup %s: %s", old, exc)
         meta = old.with_suffix(".meta.json")
         if meta.exists():
             try:
                 meta.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("Failed to delete backup meta %s: %s", meta, exc)
     return deleted
 
 
@@ -151,7 +154,8 @@ def get_backup_meta(root: Path, filename: str, custom_dir: str = "") -> dict:
         if "app_version" in meta:
             meta["app_version"] = meta["app_version"].lstrip("\ufeff")
         return meta
-    except Exception:
+    except Exception as exc:
+        log.warning("Failed to read backup meta %s: %s", meta_file, exc)
         return {}
 
 

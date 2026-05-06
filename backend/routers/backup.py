@@ -143,8 +143,8 @@ def _detect_sync_folders() -> dict:
                 if path and Path(path).is_dir():
                     result["dropbox"] = path
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Failed to parse Dropbox info.json: %s", exc)
 
     return result
 
@@ -245,8 +245,8 @@ def check_restore(filename: str, db: Session = Depends(get_db)):
                 capture_output=True, text=True, timeout=5,
             )
             rollback_available = bool(r.stdout.strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("git tag check failed: %s", exc)
 
     return {
         "compatible": compatible,
@@ -297,8 +297,8 @@ def demo_status():
         try:
             data = json.loads(DEMO_ACTIVE.read_text(encoding="utf-8"))
             since = data.get("since", "")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Failed to read demo state file: %s", exc)
     demo_db_exists = (DATA_DIR / "demo.db").exists()
     return {"active": active, "since": since, "demo_db_exists": demo_db_exists}
 

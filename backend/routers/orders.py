@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.orders import Order
 from backend.schemas.orders import OrderCreate, OrderUpdate, OrderOut, TransferRequest, OrderWithChildrenOut
 from backend.services.orders import copy_orders
@@ -77,7 +77,7 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 def create_order(data: OrderCreate, db: Session = Depends(get_db), _=Depends(require_user)):
     o = Order(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(o)
-    db.commit()
+    safe_commit(db)
     db.refresh(o)
     return o
 
@@ -89,7 +89,7 @@ def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(o, field, value)
-    db.commit()
+    safe_commit(db)
     db.refresh(o)
     return o
 
@@ -100,7 +100,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db), _=Depends(require
     if not o:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
     db.delete(o)
-    db.commit()
+    safe_commit(db, conflict_msg="Не вдалось видалити: на замовлення посилаються інші записи")
 
 
 @router.post("/{order_id}/transfer", response_model=OrderWithChildrenOut)
@@ -146,7 +146,7 @@ def transfer_order(
         created_at=datetime.now().isoformat(),
     )
     db.add(child)
-    db.commit()
+    safe_commit(db)
     db.refresh(parent)
     return parent
 

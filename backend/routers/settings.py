@@ -1,6 +1,7 @@
 """Ендпоінти налаштувань системи."""
 
 import json
+import logging
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.settings import Setting
 from backend.services import telegram_bot as tg
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["Налаштування"])
 
@@ -86,8 +89,8 @@ def telegram_authorized(db: Session = Depends(get_db)):
     chats: dict[str, str] = {}
     try:
         chats = json.loads(raw.value) if raw and raw.value else {}
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Invalid telegram_authorized_chats JSON: %s", exc)
     return {"chats": [{"chat_id": k, "phone": v} for k, v in chats.items()]}
 
 
@@ -193,11 +196,12 @@ def server_info():
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-    except Exception:
+    except Exception as exc:
+        log.debug("Primary IP detection failed, trying gethostbyname: %s", exc)
         try:
             ip = socket.gethostbyname(socket.gethostname())
-        except Exception:
-            pass
+        except Exception as exc2:
+            log.warning("Both IP detection methods failed: %s", exc2)
     port = int(os.environ.get("BAKERY_PORT", 8000))
     return {"local_ip": ip, "port": port}
 
@@ -209,8 +213,8 @@ def telegram_revoke(chat_id: str, db: Session = Depends(get_db)):
     chats: dict[str, str] = {}
     try:
         chats = json.loads(row.value) if row and row.value else {}
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Invalid telegram_authorized_chats JSON in revoke: %s", exc)
     chats.pop(chat_id, None)
     if row:
         row.value = json.dumps(chats, ensure_ascii=False)
