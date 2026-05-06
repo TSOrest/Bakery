@@ -6,6 +6,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
+import { useToast } from '../components/Toast'
 import css from './PosPage.module.css'
 
 // ─── Типи ─────────────────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ function NumpadModal({ total, onConfirm, onCancel }: NumpadProps) {
 export default function PosPage() {
   const { user, permissions, logout, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const toast = useToast()
 
   const [shops, setShops]           = useState<ShopClient[]>([])
   const [shopId, setShopId]         = useState<number | null>(null)
@@ -287,7 +289,7 @@ export default function PosPage() {
       loadDailyStat()
       setTimeout(() => setSuccessAmt(null), 1500)
     } catch (e) {
-      alert('Помилка збереження продажу')
+      toast.error('Помилка збереження продажу: ' + (e instanceof Error ? e.message : String(e)))
       console.error(e)
     }
   }

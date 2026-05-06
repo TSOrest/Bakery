@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import HelpTip from '../components/HelpTip'
+import { useConfirm } from '../components/ConfirmDialog'
 import type {
   BakingTask, Category, Client, Order, Product, ShortageClientInfo,
 } from '../types'
@@ -477,6 +478,7 @@ function DiscrepancyPanel({
 
 export default function BakingPage() {
   const { workDate } = useWorkDate()
+  const confirmDialog = useConfirm()
 
   const [tasks,        setTasks]        = useState<BakingTask[]>([])
   const [products,     setProducts]     = useState<Product[]>([])
@@ -537,11 +539,11 @@ export default function BakingPage() {
     try {
       const pending = await api.get<{ id: number }[]>(`/bot/pending-orders?order_date=${workDate}`)
       if (pending.length > 0) {
-        return window.confirm(
-          `⚠️ Є ${pending.length} непідтверджених замовлень через бота.\n\n` +
-          `Вони будуть проігноровані при формуванні/друку.\n\n` +
-          `Продовжити?`
-        )
+        return await confirmDialog({
+          title: 'Непідтверджені замовлення бота',
+          message: `Є ${pending.length} непідтверджених замовлень через бота.\nВони будуть проігноровані при формуванні/друку.\n\nПродовжити?`,
+          confirmText: 'Продовжити',
+        })
       }
     } catch {}
     return true
@@ -752,16 +754,17 @@ export default function BakingPage() {
                   return hasConflict || (surplus > 0 && allocated < surplus) || (shortage > 0 && reduced < shortage)
                 })
                 if (unresolved.length > 0) {
-                  const ok = window.confirm(
-                    `⚠️ Є ${unresolved.length} виробів з невирівняними розбіжностями:\n\n` +
-                    unresolved.map(t => {
-                      const p      = products.find(p => p.id === t.product_id)
-                      const baked  = bakedMap[t.product_id] ?? 0
-                      const diff   = baked - t.ordered_qty
-                      return `• ${p?.name ?? `#${t.product_id}`}: ${diff > 0 ? '+' : ''}${diff}`
-                    }).join('\n') +
-                    '\n\nВсе одно роздрукувати звіт?'
-                  )
+                  const ok = await confirmDialog({
+                    title: 'Невирівняні розбіжності',
+                    message: `Є ${unresolved.length} виробів з невирівняними розбіжностями:\n\n` +
+                      unresolved.map(t => {
+                        const p      = products.find(p => p.id === t.product_id)
+                        const baked  = bakedMap[t.product_id] ?? 0
+                        const diff   = baked - t.ordered_qty
+                        return `• ${p?.name ?? `#${t.product_id}`}: ${diff > 0 ? '+' : ''}${diff}`
+                      }).join('\n') + '\n\nВсе одно роздрукувати звіт?',
+                    confirmText: 'Друкувати',
+                  })
                   if (!ok) return
                 }
                 const url = `/api/v1/print/baking-report?task_date=${workDate}`

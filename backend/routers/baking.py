@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.baking import BakingTask
 from backend.schemas.baking import BakingTaskOut, BakingTaskUpdate
 from backend.services.orders import aggregate_for_baking
@@ -96,7 +96,7 @@ def generate_tasks(task_date: str, db: Session = Depends(get_db), _=Depends(requ
             task.recommended_qty = 0
             zeroed += 1
 
-    db.commit()
+    safe_commit(db)
     return {"generated": created, "updated": updated, "removed": removed, "zeroed": zeroed}
 
 
@@ -117,7 +117,7 @@ def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db), 
         created_at=datetime.now().isoformat(),
     )
     db.add(task)
-    db.commit()
+    safe_commit(db)
     db.refresh(task)
     return task
 
@@ -129,7 +129,7 @@ def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Завдання не знайдено")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
-    db.commit()
+    safe_commit(db)
     db.refresh(task)
     return task
 

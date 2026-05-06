@@ -452,10 +452,11 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   const openBakingPrint = async (categoryId: number) => {
     if (pendingBotOrders.length > 0) {
-      const ok = window.confirm(
-        `⚠️ Є ${pendingBotOrders.length} непідтверджених замовлень через бота.\n\n` +
-        `Вони будуть проігноровані при друку.\n\nПродовжити?`
-      )
+      const ok = await confirm({
+        title: 'Непідтверджені bot-замовлення',
+        message: `Є ${pendingBotOrders.length} непідтверджених замовлень через бота.\nВони будуть проігноровані при друку.\n\nПродовжити?`,
+        confirmText: 'Друкувати',
+      })
       if (!ok) return
     }
     const url = `/api/v1/print/baking?task_date=${workDate}&category_id=${categoryId}`

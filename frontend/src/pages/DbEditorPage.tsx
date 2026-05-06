@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useConfirm } from '../components/ConfirmDialog'
 import styles from './DbEditorPage.module.css'
 import ErdView from './DbEditorErd'
 
@@ -233,6 +234,7 @@ const COLUMN_HINTS: Record<string, Record<string, string>> = {
 
 export default function DbEditorPage() {
   const { token } = useAuth()
+  const confirmDialog = useConfirm()
 
   const [tables,        setTables]        = useState<TableInfo[]>([])
   const [search,        setSearch]        = useState('')
@@ -674,8 +676,14 @@ export default function DbEditorPage() {
                                 className={styles.btnDel}
                                 disabled={deleting === String(pk)}
                                 title="Видалити"
-                                onClick={() => {
-                                  if (window.confirm(`Видалити рядок (${pkCol}=${pk})?`)) deleteRow(pk)
+                                onClick={async () => {
+                                  const ok = await confirmDialog({
+                                    title: 'Видалення з БД',
+                                    message: `Видалити рядок (${pkCol}=${pk})?`,
+                                    danger: true,
+                                    confirmText: 'Видалити',
+                                  })
+                                  if (ok) deleteRow(pk)
                                 }}
                               >🗑</button>
                             )}

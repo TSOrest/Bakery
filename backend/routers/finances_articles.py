@@ -4,7 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.finances import Finance, FinanceArticle
 from backend.schemas.finance import FinanceArticleCreate, FinanceArticleUpdate, FinanceArticleOut
 from backend.routers.auth import require_admin
@@ -21,7 +21,7 @@ def list_articles(db: Session = Depends(get_db)):
 def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     article = FinanceArticle(name=data.name, direction=data.direction, is_system=0, needs_client=data.needs_client)
     db.add(article)
-    db.commit()
+    safe_commit(db)
     db.refresh(article)
     return article
 
@@ -33,7 +33,7 @@ def update_article(article_id: int, data: FinanceArticleUpdate, db: Session = De
         raise HTTPException(status_code=404, detail="Статтю не знайдено")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(article, field, value)
-    db.commit()
+    safe_commit(db)
     db.refresh(article)
     return article
 
@@ -53,4 +53,4 @@ def delete_article(article_id: int, db: Session = Depends(get_db), _=Depends(req
             detail="Статтю використовується у фінансових записах — спочатку перепризначте їх",
         )
     db.delete(article)
-    db.commit()
+    safe_commit(db)

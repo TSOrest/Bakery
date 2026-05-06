@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, date, timedelta
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.pricing import Price, ClientPriceOverride
 from backend.models.references import Product, Client
 from backend.schemas.pricing import (
@@ -162,7 +162,7 @@ def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(req
 
     p = Price(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)
-    db.commit()
+    safe_commit(db)
     db.refresh(p)
     return p
 
@@ -226,7 +226,7 @@ def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db), _=De
         created_at  = datetime.now().isoformat(),
     )
     db.add(new_p)
-    db.commit()
+    safe_commit(db)
     db.refresh(new_p)
     return new_p
 
@@ -365,7 +365,7 @@ def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db), _=Depend
         ))
         created += 1
 
-    db.commit()
+    safe_commit(db)
     return {"changed": created, "effective_date": eff_str}
 
 
@@ -392,7 +392,7 @@ def delete_price(price_id: int, db: Session = Depends(get_db), _=Depends(require
     p.is_active = 0
     if not p.valid_to:
         p.valid_to = date.today().isoformat()
-    db.commit()
+    safe_commit(db)
 
 
 # ── Індивідуальні ціни клієнтів ───────────────────────────────────────────────
@@ -416,7 +416,7 @@ def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_d
     o = ClientPriceOverride(**data.model_dump())
     db.add(o)
     try:
-        db.commit()
+        safe_commit(db)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Індивідуальна ціна для цього клієнта, виробу і дати вже існує")
@@ -430,4 +430,4 @@ def delete_override(override_id: int, db: Session = Depends(get_db), _=Depends(r
     if not o:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
     db.delete(o)
-    db.commit()
+    safe_commit(db)

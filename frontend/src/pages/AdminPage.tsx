@@ -8,6 +8,7 @@ import formStyles from '../components/Form.module.css'
 import UsersTab from './UsersTab'
 import ImportPage from './ImportPage'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../components/Toast'
 import {
   fetchIngredients, createIngredient, updateIngredient, deleteIngredient,
   fetchProductIngredients, addProductIngredient, removeProductIngredient,
@@ -658,6 +659,7 @@ const CLIENT_KIND_LABELS: Record<string, string> = {
 }
 
 function ClientsTab({ routes, products }: { routes: Route[]; products: Product[] }) {
+  const toast = useToast()
   const today    = new Date().toISOString().slice(0, 10)
   const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
   const [clients, setClients]   = useState<Client[]>([])
@@ -995,7 +997,7 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
                             await loadClientOverrides(editing.id)
                             setOverrideAddForm({ product_id: '', price: '', valid_from: tomorrow, valid_to: '' })
                             setOverrideAdding(false)
-                          } catch (err) { alert(String(err)) }
+                          } catch (err) { toast.error(String(err)) }
                           finally { setOverrideSaving(false) }
                         }}
                         style={{ padding: '5px 12px', background: '#16a34a', color: '#fff', border: 'none',
@@ -1355,6 +1357,7 @@ function PricesTab({ products, clients, categories }: {
   clients:    Client[]
   categories: Category[]
 }) {
+  const toast = useToast()
   const today    = new Date().toISOString().slice(0, 10)
   const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
 
@@ -1538,7 +1541,7 @@ function PricesTab({ products, clients, categories }: {
     const p = prices.find(x => x.id === priceId)
     if (!p) return
     if (p.valid_from <= today) {
-      alert('Не можна видалити поточну або минулу ціну')
+      toast.warning('Не можна видалити поточну або минулу ціну')
       return
     }
     if (!confirm('Видалити цю майбутню ціну?')) return
@@ -1546,7 +1549,7 @@ function PricesTab({ products, clients, categories }: {
       await api.delete(`/prices/${priceId}`)
       await loadPrices()
     } catch (err) {
-      alert(String(err))
+      toast.error(String(err))
     }
   }
 
@@ -1689,7 +1692,7 @@ function PricesTab({ products, clients, categories }: {
     const o = overrides.find(x => x.id === id)
     if (!o) return
     if (o.valid_from <= today) {
-      alert('Не можна видалити поточну або минулу індивідуальну ціну')
+      toast.warning('Не можна видалити поточну або минулу індивідуальну ціну')
       return
     }
     if (!confirm('Видалити індивідуальну ціну?')) return
@@ -1712,7 +1715,7 @@ function PricesTab({ products, clients, categories }: {
     const o = overrides.find(x => x.id === ovEditId)
     if (!o) return
     const newPrice = parseFloat(ovEditForm.price)
-    if (isNaN(newPrice) || newPrice <= 0) { alert('Введіть коректну ціну'); return }
+    if (isNaN(newPrice) || newPrice <= 0) { toast.warning('Введіть коректну ціну'); return }
     setSaving(true)
     try {
       await api.delete(`/prices/overrides/${o.id}`)
@@ -3525,6 +3528,7 @@ function RolePermissionsTab({ onSaved }: { onSaved: () => Promise<void> }) {
 // ─── Інгредієнти ─────────────────────────────────────────────────────────────
 
 function IngredientsTab({ units, products }: { units: Unit[]; products: Product[] }) {
+  const toast = useToast()
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [editIng, setEditIng]         = useState<Ingredient | null>(null)
   const [addModal, setAddModal]       = useState(false)
@@ -3581,7 +3585,7 @@ function IngredientsTab({ units, products }: { units: Unit[]; products: Product[
   const handleDelete = async (id: number) => {
     if (!confirm('Видалити інгредієнт?')) return
     try { await deleteIngredient(id); await load() }
-    catch (err) { alert(String(err)) }
+    catch (err) { toast.error(String(err)) }
   }
 
   const submitAddComp = async (e: FormEvent) => {
@@ -3994,6 +3998,7 @@ function ResetDbSection() {
 }
 
 function BackupTab() {
+  const toast = useToast()
   const [form, setForm]                   = useState<Record<string, string>>({})
   const [savingSettings, setSavingSettings] = useState(false)
   const [savedSettings, setSavedSettings]   = useState(false)
@@ -4069,7 +4074,7 @@ function BackupTab() {
       await api.post('/backup/now', {})
       await loadAll()
     } catch (e: unknown) {
-      alert(`Помилка бекапу: ${e instanceof Error ? e.message : String(e)}`)
+      toast.error(`Помилка бекапу: ${e instanceof Error ? e.message : String(e)}`)
     } finally { setBackingUp(false) }
   }
 
@@ -4098,7 +4103,7 @@ function BackupTab() {
       await fetch('/api/v1/backup/upload', { method: 'POST', body: fd })
       await loadAll()
     } catch (err) {
-      alert(`Помилка імпорту: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(`Помилка імпорту: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -4113,7 +4118,7 @@ function BackupTab() {
     if (!restoreModal) return
     setRestoreModal(null)
     await api.post(`/backup/restore/${encodeURIComponent(restoreModal.filename)}?rollback_first=${rollback_first}`, {})
-    alert('Запит на відновлення надіслано. Сервер незабаром перезапуститься.')
+    toast.info('Запит на відновлення надіслано. Сервер незабаром перезапуститься.')
   }
 
   const handleDemoEnter = async () => {
@@ -4121,10 +4126,10 @@ function BackupTab() {
     setDemoLoading(true)
     try {
       await api.post('/backup/demo/enter', {})
-      alert('Запит надіслано. Сервер перезапускається в демо режимі...')
+      toast.info('Запит надіслано. Сервер перезапускається в демо режимі...')
       setTimeout(loadAll, 5000)
     } catch (e: unknown) {
-      alert(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
+      toast.error(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
     } finally { setDemoLoading(false) }
   }
 
@@ -4133,10 +4138,10 @@ function BackupTab() {
     setDemoLoading(true)
     try {
       await api.post('/backup/demo/exit', {})
-      alert('Запит надіслано. Сервер перезапускається...')
+      toast.info('Запит надіслано. Сервер перезапускається...')
       setTimeout(loadAll, 5000)
     } catch (e: unknown) {
-      alert(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
+      toast.error(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
     } finally { setDemoLoading(false) }
   }
 
@@ -4147,7 +4152,7 @@ function BackupTab() {
       const data = await api.get<ArchivePreview>(`/backup/archive/preview?cutoff_date=${archiveDate}`)
       setArchivePreview(data)
     } catch (e: unknown) {
-      alert(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
+      toast.error(`Помилка: ${e instanceof Error ? e.message : String(e)}`)
     } finally { setArchivePreviewing(false) }
   }
 
@@ -4163,7 +4168,7 @@ function BackupTab() {
       setArchivePreview(null)
       await loadAll()
     } catch (e: unknown) {
-      alert(`Помилка архівування: ${e instanceof Error ? e.message : String(e)}`)
+      toast.error(`Помилка архівування: ${e instanceof Error ? e.message : String(e)}`)
     } finally { setArchiving(false) }
   }
 

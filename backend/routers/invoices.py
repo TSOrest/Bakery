@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.invoices import Invoice, InvoiceLine
 from backend.schemas.invoices import (
     InvoiceCreate, InvoiceOut,
@@ -210,7 +210,7 @@ def generate_from_orders(
         invoice_ids.append(inv.id)
         created_count += 1
 
-    db.commit()
+    safe_commit(db)
     return {
         "created":    created_count,
         "skipped":    skipped_count,
@@ -260,7 +260,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db), _=Depends
         ))
 
     inv.total_sum = round(total, 2)
-    db.commit()
+    safe_commit(db)
     db.refresh(inv)
     return inv
 
@@ -291,7 +291,7 @@ def update_invoice_lines(
             total += line.sum
 
     inv.total_sum = round(total, 2)
-    db.commit()
+    safe_commit(db)
     db.refresh(inv)
     return inv
 
@@ -328,7 +328,7 @@ def update_invoice_status(
         if body.payment_amount > 0:
             create_payment_finance_entry(db, inv, body.payment_amount)
 
-    db.commit()
+    safe_commit(db)
     db.refresh(inv)
 
     if status == "sent":
@@ -421,7 +421,7 @@ def create_corrective_invoice(
     if payment > 0:
         create_payment_finance_entry(db, inv, payment)
 
-    db.commit()
+    safe_commit(db)
     if corr_inv:
         db.refresh(corr_inv)
         return corr_inv
@@ -488,5 +488,5 @@ def process_return(
     from backend.services.finance import create_invoice_finance_entry
     create_invoice_finance_entry(db, inv)
 
-    db.commit()
+    safe_commit(db)
     return {"id": invoice_id, "status": "accepted"}

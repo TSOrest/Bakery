@@ -8,6 +8,8 @@ import {
 import { fetchFinanceArticles } from '../api/financeArticles'
 import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
@@ -247,6 +249,8 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [deleting, setDeleting] = useState<number | null>(null)
+  const toast = useToast()
+  const confirmDialog = useConfirm()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -263,14 +267,16 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
   }
 
   async function handleDelete(id: number) {
-    if (!confirm('Видалити запис?')) return
+    const ok = await confirmDialog({ message: 'Видалити запис?', danger: true, confirmText: 'Видалити' })
+    if (!ok) return
     setDeleting(id)
     try {
       await deleteFinance(id)
       await load()
       onChanged()
+      toast.success('Запис видалено')
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Помилка')
+      toast.error(err instanceof Error ? err.message : 'Помилка видалення')
     } finally {
       setDeleting(null)
     }
@@ -369,6 +375,8 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
 export default function FinancesPage() {
   const { workDate } = useWorkDate()
   const today = workDate ?? new Date().toISOString().slice(0, 10)
+  const toast = useToast()
+  const confirmDialog = useConfirm()
 
   const [tab,           setTab]           = useState<TabId>('dashboard')
   const [balances,      setBalances]      = useState<ClientBalance[]>([])
@@ -488,13 +496,15 @@ export default function FinancesPage() {
   }
 
   async function handleJournalDelete(id: number) {
-    if (!confirm('Видалити запис?')) return
+    const ok = await confirmDialog({ message: 'Видалити запис?', danger: true, confirmText: 'Видалити' })
+    if (!ok) return
     try {
       await deleteFinance(id)
       await loadJournal()
       await loadBalances()
+      toast.success('Запис видалено')
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Помилка')
+      toast.error(err instanceof Error ? err.message : 'Помилка видалення')
     }
   }
 

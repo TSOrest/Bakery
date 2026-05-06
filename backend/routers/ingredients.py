@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.references import Ingredient, ProductIngredient, Product
 from backend.models.pricing import Price
 from backend.schemas.ingredients import (
@@ -31,7 +31,7 @@ def list_ingredients(db: Session = Depends(get_db)):
 def create_ingredient(data: IngredientCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
     ing = Ingredient(**data.model_dump())
     db.add(ing)
-    db.commit()
+    safe_commit(db)
     db.refresh(ing)
     return ing
 
@@ -56,7 +56,7 @@ def update_ingredient(
     if price_changed:
         ing.price_updated_at = datetime.now().isoformat()
 
-    db.commit()
+    safe_commit(db)
     db.refresh(ing)
 
     # Перерахунок собівартості для всіх виробів що містять цей інгредієнт
@@ -87,7 +87,7 @@ def delete_ingredient(ingredient_id: int, db: Session = Depends(get_db), _=Depen
             detail=f"Інгредієнт використовується у {used} виробах. Спочатку видаліть його зі складу.",
         )
     db.delete(ing)
-    db.commit()
+    safe_commit(db)
 
 
 # ── Склад виробу ──────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ def add_product_ingredient(
     )
     db.add(pi)
     try:
-        db.commit()
+        safe_commit(db)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Цей інгредієнт вже є у складі виробу")
@@ -184,7 +184,7 @@ def update_product_ingredient(
     if not pi or pi.product_id != product_id:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
     pi.qty_per_unit = qty_per_unit
-    db.commit()
+    safe_commit(db)
     calculate_cost(db, product_id)
 
     ing = db.get(Ingredient, pi.ingredient_id)
@@ -217,7 +217,7 @@ def remove_product_ingredient(
     if not pi or pi.product_id != product_id:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
     db.delete(pi)
-    db.commit()
+    safe_commit(db)
     calculate_cost(db, product_id)
 
 
