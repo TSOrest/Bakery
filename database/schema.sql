@@ -377,6 +377,7 @@ INSERT OR IGNORE INTO settings (key, value, description) VALUES
     ('backup_enabled',        '1',             'Автобекап увімкнений (0/1)'),
     ('backup_time',           '02:00',         'Час щоденного бекапу (HH:MM)'),
     ('backup_keep_count',     '7',             'Кількість локальних бекапів'),
+    ('backup_max_disk_mb',    '0',             'Макс. сумарний розмір бекапів у MB (0 = без обмеження)'),
     ('backup_local_dir',      '',              'Папка бекапів (порожньо = backups/ поряд з bakery.db)'),
     ('backup_cloud_1_label',  '',              'Хмара 1: назва (напр. Google Drive)'),
     ('backup_cloud_1_path',   '',              'Хмара 1: шлях до папки синхронізації'),

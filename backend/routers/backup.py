@@ -80,6 +80,7 @@ def backup_now(db: Session = Depends(get_db)):
             keep_count=int(cfg.get("backup_keep_count", "7") or "7"),
             cloud_paths=_cloud_paths(cfg),
             app_version=_read_version(),
+            max_disk_mb=int(cfg.get("backup_max_disk_mb", "0") or "0"),
         )
     except Exception as e:
         log.exception("Backup creation failed")
@@ -381,6 +382,7 @@ def run_archive(
             keep_count=int(cfg.get("backup_keep_count", "7") or "7"),
             cloud_paths=_cloud_paths(cfg),
             app_version=_read_version(),
+            max_disk_mb=int(cfg.get("backup_max_disk_mb", "0") or "0"),
         )
     except Exception as e:
         log.exception("Backup-before-archive failed")

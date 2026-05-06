@@ -25,6 +25,7 @@ def do_backup(
     keep_count: int = 7,
     cloud_paths: Optional[list] = None,
     app_version: str = "",
+    max_disk_mb: int = 0,
 ) -> dict:
     """
     Робить SQLite online backup → датований файл + sidecar .meta.json.
@@ -68,8 +69,8 @@ def do_backup(
             except Exception as exc:
                 log.warning("Cloud backup copy to %s failed: %s", cp, exc)
 
-    # Ротація: видаляти зайві бекапи
-    rotate(backup_dir, keep_count)
+    # Ротація: за кількістю + за розміром (захист від накопичення гігабайт)
+    rotate(backup_dir, keep_count, max_disk_mb)
 
     return {"name": name, "path": str(dst), "size_kb": size_kb,
             "app_version": app_version, "created_at": created_at}
@@ -105,9 +106,14 @@ def list_backups(root: Path, custom_dir: str = "") -> list:
     return results
 
 
-def rotate(backup_dir: Path, keep_count: int) -> int:
+def rotate(backup_dir: Path, keep_count: int, max_disk_mb: int = 0) -> int:
     """
-    Залишає тільки keep_count найновіших бекапів.
+    Ротація бекапів за двома критеріями:
+    1. keep_count — залишити N найновіших (старі видалити)
+    2. max_disk_mb — якщо сумарний розмір > ліміту, видаляти найстаріші
+       з лишку поки не вкладеться. Захист від накопичення великих БД.
+       0 або негативне значення = без перевірки розміру.
+
     Видаляє і .db і .meta.json разом.
     Повертає кількість видалених файлів.
     """
@@ -115,18 +121,41 @@ def rotate(backup_dir: Path, keep_count: int) -> int:
         return 0
     files = sorted(backup_dir.glob("bakery_*.db"), reverse=True)
     deleted = 0
-    for old in files[keep_count:]:
+
+    def _delete_one(path: Path) -> None:
+        nonlocal deleted
         try:
-            old.unlink()
+            path.unlink()
             deleted += 1
         except Exception as exc:
-            log.warning("Failed to delete old backup %s: %s", old, exc)
-        meta = old.with_suffix(".meta.json")
+            log.warning("Failed to delete old backup %s: %s", path, exc)
+        meta = path.with_suffix(".meta.json")
         if meta.exists():
             try:
                 meta.unlink()
             except Exception as exc:
                 log.warning("Failed to delete backup meta %s: %s", meta, exc)
+
+    # 1. За кількістю
+    for old in files[keep_count:]:
+        _delete_one(old)
+
+    # 2. За розміром — серед тих що лишились (першi keep_count)
+    if max_disk_mb > 0:
+        max_bytes = max_disk_mb * 1024 * 1024
+        remaining = sorted(backup_dir.glob("bakery_*.db"), reverse=True)
+        total = sum(f.stat().st_size for f in remaining if f.exists())
+        # Видаляємо найстаріші (з кінця) поки не вкладемось у ліміт.
+        # Найновіший залишаємо завжди — це остання можливість відновлення.
+        idx = len(remaining) - 1
+        while total > max_bytes and idx > 0:
+            old = remaining[idx]
+            if old.exists():
+                size = old.stat().st_size
+                _delete_one(old)
+                total -= size
+            idx -= 1
+
     return deleted
 
 

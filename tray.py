@@ -372,6 +372,7 @@ _update_lock               = threading.Lock()
 _local_tags:        list  = []      # cached at startup; changes only after update/rollback (restarts tray)
 _last_backup_date:  str   = ""      # YYYY-MM-DD, захист від подвійного бекапу в один день
 _notified_version:  str   = ""      # остання версія про яку вже надіслано balloon (без повторів)
+_db_size_warned:    bool  = False   # один раз попереджаємо коли БД росте велика
 
 
 # ── Windows helpers ────────────────────────────────────────────────────────────
@@ -969,6 +970,19 @@ def _poll_backup(icon) -> None:
                             _notify(icon, "Bakery — бекап", f"Автобекап виконано ✓  {today}")
                     except Exception as e:
                         _notify(icon, "Bakery — бекап", f"Помилка автобекапу: {e}")
+
+            # ── Попередження якщо БД велика (раз на сесію) ────────────────────
+            global _db_size_warned
+            if not _db_size_warned and DB_FILE.exists():
+                try:
+                    size_mb = DB_FILE.stat().st_size / (1024 * 1024)
+                    if size_mb > 1024:  # > 1 GB
+                        _notify(icon, "Bakery — БД велика",
+                                f"Розмір {size_mb:.0f} MB. Рекомендуємо архівування "
+                                "старих даних: Налаштування → Бекапи → Архівувати.")
+                        _db_size_warned = True
+                except Exception:
+                    pass
 
         except Exception:
             pass
