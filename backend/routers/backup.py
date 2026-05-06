@@ -82,7 +82,8 @@ def backup_now(db: Session = Depends(get_db)):
             app_version=_read_version(),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log.exception("Backup creation failed")
+        raise HTTPException(status_code=500, detail="Не вдалося створити бекап. Деталі — у логах сервера.")
     return result
 
 
@@ -206,10 +207,11 @@ async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_
     except HTTPException:
         raise
     except _sqlite3.DatabaseError as exc:
+        log.warning("Uploaded backup is not valid SQLite: %s", exc)
         dest.unlink(missing_ok=True)
         raise HTTPException(
             status_code=400,
-            detail=f"Файл не є дійсною базою SQLite: {exc}. "
+            detail="Файл не є дійсною базою SQLite. "
                    "Завантажте бекап, створений через меню Налаштування → Бекап.",
         )
 
@@ -381,11 +383,13 @@ def run_archive(
             app_version=_read_version(),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Помилка бекапу перед архівуванням: {e}")
+        log.exception("Backup-before-archive failed")
+        raise HTTPException(status_code=500, detail="Помилка створення бекапу перед архівуванням. Архівування скасовано.")
 
     try:
         result = archive_svc.run_archive(db, cutoff_date)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        log.exception("Archive run failed")
+        raise HTTPException(status_code=500, detail="Помилка архівування. Бекап успішно створено — дані в безпеці.")
 
     return result

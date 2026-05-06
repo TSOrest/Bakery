@@ -4,6 +4,8 @@ import { api } from '../api/client'
 import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
 import OrderModal from '../components/OrderModal'
 import PriceTypeBadge, { type PriceSource } from '../components/PriceTypeBadge'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 import styles from './OrdersPage.module.css'
 
 type CellKey = `${number}-${number}`
@@ -89,6 +91,8 @@ function BotPendingRow({
 
 export default function OrdersPage() {
   const { workDate } = useWorkDate()
+  const toast = useToast()
+  const confirm = useConfirm()
 
   const [routes,     setRoutes]     = useState<Route[]>([])
   const [clients,    setClients]    = useState<Client[]>([])
@@ -236,10 +240,20 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
   }
 
   const handleBotStop = async () => {
+    const ok = await confirm({
+      title: 'Зупинити прийом замовлень?',
+      message: 'Бот перестане приймати замовлення від клієнтів до завтрашнього ранку.\n\nПродовжити?',
+      confirmText: 'Зупинити',
+      danger: true,
+    })
+    if (!ok) return
     setBotStatusLoading(true)
     try {
       await api.post('/bot/order-status/stop', {})
-      fetchBotStatus()
+      await fetchBotStatus()
+      toast.success('Прийом замовлень зупинено')
+    } catch (exc) {
+      toast.error('Не вдалося зупинити прийом: ' + (exc instanceof Error ? exc.message : String(exc)))
     } finally { setBotStatusLoading(false) }
   }
 
@@ -247,7 +261,10 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     setBotStatusLoading(true)
     try {
       await api.post('/bot/order-status/resume', {})
-      fetchBotStatus()
+      await fetchBotStatus()
+      toast.success('Прийом замовлень відновлено')
+    } catch (exc) {
+      toast.error('Не вдалося відновити прийом: ' + (exc instanceof Error ? exc.message : String(exc)))
     } finally { setBotStatusLoading(false) }
   }
 

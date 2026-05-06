@@ -59,9 +59,17 @@ def update_category(category_id: int, body: CategoryUpdate, db: Session = Depend
 
 @router.delete("/categories/{category_id}", status_code=204)
 def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+    from backend.models.references import Product
     c = db.get(Category, category_id)
     if not c:
         raise HTTPException(status_code=404, detail="Категорію не знайдено")
+    # Перевірка сирот: чи є вироби у цій категорії
+    used_count = db.query(Product).filter(Product.category_id == category_id).count()
+    if used_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Категорію використовують {used_count} виробів. Спочатку перенесіть їх або деактивуйте.",
+        )
     db.delete(c)
     db.commit()
 
@@ -107,8 +115,16 @@ def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _
 
 @router.delete("/units/{unit_id}", status_code=204)
 def delete_unit(unit_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+    from backend.models.references import Product, Ingredient
     u = db.get(Unit, unit_id)
     if not u:
         raise HTTPException(status_code=404, detail="Одиницю не знайдено")
+    p_count = db.query(Product).filter(Product.unit_id == unit_id).count()
+    i_count = db.query(Ingredient).filter(Ingredient.unit_id == unit_id).count()
+    if p_count or i_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Одиницю використовують {p_count} виробів і {i_count} інгредієнтів.",
+        )
     db.delete(u)
     db.commit()

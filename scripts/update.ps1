@@ -98,6 +98,33 @@ if ($oauthToken) {
     Write-Log 'Git credentials updated from OAuth token'
 }
 
+# Бекап БД перед оновленням (атомарність — якщо щось зломається, можна відкатитись)
+$DB_PATH = Join-Path $DATA_DIR 'bakery.db'
+if (Test-Path $DB_PATH) {
+    $backupName = "bakery_pre-update-$($currentVersion)-to-$($TargetTag)_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').db"
+    $backupDir = Join-Path $DATA_DIR 'backups'
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    $backupPath = Join-Path $backupDir $backupName
+    try {
+        Write-Log 'Creating pre-update DB backup...'
+        # SQLite online backup через Python (через venv)
+        & $python -c @"
+import sqlite3, sys
+src = sqlite3.connect(r'$DB_PATH')
+src.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+dst = sqlite3.connect(r'$backupPath')
+with dst:
+    src.backup(dst)
+dst.close(); src.close()
+"@ 2>&1 | Out-Null
+        if (Test-Path $backupPath) {
+            Write-Log "  Pre-update backup: $backupName" Green
+        }
+    } catch {
+        Write-Log "WARNING: pre-update backup failed: $_" Yellow
+    }
+}
+
 # Git fetch and checkout
 Write-Log 'Fetching from GitHub...'
 $gitResult = & git -C $ROOT fetch origin --tags 2>&1
@@ -127,7 +154,11 @@ Remove-Item -Path (Join-Path $ROOT 'dev')  -Recurse -Force -ErrorAction Silently
 Write-Log 'Installing Python dependencies...'
 & $pip install -r (Join-Path $ROOT 'backend\requirements.txt') --quiet
 if ($LASTEXITCODE -ne 0) {
-    Write-Log 'WARNING: pip install had errors (continuing)' Yellow
+    Write-Log 'ERROR: pip install failed — rolling back to previous version' Red
+    & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
+    Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
+    Write-Log "Rolled back to $currentVersion" Yellow
+    Read-Host 'Press Enter'; exit 1
 }
 
 # Run DB migrations
