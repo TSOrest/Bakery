@@ -7,7 +7,7 @@ import secrets
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -19,6 +19,41 @@ from backend.models.settings import Setting
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Авторизація"])
+
+# Rate-limit: in-memory tracking невдалих спроб login по IP.
+# Не БД — ефемерне, перезавантаження сервера скидає лічильник.
+# Формат: { ip: [timestamp1, timestamp2, ...] } — лише timestamp за останні 5 хв.
+import time as _time
+from collections import defaultdict
+_LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
+_LOGIN_WINDOW_SEC = 300   # 5 хв
+_LOGIN_MAX_FAILS  = 5     # після 5 невдач — block
+_LOGIN_BLOCK_SEC  = 300   # бан на 5 хв
+
+def _check_rate_limit(ip: str) -> None:
+    """Викидає 429 якщо забагато невдалих спроб за останні 5 хв."""
+    now = _time.time()
+    attempts = _LOGIN_ATTEMPTS[ip]
+    # Прибираємо старі (>5 хв)
+    attempts[:] = [t for t in attempts if now - t < _LOGIN_WINDOW_SEC]
+    if len(attempts) >= _LOGIN_MAX_FAILS:
+        # Найстаріша спроба + блок-вікно = коли можна спробувати знову
+        retry_after = int(attempts[0] + _LOGIN_BLOCK_SEC - now)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Забагато невдалих спроб. Спробуйте через {max(1, retry_after)} с.",
+            headers={"Retry-After": str(max(1, retry_after))},
+        )
+
+def _record_failed_login(ip: str) -> None:
+    _LOGIN_ATTEMPTS[ip].append(_time.time())
+
+def _clear_failed_logins(ip: str) -> None:
+    _LOGIN_ATTEMPTS.pop(ip, None)
+
+
+# Session timeout: 30 днів inactivity → invalidate
+SESSION_TIMEOUT_DAYS = 30
 
 ROLES = ("operator", "accountant", "admin", "owner", "seller")
 ROLE_LABELS = {
@@ -89,7 +124,8 @@ def get_current_user(
     authorization: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
 ) -> Optional[User]:
-    """Повертає поточного користувача або None (якщо не авторизований)."""
+    """Повертає поточного користувача або None (якщо не авторизований).
+    Перевіряє таймаут сесії і оновлює last_used_at при кожному запиті."""
     if not authorization or not authorization.startswith("Bearer "):
         return None
     token = authorization.removeprefix("Bearer ").strip()
@@ -99,6 +135,35 @@ def get_current_user(
     user = session.user
     if not user or not user.is_active:
         return None
+
+    # Перевірка таймауту (30 днів неактивності)
+    from datetime import timedelta
+    last = session.last_used_at or session.created_at
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(last)
+            if datetime.now() - last_dt > timedelta(days=SESSION_TIMEOUT_DAYS):
+                # Сесія прострочена — видаляємо
+                db.delete(session)
+                db.commit()
+                return None
+        except (ValueError, TypeError):
+            pass
+
+    # Оновлюємо last_used_at — раз на хвилину достатньо щоб не спамити write-и
+    try:
+        now = datetime.now()
+        if not session.last_used_at:
+            session.last_used_at = now.isoformat()
+            db.commit()
+        else:
+            last_dt = datetime.fromisoformat(session.last_used_at)
+            if (now - last_dt).total_seconds() > 60:
+                session.last_used_at = now.isoformat()
+                db.commit()
+    except Exception:
+        pass
+
     return user
 
 
@@ -185,14 +250,20 @@ def list_users_public(db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
+def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    # Rate-limit: 5 невдалих спроб з одного IP за 5 хв → 429
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     user = (
         db.query(User)
         .filter(User.username == body.username, User.is_active == 1)
         .first()
     )
     if not user or not _verify_password(body.password, user.password_hash, user.salt):
+        _record_failed_login(client_ip)
         raise HTTPException(status_code=401, detail="Невірний логін або пароль")
+    _clear_failed_logins(client_ip)
 
     # Auto-upgrade legacy SHA256 → bcrypt при успішному login
     if _BCRYPT_AVAILABLE and not _is_bcrypt_hash(user.password_hash):
@@ -204,7 +275,8 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
             log.warning("Failed to upgrade password hash for user %s: %s", user.username, exc)
 
     token = secrets.token_hex(32)
-    db.add(UserSession(token=token, user_id=user.id, created_at=datetime.now().isoformat()))
+    now_iso = datetime.now().isoformat()
+    db.add(UserSession(token=token, user_id=user.id, created_at=now_iso, last_used_at=now_iso))
     db.commit()
 
     return {

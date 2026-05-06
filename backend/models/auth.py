@@ -22,8 +22,9 @@ class User(Base):
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
-    token      = Column(Text, primary_key=True)
-    user_id    = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(Text)
+    token        = Column(Text, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at   = Column(Text)
+    last_used_at = Column(Text)   # оновлюється при кожному auth-запиті; None = legacy
 
     user = relationship("User", back_populates="sessions")
