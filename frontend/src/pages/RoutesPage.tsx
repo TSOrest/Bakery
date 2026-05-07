@@ -955,12 +955,38 @@ export default function RoutesPage() {
     && allDraftCheckable.every((c) => checkedDraftIds.has(c.id))
   const someChecked = allCheckable.some((i) => checkedIds.has(i.id))
     || allDraftCheckable.some((c) => checkedDraftIds.has(c.id))
-  const checkedCount = [...checkedIds].filter((id) => invoices.some((i) => i.id === id)).length
+  // Лічильники для масових операцій враховують ТІЛЬКИ клієнтів видимих у поточному фільтрі.
+  // sortedClients вже відфільтрований за обраним маршрутом — використовуємо його client_id.
+  const visibleClientIds = useMemo(() => new Set(sortedClients.map(c => c.id)), [sortedClients])
+  const visibleInvoiceIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const c of sortedClients) {
+      const inv = clientInvoice(c.id)
+      if (inv) ids.add(inv.id)
+    }
+    return ids
+  }, [sortedClients, invoices]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const checkedCount = [...checkedIds].filter((id) => visibleInvoiceIds.has(id)).length
 
   const acceptableChecked = [...checkedIds].filter(id => {
+    if (!visibleInvoiceIds.has(id)) return false
     const inv = invoices.find(i => i.id === id)
     return inv && (inv.status === 'sent' || inv.status === 'processing')
   })
+
+  // Реальні draft-накладні з відмічених (на відміну від virtual_draft які чекають генерації)
+  const sendableDraftInvoiceIds = [...checkedIds].filter(id => {
+    if (!visibleInvoiceIds.has(id)) return false
+    const inv = invoices.find(i => i.id === id)
+    return inv?.status === 'draft'
+  })
+
+  // virtual_draft клієнти у поточному фільтрі
+  const visibleCheckedDraftIds = [...checkedDraftIds].filter(id => visibleClientIds.has(id))
+
+  // Загальна кількість для масової відправки = virtual_draft клієнти + реальні draft накладні
+  const totalSendable = visibleCheckedDraftIds.length + sendableDraftInvoiceIds.length
 
   const headerCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -1016,27 +1042,41 @@ export default function RoutesPage() {
   }
 
   const sendCheckedDrafts = async () => {
-    if (checkedDraftIds.size === 0) return
+    if (visibleCheckedDraftIds.length === 0 && sendableDraftInvoiceIds.length === 0) return
     setSendingDrafts(true)
+    // 1. virtual_draft клієнти у поточному фільтрі → генеруємо накладну з замовлень
     await Promise.all(
-      [...checkedDraftIds].map((clientId) =>
+      visibleCheckedDraftIds.map((clientId) =>
         api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${clientId}`, {})
       )
     )
+    // 2. існуючі draft-накладні у поточному фільтрі → переводимо у sent
+    await Promise.all(
+      sendableDraftInvoiceIds.map((id) =>
+        api.put(`/invoices/${id}/status?status=sent`, {})
+      )
+    )
     setSendingDrafts(false)
-    setCheckedDraftIds(new Set())
+    // Знімаємо виділення тільки з оброблених, не зачіпаємо інші маршрути
+    setCheckedDraftIds(prev => {
+      const next = new Set(prev)
+      visibleCheckedDraftIds.forEach(id => next.delete(id))
+      return next
+    })
     await load(workDate)
   }
 
   // ── Друк вибраних ──────────────────────────────────────────────────────────────
 
   const printChecked = async () => {
-    if (checkedIds.size === 0) return
-    const ids = [...checkedIds].join(',')
+    // Тільки видимі (відфільтровані маршрутом) накладні
+    const visibleChecked = [...checkedIds].filter(id => visibleInvoiceIds.has(id))
+    if (visibleChecked.length === 0) return
+    const ids = visibleChecked.join(',')
     window.open(`/api/v1/print/invoices?invoice_date=${workDate}&ids=${ids}`, '_blank')
-    // draft → sent для вибраних
+    // draft → sent тільки для видимих
     await Promise.all(
-      [...checkedIds].map(async (id) => {
+      visibleChecked.map(async (id) => {
         const inv = invoices.find((i) => i.id === id)
         if (inv?.status === 'draft') {
           await api.put(`/invoices/${id}/status?status=sent`, {})
@@ -1049,13 +1089,10 @@ export default function RoutesPage() {
   // ── Масове прийняття ─────────────────────────────────────────────────────────────
 
   const acceptChecked = async () => {
-    const toAccept = [...checkedIds].filter(id => {
-      const inv = invoices.find(i => i.id === id)
-      return inv && (inv.status === 'sent' || inv.status === 'processing')
-    })
-    if (!toAccept.length) return
+    // acceptableChecked вже відфільтрований по видимих
+    if (!acceptableChecked.length) return
     setAcceptingBulk(true)
-    for (const id of toAccept) {
+    for (const id of acceptableChecked) {
       const paymentAmount = paymentAmounts[id] ?? 0
       await api.put(`/invoices/${id}/status?status=accepted`, { payment_amount: paymentAmount })
     }
@@ -1159,9 +1196,9 @@ export default function RoutesPage() {
                   : routes.find((r) => r.id === activeRouteId)?.name ?? 'Клієнти'}
             </span>
             <div className={styles.listActions}>
-              {checkedDraftIds.size > 0 && (
+              {totalSendable > 0 && (
                 <button className={styles.sendDraftsBtn} onClick={sendCheckedDrafts} disabled={sendingDrafts}>
-                  {sendingDrafts ? '...' : `▶ Відправити (${checkedDraftIds.size})`}
+                  {sendingDrafts ? '...' : `▶ Відправити (${totalSendable})`}
                 </button>
               )}
               {acceptableChecked.length > 0 && (
@@ -1169,12 +1206,6 @@ export default function RoutesPage() {
                   {acceptingBulk ? '...' : `✓ Прийняти (${acceptableChecked.length})`}
                 </button>
               )}
-              <HelpTip width={300}>
-                <strong>Поле «Оплата» (зелений інпут)</strong> — сума отримана від клієнта. За замовч. = сума накладної.<br />
-                Змініть якщо клієнт оплатив частково або не оплатив (введіть 0).<br /><br />
-                <strong>✓ Прийняти (N)</strong> — масово приймає відмічені накладні і записує оплату у баланс кожного клієнта.<br /><br />
-                <strong>✏ Внести корекції</strong> — відкриває форму де можна змінити фактично доставлену кількість. Система створить коригуючу накладну.
-              </HelpTip>
               {checkedCount > 0 && (
                 <button className={styles.printSelBtn} onClick={printChecked}>
                   🖨 Друкувати ({checkedCount})
@@ -1187,6 +1218,12 @@ export default function RoutesPage() {
                 onChange={toggleAll}
                 title="Виділити всі"
               />
+              <HelpTip width={300}>
+                <strong>Поле «Оплата» (зелений інпут)</strong> — сума отримана від клієнта. За замовч. = сума накладної.<br />
+                Змініть якщо клієнт оплатив частково або не оплатив (введіть 0).<br /><br />
+                <strong>✓ Прийняти (N)</strong> — масово приймає відмічені накладні і записує оплату у баланс кожного клієнта.<br /><br />
+                <strong>✏ Внести корекції</strong> — відкриває форму де можна змінити фактично доставлену кількість. Система створить коригуючу накладну.
+              </HelpTip>
             </div>
           </div>
 
@@ -1266,22 +1303,30 @@ export default function RoutesPage() {
                     )}
                   </span>
                   <span className={styles.rowSum}>{inv ? `${inv.total_sum.toFixed(2)} ₴` : ''}</span>
-                  {inv && inv.status !== 'cancelled' && (
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={paymentAmounts[inv.id] ?? inv.total_sum}
-                      disabled={inv.status === 'accepted'}
-                      className={styles.paymentInput}
-                      style={{ background: (paymentAmounts[inv.id] ?? inv.total_sum) > 0 ? '#f0fdf4' : '#f9fafb' }}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => {
-                        const v = Math.max(0, Number(e.target.value))
-                        setPaymentAmounts(prev => ({ ...prev, [inv.id]: v }))
-                      }}
-                    />
-                  )}
+                  {inv && (() => {
+                    const showPayment = inv.status === 'sent' || inv.status === 'processing' || inv.status === 'accepted'
+                    return (
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={paymentAmounts[inv.id] ?? inv.total_sum}
+                        disabled={inv.status === 'accepted' || !showPayment}
+                        tabIndex={showPayment ? 0 : -1}
+                        aria-hidden={!showPayment}
+                        className={styles.paymentInput}
+                        style={{
+                          background: (paymentAmounts[inv.id] ?? inv.total_sum) > 0 ? '#f0fdf4' : '#f9fafb',
+                          visibility: showPayment ? 'visible' : 'hidden',
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => {
+                          const v = Math.max(0, Number(e.target.value))
+                          setPaymentAmounts(prev => ({ ...prev, [inv.id]: v }))
+                        }}
+                      />
+                    )
+                  })()}
                 </div>
               )
             })}

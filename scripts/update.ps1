@@ -126,9 +126,24 @@ dst.close(); src.close()
 }
 
 # Git fetch and checkout
+# Налаштування git щоб НЕ просив prompt (інакше зависає у фоновому процесі без TTY)
+$env:GIT_TERMINAL_PROMPT = '0'
+
 Write-Log 'Fetching from GitHub...'
+# Тимчасово підставляємо URL з токеном — НЕ покладаємось на credential.helper
+# (wincredman / .git-credentials можуть бути недоступні з фонового процесу).
+$REPO_URL = 'https://github.com/TSOrest/Bakery.git'
+if ($oauthToken) {
+    $authUrl = "https://x-access-token:$oauthToken@github.com/TSOrest/Bakery.git"
+    & git -C $ROOT remote set-url origin $authUrl 2>&1 | Out-Null
+}
 $gitResult = & git -C $ROOT fetch origin --tags 2>&1
-if ($LASTEXITCODE -ne 0) {
+$fetchExit = $LASTEXITCODE
+# Прибираємо токен з origin URL — щоб не лишався у git config
+if ($oauthToken) {
+    & git -C $ROOT remote set-url origin $REPO_URL 2>&1 | Out-Null
+}
+if ($fetchExit -ne 0) {
     Write-Log "ERROR: git fetch failed: $gitResult" Red
     Read-Host 'Press Enter'; exit 1
 }
