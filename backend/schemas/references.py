@@ -16,7 +16,7 @@ class UnitOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    is_active: int = 1
+    is_active: Optional[int] = 1
 
 
 # --- Categories ---
@@ -33,10 +33,10 @@ class CategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    is_active: int = 1
-    is_baked: int = 1
-    reserve_pct: float = 5.0
-    sort_order: int = 0
+    is_active: Optional[int] = 1
+    is_baked: Optional[int] = 1
+    reserve_pct: Optional[float] = 5.0
+    sort_order: Optional[int] = 0
 
 
 # --- Products ---
@@ -70,9 +70,9 @@ class ProductOut(BaseModel):
     weight: Optional[float]
     unit_id: Optional[int]
     category_id: Optional[int]
-    cost_per_unit: float = 0
-    is_active: int = 1
-    initial_stock: float = 0
+    cost_per_unit: Optional[float] = 0
+    is_active: Optional[int] = 1
+    initial_stock: Optional[float] = 0
 
 
 # --- Ingredients ---
@@ -106,9 +106,9 @@ class OtherProductOut(BaseModel):
     id: int
     name: str
     unit_id: Optional[int]
-    purchase_price: float = 0
-    sell_price: float = 0
-    is_active: int = 1
+    purchase_price: Optional[float] = 0
+    sell_price: Optional[float] = 0
+    is_active: Optional[int] = 1
 
 
 # --- Routes ---
@@ -122,8 +122,8 @@ class RouteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    sort_order: int = 0
-    is_active: int = 1
+    sort_order: Optional[int] = 0
+    is_active: Optional[int] = 1
 
 
 # --- Clients ---
@@ -177,10 +177,11 @@ class ClientOut(BaseModel):
     address: Optional[str]
     phone: Optional[str]
     route_id: Optional[int]
-    discount_pct: float = 0
-    is_active: int = 1
-    is_own_shop: int = 0
-    print_invoice: int = 1
+    # Default — float, але з БД може прийти None для legacy-записів
+    discount_pct: Optional[float] = 0
+    is_active: Optional[int] = 1
+    is_own_shop: Optional[int] = 0
+    print_invoice: Optional[int] = 1
     receiver_name: Optional[str]
     delivery_agent: Optional[str]
     delivery_note_number: Optional[str]
