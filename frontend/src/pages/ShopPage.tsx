@@ -268,7 +268,7 @@ function ShopTabContent({
   const [receiptRefresh, setReceiptRefresh]   = useState(0)
   const [allReceipts, setAllReceipts]         = useState<ShopReceipt[]>([])
   const [products, setProducts]               = useState<{ id: number; name: string; category_id: number | null }[]>([])
-  const [categories, setCategories]           = useState<{ id: number; name: string }[]>([])
+  const [categories, setCategories]           = useState<{ id: number; name: string; is_baked: number }[]>([])
   const [hasOpeningRec, setHasOpeningRec]     = useState(false)
 
   useEffect(() => { setSelectedDate(workDate) }, [workDate])
@@ -287,7 +287,7 @@ function ShopTabContent({
     checkOpeningRec()
     // Завантажуємо всі продукти (включно з неактивними — у звірках можуть бути старі)
     api.get<{ id: number; name: string; category_id: number | null }[]>('/products/').then(setProducts)
-    api.get<{ id: number; name: string }[]>('/categories').then(setCategories)
+    api.get<{ id: number; name: string; is_baked: number }[]>('/categories').then(setCategories)
   }, [shopId, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dateReceipts  = allReceipts.filter((r) => r.receipt_date === selectedDate)
@@ -368,6 +368,7 @@ function ShopTabContent({
           shopId={shopId}
           defaultDate={selectedDate}
           products={products}
+          categories={categories}
           onClose={() => setAddReceiptOpen(false)}
           onSaved={() => setReceiptRefresh((n) => n + 1)}
         />
@@ -389,11 +390,12 @@ function ShopTabContent({
 // ─── Модальне вікно додавання надходження ─────────────────────────────────────
 
 function AddReceiptModal({
-  shopId, defaultDate, products, onClose, onSaved,
+  shopId, defaultDate, products, categories, onClose, onSaved,
 }: {
   shopId: number
   defaultDate: string
-  products: { id: number; name: string }[]
+  products: { id: number; name: string; category_id: number | null }[]
+  categories: { id: number; name: string; is_baked: number }[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -401,6 +403,16 @@ function AddReceiptModal({
     product_id: '', qty: '', purchase_price: '', notes: '', receipt_date: defaultDate,
   })
   const [saving, setSaving] = useState(false)
+  // За замовч. показуємо лише невипікаємі — форма для куплених ззовні товарів.
+  // Sentinel-option у dropdown дозволяє розгорнути повний список за потреби.
+  const [showAll, setShowAll] = useState(false)
+  const bakedCategoryIds = useMemo(
+    () => new Set(categories.filter(c => c.is_baked === 1).map(c => c.id)),
+    [categories]
+  )
+  const visibleProducts = showAll
+    ? products
+    : products.filter(p => !p.category_id || !bakedCategoryIds.has(p.category_id))
 
   const handleSave = async () => {
     if (!form.product_id || !form.qty) return
@@ -438,10 +450,21 @@ function AddReceiptModal({
           <div>
             <label style={labelStyle}>Виріб</label>
             <select value={form.product_id}
-              onChange={(e) => setForm({ ...form, product_id: e.target.value })}
+              onChange={(e) => {
+                if (e.target.value === '__SHOW_ALL__') {
+                  setShowAll(true)
+                  return  // product_id не змінюємо
+                }
+                setForm({ ...form, product_id: e.target.value })
+              }}
               style={inputStyle}>
               <option value="">— оберіть —</option>
-              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {visibleProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {!showAll && (
+                <option value="__SHOW_ALL__" style={{ fontStyle: 'italic', color: '#1a3a5c' }}>
+                  — Показати всі вироби —
+                </option>
+              )}
             </select>
           </div>
           <div>
@@ -606,7 +629,7 @@ function ReconciliationCalendar({
 }: {
   shopId: number
   products: { id: number; name: string; category_id: number | null }[]
-  categories: { id: number; name: string }[]
+  categories: { id: number; name: string; is_baked: number }[]
   onSelectDate?: (date: string) => void
   leftFooter?: React.ReactNode
 }) {
