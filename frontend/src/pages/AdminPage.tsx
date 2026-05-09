@@ -1800,32 +1800,49 @@ function PricesTab({ products, clients, categories }: {
             </button>
           ))}
         </div>
-        {/* Слайдер глибини історії */}
+        {/* Слайдер глибини історії — заповнення показує ВИДИМИЙ діапазон (від value до max) */}
         {earliestDate && maxSlider > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52, textAlign: 'right' }}>
-              {earliest.slice(0, 7)}
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={maxSlider}
-              value={sliderVal}
-              onChange={e => {
-                const v = Number(e.target.value)
-                const d = new Date(earliest)
-                d.setMonth(d.getMonth() + v)
-                setFrom(d.toISOString().slice(0, 10))
-              }}
-              style={{ flex: 1, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52 }}>
-              {today.slice(0, 7)}
-            </span>
-            <span style={{ fontSize: 11, color: '#2563eb', minWidth: 56, fontWeight: 500 }}>
-              ↤ {from.slice(0, 7)}
-            </span>
-          </div>
+          <>
+            <style>{`
+              .pgRevRange { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 4px; outline: none; padding: 0; margin: 0; }
+              .pgRevRange::-webkit-slider-runnable-track { height: 6px; border-radius: 4px; background: transparent; }
+              .pgRevRange::-moz-range-track { height: 6px; border-radius: 4px; background: transparent; }
+              .pgRevRange::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); margin-top: -5px; }
+              .pgRevRange::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+            `}</style>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52, textAlign: 'right' }}>
+                {earliest.slice(0, 7)}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={maxSlider}
+                value={sliderVal}
+                onChange={e => {
+                  const v = Number(e.target.value)
+                  const d = new Date(earliest)
+                  d.setMonth(d.getMonth() + v)
+                  setFrom(d.toISOString().slice(0, 10))
+                }}
+                className="pgRevRange"
+                style={{
+                  flex: 1,
+                  cursor: 'pointer',
+                  background: (() => {
+                    const pct = maxSlider > 0 ? (sliderVal / maxSlider) * 100 : 0
+                    return `linear-gradient(to right, #e5e7eb 0%, #e5e7eb ${pct}%, #2563eb ${pct}%, #2563eb 100%)`
+                  })(),
+                }}
+              />
+              <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 52 }}>
+                {today.slice(0, 7)}
+              </span>
+              <span style={{ fontSize: 11, color: '#2563eb', minWidth: 56, fontWeight: 500 }}>
+                ↤ {from.slice(0, 7)}
+              </span>
+            </div>
+          </>
         )}
       </div>
     )
