@@ -3,6 +3,7 @@ import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import HelpTip from '../components/HelpTip'
 import { useConfirm } from '../components/ConfirmDialog'
+import { useToast } from '../components/Toast'
 import type {
   BakingTask, Category, Client, Order, Product, ShortageClientInfo,
 } from '../types'
@@ -34,6 +35,7 @@ function DiscrepancyPanel({
   task, productName, clients, surplusLines, workDate, routeReserve,
   onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated, onShortageChanged,
 }: DiscrepancyPanelProps) {
+  const toast = useToast()
 
   const [clientRows,     setClientRows]     = useState<ShortageClientInfo[]>([])
   const [childOrders,    setChildOrders]    = useState<Order[]>([])
@@ -159,7 +161,7 @@ function DiscrepancyPanel({
   // ── Shortage actions ──────────────────────────────────────────────────────
   const handleApplyReductions = async () => {
     if (!underbakedClient) {
-      alert('Системний клієнт "Недопечено" не знайдений.')
+      toast.error('Системний клієнт "Недопечено" не знайдений')
       return
     }
     setApplying(true)

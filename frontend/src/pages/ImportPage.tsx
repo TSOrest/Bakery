@@ -3,6 +3,7 @@
  * Відкривається з кнопки у BackupTab (AdminPage.tsx).
  */
 import { useEffect, useRef, useState } from 'react'
+import { useToast } from '../components/Toast'
 import {
   uploadAccdb,
   runImport,
@@ -1276,6 +1277,7 @@ interface Props {
 }
 
 export default function ImportPage({ onClose }: Props) {
+  const toast = useToast()
   const [step, setStep]         = useState<WizardStep>(1)
   const [maxReached, setMaxReached] = useState<WizardStep>(1)
 
@@ -1466,7 +1468,7 @@ export default function ImportPage({ onClose }: Props) {
       })
       goTo(10)
     } catch (e: any) {
-      alert(e.message ?? 'Помилка запуску імпорту')
+      toast.error(e.message ?? 'Помилка запуску імпорту')
     }
   }
 
