@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.shop import (
     ShopCount, OtherStockIn,
     ShopReconciliation, ShopReconciliationLine, ShopReceipt,
@@ -733,10 +733,10 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
             price=price,
         ))
 
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     _recalc_reconciliation(rec)
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     return rec
 
@@ -807,7 +807,7 @@ def create_opening_reconciliation(
             price=None,
             expected_cash=0.0,
         ))
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     return rec
 
@@ -828,7 +828,7 @@ def update_opening_cash(
     rec.cash_actual   = body.cash_actual
     rec.cash_expected = body.cash_actual
     rec.cash_diff     = 0.0
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     return get_reconciliation(rec_id, db)
 
@@ -1071,7 +1071,7 @@ def update_reconciliation_line(
 
     _recalc_line(line, from_disposal=bool(line.disposal_lines))
     _recalc_reconciliation(rec)
-    db.commit()
+    safe_commit(db)
     db.refresh(line)
     return line
 
@@ -1162,7 +1162,7 @@ def refresh_received(rec_id: int, db: Session = Depends(get_db)):
         ))
 
     _recalc_reconciliation(rec)
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     return rec
 
@@ -1227,7 +1227,7 @@ def confirm_reconciliation(
         )
         db.add(fin)
 
-    db.commit()
+    safe_commit(db)
     db.refresh(rec)
     return rec
 
@@ -1240,7 +1240,7 @@ def delete_reconciliation(rec_id: int, db: Session = Depends(get_db)):
     if rec.closed:
         raise HTTPException(status_code=400, detail="Закриту звірку не можна видалити")
     db.delete(rec)
-    db.commit()
+    safe_commit(db)
 
 
 # ─── Розподіл списань рядка звірки ───────────────────────────────────────────
@@ -1287,7 +1287,7 @@ def add_disposal(
 
     _recalc_line(line, from_disposal=True)
     _recalc_reconciliation(rec)
-    db.commit()
+    safe_commit(db)
     db.refresh(line)
     return line
 
@@ -1321,7 +1321,7 @@ def delete_disposal(
         _recalc_line(line, from_disposal=True)
 
     _recalc_reconciliation(rec)
-    db.commit()
+    safe_commit(db)
 
 
 # ─── Надходження ззовні ───────────────────────────────────────────────────────
@@ -1345,7 +1345,7 @@ def list_receipts(
 def create_receipt(data: ShopReceiptCreate, db: Session = Depends(get_db)):
     r = ShopReceipt(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(r)
-    db.commit()
+    safe_commit(db)
     db.refresh(r)
     return r
 
@@ -1368,7 +1368,7 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db)):
     if last_closed and r.receipt_date <= last_closed.period_to:
         raise HTTPException(status_code=409, detail="Надходження у закритому діапазоні — видалення заборонено")
     db.delete(r)
-    db.commit()
+    safe_commit(db)
 
 
 # ─── Старі ендпоінти (сумісність) ────────────────────────────────────────────
@@ -1401,7 +1401,7 @@ def update_count(count_id: int, body: ShopCountUpdate, db: Session = Depends(get
             0.0,
             sc.yesterday_balance + sc.received_today - sc.entered_balance - sc.written_off_entered,
         )
-    db.commit()
+    safe_commit(db)
     db.refresh(sc)
     return sc
 
@@ -1421,7 +1421,7 @@ def list_stock_in(stock_date: str, db: Session = Depends(get_db)):
 def create_stock_in(stock_date: str, data: OtherStockInCreate, db: Session = Depends(get_db)):
     s = OtherStockIn(**data.model_dump(), stock_date=stock_date, created_at=datetime.now().isoformat())
     db.add(s)
-    db.commit()
+    safe_commit(db)
     db.refresh(s)
     return s
 
@@ -1432,7 +1432,7 @@ def delete_stock_in(stock_in_id: int, db: Session = Depends(get_db)):
     if not s:
         raise HTTPException(status_code=404, detail="Не знайдено")
     db.delete(s)
-    db.commit()
+    safe_commit(db)
 
 
 # ─── POS-каса ─────────────────────────────────────────────────────────────────
@@ -1603,7 +1603,7 @@ def create_sale(
         )
         db.add(sale)
         created_lines.append(sale)
-    db.commit()
+    safe_commit(db)
     for s in created_lines:
         db.refresh(s)
     return _build_sale_out(session_id, created_lines)
@@ -1642,4 +1642,4 @@ def delete_sale(
         raise HTTPException(status_code=404, detail="Чек не знайдено")
     for row in rows:
         db.delete(row)
-    db.commit()
+    safe_commit(db)

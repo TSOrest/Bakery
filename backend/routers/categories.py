@@ -2,9 +2,8 @@
 
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.references import Category, Unit
 from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate
 from backend.routers.auth import require_admin
@@ -24,11 +23,7 @@ def list_categories(active_only: bool = False, db: Session = Depends(get_db)):
 def create_category(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
     c = Category(name=name)
     db.add(c)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Категорія з назвою «{name}» вже існує")
+    safe_commit(db, conflict_msg=f"Категорія з назвою «{name}» вже існує")
     db.refresh(c)
     return c
 
@@ -48,11 +43,7 @@ def update_category(category_id: int, body: CategoryUpdate, db: Session = Depend
         c.reserve_pct = body.reserve_pct
     if body.sort_order is not None:
         c.sort_order = body.sort_order
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Категорія з назвою «{body.name}» вже існує")
+    safe_commit(db, conflict_msg=f"Категорія з назвою «{body.name}» вже існує")
     db.refresh(c)
     return c
 
@@ -71,7 +62,7 @@ def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(r
             detail=f"Категорію використовують {used_count} виробів. Спочатку перенесіть їх або деактивуйте.",
         )
     db.delete(c)
-    db.commit()
+    safe_commit(db)
 
 
 @router.get("/units", response_model=List[UnitOut])
@@ -86,11 +77,7 @@ def list_units(active_only: bool = False, db: Session = Depends(get_db)):
 def create_unit(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
     u = Unit(name=name)
     db.add(u)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Одиниця з назвою «{name}» вже існує")
+    safe_commit(db, conflict_msg=f"Одиниця з назвою «{name}» вже існує")
     db.refresh(u)
     return u
 
@@ -104,11 +91,7 @@ def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _
         u.name = body.name
     if body.is_active is not None:
         u.is_active = body.is_active
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Одиниця з назвою «{body.name}» вже існує")
+    safe_commit(db, conflict_msg=f"Одиниця з назвою «{body.name}» вже існує")
     db.refresh(u)
     return u
 
@@ -127,4 +110,4 @@ def delete_unit(unit_id: int, db: Session = Depends(get_db), _=Depends(require_a
             detail=f"Одиницю використовують {p_count} виробів і {i_count} інгредієнтів.",
         )
     db.delete(u)
-    db.commit()
+    safe_commit(db)

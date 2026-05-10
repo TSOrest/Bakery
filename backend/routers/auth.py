@@ -9,10 +9,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.auth import User, UserSession
 from backend.models.settings import Setting
 
@@ -277,7 +276,7 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     token = secrets.token_hex(32)
     now_iso = datetime.now().isoformat()
     db.add(UserSession(token=token, user_id=user.id, created_at=now_iso, last_used_at=now_iso))
-    db.commit()
+    safe_commit(db)
 
     return {
         "token": token,
@@ -348,11 +347,7 @@ def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Sess
         role=body.role,
     )
     db.add(user)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=409, detail=f"Користувач з логіном «{body.username}» вже існує")
+    safe_commit(db, conflict_msg=f"Користувач з логіном «{body.username}» вже існує")
     db.refresh(user)
     return {"id": user.id, "username": user.username, "role": user.role}
 
@@ -378,5 +373,5 @@ def update_user(
     if body.password:
         user.salt = _make_salt()
         user.password_hash = _hash_password(body.password, user.salt)
-    db.commit()
+    safe_commit(db)
     return {"id": user.id, "username": user.username, "role": user.role}

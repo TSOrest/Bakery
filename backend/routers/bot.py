@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
 from backend.models.orders import Order
 from backend.models.references import Client, ClientBotUser, Product
 from backend.models.settings import Setting
@@ -180,7 +180,7 @@ def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db
     else:
         raise HTTPException(400, "Невідома дія")
 
-    db.commit()
+    safe_commit(db)
     return {"ok": True, "status": order.bot_status}
 
 
@@ -310,7 +310,7 @@ def stop_order_acceptance(db: Session = Depends(get_db)):
     else:
         db.add(Setting(key="bot_orders_closed_until", value=closed_until,
                        description="Бот приймає замовлення до цього часу (ISO datetime)"))
-    db.commit()
+    safe_commit(db)
     return {"accepting": False, "closed_until": closed_until}
 
 
@@ -320,7 +320,7 @@ def resume_order_acceptance(db: Session = Depends(get_db)):
     row = db.get(Setting, "bot_orders_closed_until")
     if row:
         row.value = ""
-        db.commit()
+    safe_commit(db)
     return {"accepting": True, "closed_until": None}
 
 
@@ -355,5 +355,5 @@ def revoke_bot_user(client_id: int, user_id: int, db: Session = Depends(get_db))
     if not row or row.client_id != client_id:
         raise HTTPException(404, "Не знайдено")
     db.delete(row)
-    db.commit()
+    safe_commit(db)
     return {"ok": True}
