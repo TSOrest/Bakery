@@ -129,6 +129,135 @@ def _received_from_invoices(db: Session, shop_client_id: int, date_from: str, da
     return {r.product_id: float(r.total) for r in rows}
 
 
+def _received_from_invoices_batched(
+    db: Session, shop_client_id: int, date_from: str, date_to: str
+) -> dict[tuple[int, str], float]:
+    """Надходження через прийняті накладні — розбиті по (product_id, invoice_date)."""
+    rows = (
+        db.query(
+            InvoiceLine.product_id,
+            Invoice.invoice_date,
+            func.sum(InvoiceLine.qty).label("total"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.client_id == shop_client_id,
+            Invoice.status == "accepted",
+            Invoice.invoice_date >= date_from,
+            Invoice.invoice_date <= date_to,
+            InvoiceLine.is_exchange == 0,
+            InvoiceLine.is_stale == 0,
+        )
+        .group_by(InvoiceLine.product_id, Invoice.invoice_date)
+        .all()
+    )
+    return {(r.product_id, r.invoice_date): float(r.total) for r in rows}
+
+
+def compute_current_stock(
+    db: Session,
+    shop_client_id: int,
+    as_of_date: str,
+) -> dict[tuple[int, Optional[str]], float]:
+    """
+    Поточний стан магазину на as_of_date по партіях (product_id, batch_date).
+
+    База:
+      • якщо є відкрита звірка → її рядки як opening_balance + received
+      • інакше → entered_balance кожного рядка останньої закритої звірки
+
+    До бази додаються рухи у незвіреному періоді (period_to останньої закритої +1 → as_of_date):
+      • надходження з пекарні (Order, origin_id IS NULL/0) — batch_date = order_date
+      • зовнішні надходження (ShopReceipt) — batch_date = receipt_date
+      • прийняті накладні (Invoice status='accepted') — batch_date = invoice_date
+    Мінус POS-продажі (ShopSale) у тому ж періоді — по власному batch_date.
+
+    Disposals (writeoff/ration/sale/client) — лише в межах звірок, тут не враховуються:
+    у незвіреному періоді їх не існує.
+    """
+    from datetime import date as _date, timedelta
+
+    stock: dict[tuple[int, Optional[str]], float] = {}
+
+    open_rec = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == shop_client_id,
+            ShopReconciliation.closed == 0,
+        )
+        .first()
+    )
+
+    if open_rec:
+        for ln in open_rec.lines:
+            key = (ln.product_id, ln.batch_date)
+            stock[key] = stock.get(key, 0.0) + float((ln.opening_balance or 0) + (ln.received or 0))
+        period_from = open_rec.period_from
+    else:
+        last_closed = (
+            db.query(ShopReconciliation)
+            .filter(
+                ShopReconciliation.shop_client_id == shop_client_id,
+                ShopReconciliation.closed == 1,
+            )
+            .order_by(ShopReconciliation.period_to.desc())
+            .first()
+        )
+        # Без opening rec немає якоря — historical надходження не репрезентують реальний залишок.
+        # Повертаємо пусто; UI має направити користувача створити початкову звірку.
+        if not last_closed:
+            return {}
+
+        for ln in last_closed.lines:
+            if ln.entered_balance and ln.entered_balance > 0:
+                key = (ln.product_id, ln.batch_date)
+                stock[key] = stock.get(key, 0.0) + float(ln.entered_balance)
+        period_from = (
+            _date.fromisoformat(last_closed.period_to) + timedelta(days=1)
+        ).isoformat()
+
+        # Надходження у незвіреному періоді (по batch_date)
+        for (pid, bd), qty in _received_from_bakery_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            key = (pid, bd)
+            stock[key] = stock.get(key, 0.0) + qty
+
+        for (pid, bd), qty in _received_from_receipts_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            key = (pid, bd)
+            stock[key] = stock.get(key, 0.0) + qty
+
+        for (pid, bd), qty in _received_from_invoices_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            key = (pid, bd)
+            stock[key] = stock.get(key, 0.0) + qty
+
+    # POS-продажі від period_from до as_of_date
+    pos_rows = (
+        db.query(
+            ShopSale.product_id,
+            ShopSale.batch_date,
+            func.sum(ShopSale.qty).label("total"),
+        )
+        .filter(
+            ShopSale.shop_client_id == shop_client_id,
+            ShopSale.sale_date >= period_from,
+            ShopSale.sale_date <= as_of_date,
+        )
+        .group_by(ShopSale.product_id, ShopSale.batch_date)
+        .all()
+    )
+    for r in pos_rows:
+        key = (r.product_id, r.batch_date)
+        stock[key] = stock.get(key, 0.0) - float(r.total)
+
+    # Прибираємо нульові і від'ємні залишки
+    return {k: v for k, v in stock.items() if v > 0.0001}
+
+
 def _get_shop_price(db: Session, shop_client_id: int, product_id: int, date: str) -> Optional[float]:
     """Ціна виробу для магазину: client_price_overrides → базова ціна."""
     from backend.models.pricing import ClientPriceOverride, Price
@@ -1312,103 +1441,95 @@ def delete_stock_in(stock_in_id: int, db: Session = Depends(get_db)):
 def pos_products(shop_client_id: int, date: str, db: Session = Depends(get_db)):
     """
     Список товарів для POS-інтерфейсу по партіях (product_id, batch_date).
-    Відкрита звірка або остання закрита визначає залишок кожної партії.
+    Стан рахується через compute_current_stock — працює і коли немає відкритої звірки
+    (lazy-обчислення з last_closed.period_to+1 до date).
     """
     from datetime import date as _date_type
 
-    # Знайти відкриту звірку (або останню закриту як базу)
-    open_rec: Optional[ShopReconciliation] = (
-        db.query(ShopReconciliation)
+    stock = compute_current_stock(db, shop_client_id, date)
+    if not stock:
+        return []
+
+    # Точка відліку для age_days NULL-партій: початок незвіреного періоду
+    # (день після last_closed.period_to, або сама date якщо звірок ще не було).
+    last_closed_to = (
+        db.query(ShopReconciliation.period_to)
         .filter(
             ShopReconciliation.shop_client_id == shop_client_id,
-            ShopReconciliation.closed == 0,
+            ShopReconciliation.closed == 1,
         )
-        .first()
-    )
-    base_rec: Optional[ShopReconciliation] = open_rec or (
-        db.query(ShopReconciliation)
-        .filter(ShopReconciliation.shop_client_id == shop_client_id)
         .order_by(ShopReconciliation.period_to.desc())
-        .first()
+        .limit(1)
+        .scalar()
     )
-    period_from = base_rec.period_from if base_rec else date
+    if last_closed_to:
+        from datetime import timedelta
+        age_ref_default = (
+            _date_type.fromisoformat(last_closed_to) + timedelta(days=1)
+        ).isoformat()
+    else:
+        age_ref_default = date
 
-    # POS-продажі за поточний сеанс (від period_from до сьогодні) по (product_id, batch_date)
-    pos_sold_rows = (
-        db.query(ShopSale.product_id, ShopSale.batch_date, func.sum(ShopSale.qty).label("total"))
-        .filter(
-            ShopSale.shop_client_id == shop_client_id,
-            ShopSale.sale_date >= period_from,
-            ShopSale.sale_date <= date,
-        )
-        .group_by(ShopSale.product_id, ShopSale.batch_date)
-        .all()
-    )
-    pos_sold: dict[tuple[int, str | None], float] = {
-        (r.product_id, r.batch_date): float(r.total) for r in pos_sold_rows
+    # Батч-завантаження продуктів і категорій
+    pids = sorted({pid for (pid, _) in stock.keys()})
+    products_map = {
+        p.id: p for p in db.query(Product).filter(Product.id.in_(pids)).all()
     }
+    cat_ids = {p.category_id for p in products_map.values() if p.category_id}
+    categories_map = {
+        c.id: c for c in db.query(Category).filter(Category.id.in_(cat_ids)).all()
+    } if cat_ids else {}
 
     today = _date_type.fromisoformat(date)
-    rows = []
-    if base_rec:
-        for ln in base_rec.lines:
-            product = db.get(Product, ln.product_id)
-            if not product or not product.is_active:
-                continue
-            # Залишок партії = (entering balance або opening+received) мінус POS-продажі цієї партії
-            if base_rec.closed:
-                batch_balance = ln.entered_balance or 0
-            else:
-                batch_balance = (ln.opening_balance or 0) + (ln.received or 0)
-            batch_balance = max(0.0, batch_balance - pos_sold.get((ln.product_id, ln.batch_date), 0))
-            if batch_balance <= 0:
-                continue
+    rows: list[PosProductRow] = []
+    price_cache: dict[int, Optional[float]] = {}
 
-            price = _get_shop_price(db, shop_client_id, ln.product_id, date)
+    for (pid, batch_date), balance in stock.items():
+        product = products_map.get(pid)
+        if not product or not product.is_active:
+            continue
 
-            cat_id = product.category_id
-            cat_name = None
-            is_baked_cat = False
-            if cat_id:
-                cat = db.get(Category, cat_id)
-                cat_name = cat.name if cat else None
-                is_baked_cat = bool(cat and cat.is_baked)
+        cat_id = product.category_id
+        cat = categories_map.get(cat_id) if cat_id else None
+        cat_name = cat.name if cat else None
+        is_baked_cat = bool(cat and cat.is_baked)
 
-            # age_days — тільки для виробів що випікаються (Хліб/Булки).
-            # Товари категорії "Інше" (is_baked=0) не черствіють → age_days=None.
-            # Для NULL-партій (залишок з попередньої звірки) рахуємо від period_from.
-            age_days: Optional[int] = None
-            if is_baked_cat:
-                ref_date = ln.batch_date or period_from
-                age_days = (today - _date_type.fromisoformat(ref_date)).days
-                # Підказка ціни для старих партій
-                if age_days > 0 and not price:
-                    last_sale_d = (
-                        db.query(ShopDisposalLine)
-                        .join(ShopReconciliationLine)
-                        .filter(
-                            ShopReconciliationLine.product_id == ln.product_id,
-                            ShopDisposalLine.disposal_type == 'sale',
-                            ShopDisposalLine.price.isnot(None),
-                        )
-                        .order_by(ShopDisposalLine.id.desc())
-                        .first()
+        if pid not in price_cache:
+            price_cache[pid] = _get_shop_price(db, shop_client_id, pid, date)
+        price = price_cache[pid]
+
+        age_days: Optional[int] = None
+        if is_baked_cat:
+            ref_date = batch_date or age_ref_default
+            age_days = (today - _date_type.fromisoformat(ref_date)).days
+            # Підказка ціни для старих партій — з останнього disposal type='sale'
+            if age_days > 0 and not price:
+                last_sale_d = (
+                    db.query(ShopDisposalLine)
+                    .join(ShopReconciliationLine)
+                    .filter(
+                        ShopReconciliationLine.product_id == pid,
+                        ShopDisposalLine.disposal_type == 'sale',
+                        ShopDisposalLine.price.isnot(None),
                     )
-                    if last_sale_d:
-                        price = last_sale_d.price
+                    .order_by(ShopDisposalLine.id.desc())
+                    .first()
+                )
+                if last_sale_d:
+                    price = last_sale_d.price
 
-            rows.append(PosProductRow(
-                product_id=ln.product_id,
-                name=product.name,
-                short_name=product.short_name,
-                category_id=cat_id,
-                category_name=cat_name,
-                price=price,
-                current_balance=batch_balance,
-                batch_date=ln.batch_date,
-                age_days=age_days,
-            ))
-    # Сортуємо: по product_id, потім NULL-партії після нових (старіші — нижче)
+        rows.append(PosProductRow(
+            product_id=pid,
+            name=product.name,
+            short_name=product.short_name,
+            category_id=cat_id,
+            category_name=cat_name,
+            price=price,
+            current_balance=round(balance, 4),
+            batch_date=batch_date,
+            age_days=age_days,
+        ))
+
     rows.sort(key=lambda r: (r.product_id, r.batch_date is None, r.batch_date or ''))
     return rows
 
@@ -1437,8 +1558,32 @@ def create_sale(
     current_user=Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Зареєструвати продаж (один чек = масив позицій)."""
+    """Зареєструвати продаж (один чек = масив позицій).
+
+    Валідація: сума qty по (product_id, batch_date) не може перевищувати
+    поточний залишок магазину (compute_current_stock).
+    """
     import uuid
+    from collections import defaultdict
+
+    # Сумуємо потребу по партії — кілька рядків з тим самим (product, batch) рахуємо разом
+    need: dict[tuple[int, Optional[str]], float] = defaultdict(float)
+    for ln in data.lines:
+        need[(ln.product_id, ln.batch_date)] += float(ln.qty)
+
+    stock = compute_current_stock(db, data.shop_client_id, data.sale_date)
+    for (pid, bd), qty_needed in need.items():
+        available = stock.get((pid, bd), 0.0)
+        if qty_needed > available + 0.0001:
+            product = db.get(Product, pid)
+            pname = product.name if product else f'#{pid}'
+            batch_label = bd or '—'
+            raise HTTPException(
+                status_code=422,
+                detail=f"Недостатній залишок: «{pname}» (партія {batch_label}) — "
+                       f"доступно {available:g}, потрібно {qty_needed:g}",
+            )
+
     session_id = data.session_id or str(uuid.uuid4())
     now = datetime.now().isoformat()
     created_lines = []
