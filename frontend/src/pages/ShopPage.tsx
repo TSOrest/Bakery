@@ -270,6 +270,14 @@ function ShopTabContent({
   const [products, setProducts]               = useState<{ id: number; name: string; category_id: number | null }[]>([])
   const [categories, setCategories]           = useState<{ id: number; name: string; is_baked: number }[]>([])
   const [hasOpeningRec, setHasOpeningRec]     = useState(false)
+  const [hasAnyRec, setHasAnyRec]             = useState(false)
+  // Поточні залишки магазину (по партіях) — для верхньої секції під tab
+  const [stock, setStock] = useState<Array<{
+    product_id: number; name: string; short_name: string | null;
+    category_id: number | null; category_name: string | null;
+    price: number | null; current_balance: number;
+    batch_date: string | null; age_days: number | null;
+  }>>([])
 
   useEffect(() => { setSelectedDate(workDate) }, [workDate])
 
@@ -279,7 +287,10 @@ function ShopTabContent({
 
   const checkOpeningRec = () =>
     api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
-      .then((recs) => setHasOpeningRec(recs.some((r) => r.rec_type === 'opening')))
+      .then((recs) => {
+        setHasOpeningRec(recs.some((r) => r.rec_type === 'opening'))
+        setHasAnyRec(recs.length > 0)
+      })
       .catch(() => {})
 
   useEffect(() => {
@@ -290,27 +301,44 @@ function ShopTabContent({
     api.get<{ id: number; name: string; is_baked: number }[]>('/categories').then(setCategories)
   }, [shopId, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Поточні залишки магазину — оновлюються при зміні дати/магазину/нового надходження/звірки
+  useEffect(() => {
+    api.get<typeof stock>(`/shop/pos/products?shop_client_id=${shopId}&date=${workDate}`)
+      .then(setStock)
+      .catch(() => setStock([]))
+  }, [shopId, workDate, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const dateReceipts  = allReceipts.filter((r) => r.receipt_date === selectedDate)
   const productName   = (id: number) => products.find((p) => p.id === id)?.name ?? `#${id}`
 
   const handleDeleteReceipt = (id: number) =>
     api.delete(`/shop/receipts/${id}`).then(() => setReceiptRefresh((n) => n + 1))
 
-  // Підвал лівої колонки календаря: кнопка звірки + надходження на обрану дату
+  // Підвал лівої колонки календаря: кнопка звірки АБО початкового залишку (взаємовиключні)
+  // Логіка: жодних звірок → тільки "Початковий залишок"; інакше → тільки "Звірка"
   const calendarLeftFooter = (
     <div>
-      <button
-        onClick={() => setShowRecModal(true)}
-        style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.35rem' }}
-      >
-        Звірка →
-      </button>
-      {!hasOpeningRec && (
+      {hasAnyRec ? (
+        <button
+          onClick={() => setShowRecModal(true)}
+          style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.5rem' }}
+        >
+          Звірка →
+        </button>
+      ) : (
+        <button
+          onClick={() => setShowOpeningModal(true)}
+          style={{ ...primaryBtn, width: '100%', marginTop: '0.6rem', marginBottom: '0.5rem', background: '#5b21b6' }}
+        >
+          ◈ Початковий залишок
+        </button>
+      )}
+      {hasAnyRec && !hasOpeningRec && (
         <button
           onClick={() => setShowOpeningModal(true)}
           style={{ ...secondaryBtn, width: '100%', marginBottom: '0.5rem', fontSize: '0.78rem', color: '#5b21b6', borderColor: '#c4b5fd' }}
         >
-          ◈ Початковий залишок
+          ◈ Початковий залишок (legacy)
         </button>
       )}
       <div style={{ borderTop: '1px solid #e0e8f0', paddingTop: '0.55rem' }}>
@@ -340,8 +368,105 @@ function ShopTabContent({
     </div>
   )
 
+  // Згрупувати залишки по категоріях (порядок: випікаємі — Хліб → Булки, потім інші).
+  // Сортування у групі: за назвою товару, потім за batch_date (NULL — старіші — на початку).
+  const stockByCategory = useMemo(() => {
+    const groups = new Map<string, typeof stock>()
+    const noCategory: typeof stock = []
+    for (const item of stock) {
+      if (item.current_balance <= 0) continue
+      const key = item.category_name ?? null
+      if (key === null) { noCategory.push(item); continue }
+      const arr = groups.get(key) ?? []
+      arr.push(item)
+      groups.set(key, arr)
+    }
+    // Сортування товарів усередині кожної групи
+    for (const arr of groups.values()) {
+      arr.sort((a, b) => {
+        const an = a.short_name ?? a.name, bn = b.short_name ?? b.name
+        if (an !== bn) return an.localeCompare(bn, 'uk')
+        return (a.batch_date ?? '').localeCompare(b.batch_date ?? '')
+      })
+    }
+    // Сортування груп: випікаємі першими, потім за алфавітом
+    const bakedSet = new Set(categories.filter(c => c.is_baked === 1).map(c => c.name))
+    const entries = Array.from(groups.entries()).sort((a, b) => {
+      const ab = bakedSet.has(a[0]) ? 0 : 1
+      const bb = bakedSet.has(b[0]) ? 0 : 1
+      if (ab !== bb) return ab - bb
+      return a[0].localeCompare(b[0], 'uk')
+    })
+    if (noCategory.length > 0) entries.push(['Без категорії', noCategory])
+    return entries
+  }, [stock, categories])
+
+  const totalStockUnits = stock.reduce((s, x) => s + (x.current_balance > 0 ? x.current_balance : 0), 0)
+
   return (
     <>
+      {/* ── Поточні залишки магазину: групи поряд горизонтально (wrap) ── */}
+      {stockByCategory.length > 0 && (
+        <div style={{
+          marginBottom: 10, padding: '8px 12px', background: '#f8fafc',
+          border: '1px solid #e2e8f0', borderRadius: 8, fontSize: '0.82rem',
+          maxHeight: 220, overflowY: 'auto',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, color: '#475569', fontWeight: 600, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            <span>📦 Залишки магазину</span>
+            <span style={{ color: '#94a3b8', fontWeight: 400 }}>· разом {totalStockUnits.toFixed(1)} шт</span>
+          </div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'row',
+            gap: 8,
+            alignItems: 'stretch',
+            flexWrap: 'wrap',
+          }}>
+            {stockByCategory.map(([cat, items]) => {
+              // Вага групи = сумарна "псевдо-ширина" chips (довжина назви + резерв на число/badge).
+              // Через flex-grow=weight ширина групи пропорційна вмісту → висоти приблизно вирівнюються.
+              const weight = items.reduce(
+                (s, p) => s + (p.short_name ?? p.name).length + (p.batch_date ? 6 : 4),
+                0,
+              )
+              return (
+              <div key={cat} style={{
+                flex: `${weight} 1 0`,
+                minWidth: 'min-content',
+                padding: '4px 7px',
+                background: '#fff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 6,
+              }}>
+                <div style={{ color: '#1a3a5c', fontWeight: 600, fontSize: '0.74rem', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{cat}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                  {items.map((p, i) => {
+                    const stale = (p.age_days ?? 0) > 1
+                    return (
+                      <span key={`${p.product_id}-${p.batch_date ?? 'n'}-${i}`} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 3,
+                        padding: '1px 7px', borderRadius: 10, fontSize: '0.78rem',
+                        background: stale ? '#fef3c7' : '#f8fafc',
+                        border: `1px solid ${stale ? '#fcd34d' : '#cbd5e1'}`,
+                        color: stale ? '#92400e' : '#334155',
+                      }}>
+                        <span>{p.short_name ?? p.name}</span>
+                        <strong style={{ color: '#1a3a5c' }}>{p.current_balance.toFixed(p.current_balance % 1 === 0 ? 0 : 1)}</strong>
+                        {stale && p.age_days != null && (
+                          <span style={{ fontSize: '0.7rem', color: '#92400e', fontWeight: 600 }}>·{p.age_days}д</span>
+                        )}
+                      </span>
+                    )
+                  })}
+                </div>
+              </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Календар звірок (кнопка + надходження в лівій колонці, деталі у правій) */}
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ReconciliationCalendar
@@ -803,7 +928,7 @@ function ReconciliationCalendar({
                 : <span style={badgeOpen}>Відкрита</span>}
           </div>
 
-          {loadingRec ? (
+          {loadingRec || !selectedRec.lines ? (
             <div style={{ color: '#999', fontSize: '0.82rem', padding: '0.5rem 0' }}>Завантаження…</div>
           ) : selectedRec.lines.length === 0 ? (
             <div style={{ color: '#aaa', fontSize: '0.82rem' }}>Рядків немає</div>
