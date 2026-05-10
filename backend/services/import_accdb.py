@@ -1081,6 +1081,21 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     else:
                         kind = mapping.default_client_kind
 
+                    # Системні singletons — використати існуючого canonical замість створення дубля.
+                    # PARTIAL UNIQUE INDEX (міграція 030) це теж блокує на рівні БД,
+                    # але тут уникаємо IntegrityError і коректно прив'язуємо access_id → canonical.id.
+                    if kind in ("writeoff", "ration", "underbaked"):
+                        canonical = (
+                            db.query(Client).filter(Client.client_kind == kind).first()
+                        )
+                        if canonical:
+                            if access_id is not None:
+                                client_map[access_id] = canonical.id
+                            client_price_cat[canonical.id] = price_cat_str
+                            client_bal_map.setdefault(canonical.id, 0.0)
+                            ep.skipped += 1
+                            continue
+
                     c = Client(
                         full_name=full_nm or short_nm, short_name=short_nm,
                         address=address, phone=phone, route_id=route_id,
