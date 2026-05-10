@@ -147,8 +147,12 @@ export default function PosPage() {
   const [dailyStat, setDailyStat]   = useState<DailyStat>({ receipts: 0, total: 0 })
   const [loading, setLoading]       = useState(true)
   const flashTimers                 = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // ref для актуальних products у setCart callback (callback не має доступу до products через замикання)
+  const productsRef                 = useRef<PosProduct[]>([])
 
   const today = todayStr()
+
+  useEffect(() => { productsRef.current = products }, [products])
 
   // Перевірка доступу (чекаємо поки AuthContext завершить відновлення сесії)
   useEffect(() => {
@@ -228,8 +232,18 @@ export default function PosPage() {
   function addToCart(prod: PosProduct) {
     if (!prod.price) return
     const key = cartKey(prod.product_id, prod.batch_date)
+    let added = false
+    // Атомарна перевірка ВСЕРЕДИНІ setCart callback — prev завжди актуальний,
+    // незалежно від HMR/strict-mode/closure-staleness
     setCart(prev => {
       const idx = prev.findIndex(i => cartKey(i.product_id, i.batch_date) === key)
+      const inCart = idx >= 0 ? prev[idx].qty : 0
+      if (inCart + 1 > prod.current_balance) {
+        // Toast виносимо у setTimeout — не можна викликати setState/toast прямо у setState callback
+        setTimeout(() => toast.warning(`Залишок: ${prod.current_balance} шт`), 0)
+        return prev
+      }
+      added = true
       if (idx >= 0) {
         const updated = [...prev]
         updated[idx] = { ...updated[idx], qty: updated[idx].qty + 1 }
@@ -237,6 +251,7 @@ export default function PosPage() {
       }
       return [...prev, { product_id: prod.product_id, batch_date: prod.batch_date, name: prod.short_name || prod.name, price: prod.price!, qty: 1 }]
     })
+    if (!added) return
     if (flashTimers.current.has(key)) {
       clearTimeout(flashTimers.current.get(key)!)
     }
@@ -248,10 +263,18 @@ export default function PosPage() {
 
   function changeQty(key: string, delta: number) {
     setCart(prev => {
-      const updated = prev.map(i =>
-        cartKey(i.product_id, i.batch_date) === key ? { ...i, qty: i.qty + delta } : i
-      ).filter(i => i.qty > 0)
-      return updated
+      const item = prev.find(i => cartKey(i.product_id, i.batch_date) === key)
+      if (!item) return prev
+      if (delta > 0) {
+        const prod = productsRef.current.find(p => cartKey(p.product_id, p.batch_date) === key)
+        if (prod && item.qty + delta > prod.current_balance) {
+          setTimeout(() => toast.warning(`Залишок: ${prod.current_balance} шт`), 0)
+          return prev
+        }
+      }
+      return prev
+        .map(i => cartKey(i.product_id, i.batch_date) === key ? { ...i, qty: i.qty + delta } : i)
+        .filter(i => i.qty > 0)
     })
   }
 
@@ -362,6 +385,7 @@ export default function PosPage() {
                         const isFlash = flashIds.has(key)
                         const isLow = prod.current_balance <= 2
                         const isStale = (prod.age_days ?? 0) > 1
+                        const exhausted = (inCart?.qty ?? 0) >= prod.current_balance
                         return (
                           <div
                             key={key}
@@ -370,7 +394,10 @@ export default function PosPage() {
                               inCart ? css.productCardInCart : '',
                               isFlash ? css.productCardFlash : '',
                             ].join(' ')}
-                            style={isStale ? { background: '#f5f5f5' } : undefined}
+                            style={{
+                              ...(isStale ? { background: '#f5f5f5' } : null),
+                              ...(exhausted ? { opacity: 0.45, cursor: 'not-allowed' } : null),
+                            }}
                             onClick={() => addToCart(prod)}
                           >
                             {inCart && <span className={css.cartBadge}>{inCart.qty}</span>}
@@ -407,13 +434,20 @@ export default function PosPage() {
             ) : (
               cart.map(item => {
                 const key = cartKey(item.product_id, item.batch_date)
+                const prod = products.find(p => cartKey(p.product_id, p.batch_date) === key)
+                const exhausted = !!prod && item.qty >= prod.current_balance
                 return (
                 <div key={key} className={css.cartItem}>
                   <span className={css.cartItemName}>{item.name}</span>
                   <div className={css.cartQtyControls}>
                     <button className={css.qtyBtn} onClick={() => changeQty(key, -1)}>−</button>
                     <span className={css.qtyValue}>{item.qty}</span>
-                    <button className={css.qtyBtn} onClick={() => changeQty(key, +1)}>+</button>
+                    <button
+                      className={css.qtyBtn}
+                      onClick={() => changeQty(key, +1)}
+                      disabled={exhausted}
+                      style={exhausted ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                    >+</button>
                   </div>
                   <span className={css.cartItemAmount}>{fmt(item.price * item.qty)}</span>
                   <button className={css.removeBtn} onClick={() => removeFromCart(key)}>×</button>
