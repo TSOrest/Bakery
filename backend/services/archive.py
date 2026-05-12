@@ -217,7 +217,38 @@ def run_archive(db: Session, cutoff_date: str) -> dict[str, Any]:
     )
     deleted["daily_balances"] = r.rowcount
 
-    # ── 5. Orders: спочатку дочірні, потім батьківські ────────────────────────
+    # ── 5. Orders: спочатку обнуляємо source_id у movements, потім видаляємо ──
+    # movements >= cutoff (актуальні) можуть посилатися на orders < cutoff (видалятимуться).
+    # NULL зберігає історичний запис руху без зломаного посилання.
+    if _table_exists(db, "movements"):
+        r = db.execute(
+            text("""
+                UPDATE movements SET source_id = NULL
+                WHERE source_table = 'orders'
+                  AND source_id IN (SELECT id FROM orders WHERE order_date < :c)
+            """),
+            {"c": c},
+        )
+        deleted["movements_source_orphaned"] = r.rowcount
+        r = db.execute(
+            text("""
+                UPDATE movements SET source_id = NULL
+                WHERE source_table = 'invoices'
+                  AND source_id IN (
+                      SELECT id FROM invoices
+                      WHERE invoice_date < :c
+                        AND NOT EXISTS (
+                            SELECT 1 FROM invoices corr
+                            WHERE corr.corrective_for_id = invoices.id
+                              AND corr.invoice_date >= :c
+                        )
+                  )
+            """),
+            {"c": c},
+        )
+        deleted["movements_source_orphaned"] += r.rowcount
+
+    # Orders: спочатку дочірні, потім батьківські
     r = db.execute(
         text("""
             DELETE FROM orders
