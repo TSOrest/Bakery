@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
@@ -18,13 +18,15 @@ type PricesCache = Record<number, Record<number, PriceEntry>>
 const fmt = (n: number) =>
   n.toLocaleString('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-function BotPendingRow({
-  order,
-  onVerify,
-}: {
+interface BotPendingRowProps {
   order: BotPendingOrder
   onVerify: (id: number, action: 'confirm' | 'reject' | 'modify', newQty?: number, reason?: string) => void
-}) {
+}
+
+const BotPendingRow = memo(function BotPendingRow({
+  order,
+  onVerify,
+}: BotPendingRowProps) {
   const [rejectReason, setRejectReason] = useState('')
   const [newQty, setNewQty] = useState(order.qty)
   const [mode, setMode] = useState<'idle' | 'reject' | 'modify'>('idle')
@@ -38,9 +40,9 @@ function BotPendingRow({
         <td className={styles.botTd} style={{ textAlign: 'right' }}>{fmt(order.sum)}</td>
         <td className={styles.botTd}>
           <div className={styles.botActions}>
-            <button className={styles.botBtnConfirm} title="Підтвердити" onClick={() => onVerify(order.id, 'confirm')}>✓</button>
-            <button className={styles.botBtnModify} title="Змінити кількість" onClick={() => setMode(mode === 'modify' ? 'idle' : 'modify')}>✏️</button>
-            <button className={styles.botBtnReject} title="Відхилити" onClick={() => setMode(mode === 'reject' ? 'idle' : 'reject')}>✗</button>
+            <button className={styles.botBtnConfirm} title="Підтвердити" aria-label="Підтвердити bot-замовлення" onClick={() => onVerify(order.id, 'confirm')}>✓</button>
+            <button className={styles.botBtnModify} title="Змінити кількість" aria-label="Змінити кількість" onClick={() => setMode(mode === 'modify' ? 'idle' : 'modify')}>✏️</button>
+            <button className={styles.botBtnReject} title="Відхилити" aria-label="Відхилити bot-замовлення" onClick={() => setMode(mode === 'reject' ? 'idle' : 'reject')}>✗</button>
           </div>
         </td>
       </tr>
@@ -87,7 +89,7 @@ function BotPendingRow({
       )}
     </>
   )
-}
+})
 
 export default function OrdersPage() {
   const { workDate } = useWorkDate()

@@ -161,7 +161,7 @@ function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onCl
       <div className={styles.modal} onClick={e => e.stopPropagation()}>
         <div className={styles.modalHeader}>
           <h3>{isClientMode ? `Оплата — ${clientName}` : 'Нова операція'}</h3>
-          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label="Закрити" title="Закрити">✕</button>
         </div>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label>Дата
@@ -305,7 +305,7 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
           <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
             + Оплата
           </button>
-          <button className={styles.closeBtn} onClick={onClose}>✕</button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label="Закрити" title="Закрити">✕</button>
         </div>
       </div>
 

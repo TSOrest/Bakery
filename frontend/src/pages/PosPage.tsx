@@ -450,7 +450,7 @@ export default function PosPage() {
                     >+</button>
                   </div>
                   <span className={css.cartItemAmount}>{fmt(item.price * item.qty)}</span>
-                  <button className={css.removeBtn} onClick={() => removeFromCart(key)}>×</button>
+                  <button className={css.removeBtn} onClick={() => removeFromCart(key)} aria-label="Прибрати з кошика" title="Прибрати з кошика">×</button>
                 </div>
               )})
             )}

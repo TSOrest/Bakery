@@ -375,9 +375,9 @@ function FinanceArticlesTab() {
                   </>
                 ) : (
                   <>
-                    <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client) }}>✎</button>
+                    <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client) }} aria-label="Редагувати" title="Редагувати">✎</button>
                     {!a.is_system && (
-                      <button style={{ ...btnS, color: '#e74c3c', borderColor: '#fca5a5' }} onClick={() => handleDelete(a.id)}>×</button>
+                      <button style={{ ...btnS, color: '#e74c3c', borderColor: '#fca5a5' }} onClick={() => handleDelete(a.id)} aria-label="Видалити" title="Видалити">×</button>
                     )}
                   </>
                 )}
@@ -579,11 +579,11 @@ function ProductsTab({
           <form onSubmit={handleSubmit} className={formStyles.form}>
             <div className={formStyles.field}>
               <label>Назва *</label>
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input required maxLength={200} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className={formStyles.field}>
               <label>Скорочена назва</label>
-              <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
+              <input maxLength={100} value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
               <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
             </div>
             <div className={formStyles.field}>
@@ -841,11 +841,11 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
                 )}
                 <div className={formStyles.field}>
                   <label>Повна назва *</label>
-                  <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+                  <input required maxLength={200} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
                 </div>
                 <div className={formStyles.field}>
                   <label>Скорочена назва</label>
-                  <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
+                  <input maxLength={100} value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
                   <span className={formStyles.hint}>Відображається в таблиці замовлень</span>
                 </div>
                 <div className={formStyles.field}>
@@ -859,11 +859,11 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
                 </div>
                 <div className={formStyles.field}>
                   <label>Адреса</label>
-                  <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+                  <input maxLength={300} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
                 </div>
                 <div className={formStyles.field}>
                   <label>Телефон</label>
-                  <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                  <input maxLength={50} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                 </div>
               </div>
 
@@ -872,15 +872,15 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Реквізити</div>
                 <div className={formStyles.field}>
                   <label>Директор</label>
-                  <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} />
+                  <input maxLength={200} value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} />
                 </div>
                 <div className={formStyles.field}>
                   <label>Бухгалтер</label>
-                  <input value={form.accountant} onChange={(e) => setForm({ ...form, accountant: e.target.value })} />
+                  <input maxLength={200} value={form.accountant} onChange={(e) => setForm({ ...form, accountant: e.target.value })} />
                 </div>
                 <div className={formStyles.field}>
                   <label>Телефони для бота</label>
-                  <input value={form.bot_phones}
+                  <input maxLength={200} value={form.bot_phones}
                     onChange={(e) => setForm({ ...form, bot_phones: e.target.value })}
                     placeholder="+380501234567, +380671234567" />
                   <span className={formStyles.hint}>Через кому. Бот звіряє при авторизації.</span>
@@ -909,6 +909,7 @@ function ClientsTab({ routes, products }: { routes: Route[]; products: Product[]
                                   setBotUsers((prev) => prev.filter((x) => x.id !== u.id))
                                 }}
                                 style={{ background: '#fde', border: '1px solid #e88', borderRadius: 3, cursor: 'pointer', padding: '0.1rem 0.35rem', color: '#900', fontSize: '0.78rem' }}
+                                aria-label="Відкликати доступ"
                               >✕</button>
                             </td>
                           </tr>
@@ -1197,11 +1198,11 @@ function SystemClientsTab({ routes }: { routes: Route[] }) {
           <form onSubmit={handleSubmit} className={formStyles.form}>
             <div className={formStyles.field}>
               <label>Повна назва *</label>
-              <input required value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+              <input required maxLength={200} value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
             </div>
             <div className={formStyles.field}>
               <label>Скорочена назва</label>
-              <input value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
+              <input maxLength={100} value={form.short_name} onChange={(e) => setForm({ ...form, short_name: e.target.value })} />
             </div>
             <div className={formStyles.field}>
               <label>Тип</label>
@@ -1297,7 +1298,7 @@ function RoutesTab({ routes, onReload }: { routes: Route[]; onReload: () => void
           <form onSubmit={handleSubmit} className={formStyles.form}>
             <div className={formStyles.field}>
               <label>Назва маршруту *</label>
-              <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              <input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="напр. Центр, Північ, Ринок" />
             </div>
             <div className={formStyles.field}>
@@ -2688,7 +2689,7 @@ function SimpleListTab({
               style={{ padding: '0.2rem 0.4rem', border: '1px solid #bcd', borderRadius: '3px', fontSize: '0.9rem' }}
             />
             <button onClick={handleRename} style={editBtnStyle}>Зберегти</button>
-            <button onClick={() => setEditItem(null)} style={{ ...editBtnStyle, color: '#888' }}>✕</button>
+            <button onClick={() => setEditItem(null)} style={{ ...editBtnStyle, color: '#888' }} aria-label="Скасувати" title="Скасувати">✕</button>
           </span>
         ) : (
           item.name
@@ -3070,7 +3071,7 @@ function SettingsTab({ section }: { section: SettingsSection }) {
                       <td style={{ padding: '5px 8px' }}>{c.phone}</td>
                       <td style={{ padding: '5px 8px', textAlign: 'center' }}>
                         <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
-                          title="Відкликати доступ">✕</button>
+                          title="Відкликати доступ" aria-label="Відкликати доступ">✕</button>
                       </td>
                     </tr>
                   ))}
@@ -3654,8 +3655,8 @@ function IngredientsTab({ units, products }: { units: Unit[]; products: Product[
                   <Td><strong>{ing.price_per_unit.toFixed(2)}</strong></Td>
                   <Td><span style={{ fontSize: 12, color: '#888' }}>{ing.price_updated_at?.slice(0, 10) ?? '—'}</span></Td>
                   <Td>
-                    <button onClick={() => { setEditIng(ing); setEditForm({ name: ing.name, unit_id: String(ing.unit_id ?? ''), price_per_unit: String(ing.price_per_unit) }) }} style={{ ...editBtnStyle, marginRight: 4 }}>✎</button>
-                    <button onClick={() => handleDelete(ing.id)} style={delBtnStyle}>✕</button>
+                    <button onClick={() => { setEditIng(ing); setEditForm({ name: ing.name, unit_id: String(ing.unit_id ?? ''), price_per_unit: String(ing.price_per_unit) }) }} style={{ ...editBtnStyle, marginRight: 4 }} aria-label="Редагувати" title="Редагувати">✎</button>
+                    <button onClick={() => handleDelete(ing.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
                   </Td>
                 </tr>
               ))}
@@ -3702,7 +3703,7 @@ function IngredientsTab({ units, products }: { units: Unit[]; products: Product[
                       <Td>{r.price_per_unit.toFixed(2)}</Td>
                       <Td><strong>{r.line_cost.toFixed(4)}</strong></Td>
                       <Td>
-                        <button onClick={() => handleRemoveComp(r.id)} style={delBtnStyle}>✕</button>
+                        <button onClick={() => handleRemoveComp(r.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
                       </Td>
                     </tr>
                   ))}
@@ -3746,7 +3747,7 @@ function IngredientsTab({ units, products }: { units: Unit[]; products: Product[
             {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
             <div className={formStyles.field}>
               <label>Назва *</label>
-              <input required autoFocus value={addForm.name}
+              <input required autoFocus maxLength={200} value={addForm.name}
                 onChange={e => setAddForm({ ...addForm, name: e.target.value })} />
             </div>
             <div className={formStyles.field}>
@@ -3775,7 +3776,7 @@ function IngredientsTab({ units, products }: { units: Unit[]; products: Product[
             {error && <p style={{ color: '#c0392b', margin: '0 0 .5rem' }}>{error}</p>}
             <div className={formStyles.field}>
               <label>Назва *</label>
-              <input required autoFocus value={editForm.name}
+              <input required autoFocus maxLength={200} value={editForm.name}
                 onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
             </div>
             <div className={formStyles.field}>

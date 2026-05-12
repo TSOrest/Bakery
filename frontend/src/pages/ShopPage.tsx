@@ -357,7 +357,7 @@ function ShopTabContent({
                   <span style={{ fontWeight: 600 }}>{productName(r.product_id)}</span>
                   <span style={{ color: '#777', marginLeft: '0.4rem' }}>{r.qty} од.{r.purchase_price > 0 ? ` · ${r.purchase_price.toFixed(2)} грн` : ''}</span>
                 </div>
-                <button onClick={() => handleDeleteReceipt(r.id)} style={deleteBtnSmall}>✕</button>
+                <button onClick={() => handleDeleteReceipt(r.id)} style={deleteBtnSmall} aria-label="Видалити надходження" title="Видалити надходження">✕</button>
               </div>
             ))}
           </div>
@@ -563,7 +563,7 @@ function AddReceiptModal({
       <div style={{ background: '#fff', borderRadius: '10px', padding: '1.5rem', width: '400px', maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h3 style={{ margin: 0, color: '#1a3a5c', fontSize: '1rem' }}>Надходження у магазин</h3>
-          <button onClick={onClose} style={closeBtnStyle}>✕</button>
+          <button onClick={onClose} style={closeBtnStyle} aria-label="Закрити" title="Закрити">✕</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
           <div>
@@ -674,7 +674,7 @@ function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
       <div style={{ ...modalStyle, maxWidth: '520px', height: 'auto', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
           <h3 style={{ margin: 0, color: '#5b21b6' }}>◈ Початковий залишок магазину</h3>
-          <button onClick={onClose} style={closeBtnStyle}>✕</button>
+          <button onClick={onClose} style={closeBtnStyle} aria-label="Закрити" title="Закрити">✕</button>
         </div>
         <p style={{ margin: '0 0 0.75rem', fontSize: '0.82rem', color: '#555' }}>
           Вкажіть дату першого дня реального обліку і фактичні залишки товару на той момент.
@@ -1420,7 +1420,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
             {activeRec && activeRec.closed && (
               <button onClick={handleDelete} style={delBtn}>Видалити</button>
             )}
-            <button onClick={onClose} style={closeBtnStyle}>✕</button>
+            <button onClick={onClose} style={closeBtnStyle} aria-label="Закрити" title="Закрити">✕</button>
           </div>
         </div>
 
@@ -1744,7 +1744,7 @@ function ReconciliationTable({
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       {!disabled && (
                         <button onClick={() => onDeleteDisposal(line.id, d.id)}
-                          style={deleteBtnSmall} title="Видалити">✕</button>
+                          style={deleteBtnSmall} title="Видалити" aria-label="Видалити">✕</button>
                       )}
                     </td>
                   </tr>
