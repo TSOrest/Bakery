@@ -11,6 +11,7 @@ from urllib.error import URLError, HTTPError
 
 from backend.database import get_db
 from backend.models.settings import Setting
+from backend.services.crypto import encrypt_setting
 
 router = APIRouter(prefix="/auth/github", tags=["auth-github"])
 
@@ -141,7 +142,9 @@ def poll_device_flow(payload: PollPayload, db: Session = Depends(get_db)):
     name       = user_info.get("name") or login
     avatar_url = user_info.get("avatar_url", "")
 
-    _upsert(db, "github_oauth_token", token,      "OAuth токен акаунта пекарні на GitHub")
+    # Token зберігається в зашифрованому вигляді (Fernet); login/name/avatar — публічні
+    _upsert(db, "github_oauth_token", encrypt_setting(token),
+            "OAuth токен акаунта пекарні на GitHub (зашифровано Fernet)")
     _upsert(db, "github_login",       login,      "GitHub логін акаунта пекарні")
     _upsert(db, "github_name",        name,       "GitHub ім'я акаунта пекарні")
     _upsert(db, "github_avatar_url",  avatar_url, "GitHub аватар акаунта пекарні")

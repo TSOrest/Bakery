@@ -8,6 +8,11 @@ __pycache__/
 *.pyc
 .env
 
+# Fernet key для шифрування OAuth-токенів (BAKERY_DATA_DIR/.fernet_key)
+# Має бути за межами repo; цей ignore — лише як safety-net якщо випадково
+# опиниться в root проекту під час dev/тестів.
+.fernet_key
+
 # Generated distributable installer — never commit (root-level, з вбудованими токенами)
 /Bakery-Setup.ps1
 /Bakery-Setup.bat

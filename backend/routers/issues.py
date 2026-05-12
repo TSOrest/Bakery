@@ -25,12 +25,29 @@ def _repo(db: Session) -> str:
 
 
 def _token(db: Session) -> str:
-    """Повертає OAuth токен акаунта пекарні."""
+    """Повертає OAuth токен акаунта пекарні (розшифрований).
+
+    Lazy-міграція: якщо у БД лежить plain token (legacy) — перешифровує
+    у Fernet і зберігає назад, перед поверненням.
+    """
+    from backend.services.crypto import decrypt_setting, encrypt_setting, is_encrypted
+
     row = db.get(Setting, "github_oauth_token")
-    token = row.value if row else ""
-    if not token:
+    stored = row.value if row else ""
+    if not stored:
         raise HTTPException(503, "GitHub не авторизовано. Налаштуйте в Довідники → Налаштування")
-    return token
+
+    # Legacy plain token — перешифрувати на льоту
+    if not is_encrypted(stored):
+        try:
+            row.value = encrypt_setting(stored)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            # Якщо шифрування не вдалось — повертаємо plain далі (читабельність важливіша)
+            db.rollback()
+        return stored
+
+    return decrypt_setting(stored)
 
 
 def _github_login(db: Session) -> str:
