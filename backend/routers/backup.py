@@ -157,6 +157,49 @@ def cloud_detect():
     return _detect_sync_folders()
 
 
+@router.post("/cloud/test")
+def cloud_test(body: dict):
+    """
+    Перевіряє чи папка хмарної синхронізації доступна для запису.
+
+    Логіка: пишемо тимчасовий файл `.bakery_sync_test_<TS>`, перевіряємо
+    що він з'явився, потім видаляємо. НЕ перевіряє чи відбулась
+    реальна синхронізація з хмарою (це залежить від клієнт-додатка
+    хмари і не контролюється з нашого боку — користувач має сам
+    переконатись що клієнт хмари запущений).
+
+    Body: {"path": "/path/to/cloud/folder"}
+    Response: {"status": "ok"|"error", "detail": "..."}
+    """
+    import time
+    raw_path = (body or {}).get("path", "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="path обов'язковий")
+
+    p = Path(raw_path)
+    if not p.exists():
+        return {"status": "error", "detail": f"Папка не існує: {raw_path}"}
+    if not p.is_dir():
+        return {"status": "error", "detail": "Шлях не є папкою"}
+
+    test_name = f".bakery_sync_test_{int(time.time())}"
+    test_file = p / test_name
+    try:
+        test_file.write_text("ok", encoding="utf-8")
+        if not test_file.exists():
+            return {"status": "error", "detail": "Не вдалось записати тестовий файл"}
+        # Cleanup
+        test_file.unlink(missing_ok=True)
+        return {
+            "status": "ok",
+            "detail": "Папка доступна для запису. Переконайтесь що клієнт хмари (OneDrive/Drive/Dropbox) запущений і синхронізується.",
+        }
+    except PermissionError:
+        return {"status": "error", "detail": "Немає прав на запис у папку"}
+    except OSError as exc:
+        return {"status": "error", "detail": f"Помилка запису: {exc}"}
+
+
 # ── Завантажити файл бекапу (SaveFile) ────────────────────────────────────────
 
 @router.get("/download/{filename}")

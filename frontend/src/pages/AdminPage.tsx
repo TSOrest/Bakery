@@ -4051,6 +4051,26 @@ function BackupTab() {
 
   type DetectedFolders = { google: string | null; onedrive: string | null; dropbox: string | null }
   const [detected, setDetected] = useState<DetectedFolders>({ google: null, onedrive: null, dropbox: null })
+  const [testingCloud, setTestingCloud] = useState<string | null>(null)  // key якого зараз тестуємо
+
+  const handleTestCloud = async (key: string, path: string) => {
+    if (!path) return
+    setTestingCloud(key)
+    try {
+      const res = await api.post<{ status: string; detail: string }>(
+        '/backup/cloud/test', { path },
+      )
+      if (res.status === 'ok') {
+        toast.success(res.detail)
+      } else {
+        toast.error(res.detail)
+      }
+    } catch (err) {
+      toast.error('Не вдалось виконати перевірку: ' + String(err))
+    } finally {
+      setTestingCloud(null)
+    }
+  }
 
   const loadAll = async () => {
     try {
@@ -4270,13 +4290,23 @@ function BackupTab() {
                 </button>
               )}
               {currentPath && (
-                <button
-                  style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.6rem', fontSize: '0.8rem' }}
-                  onClick={() => setForm(f => ({ ...f, [p.key]: '' }))}
-                  title="Вимкнути синхронізацію"
-                >
-                  ✕
-                </button>
+                <>
+                  <button
+                    style={{ ...btnS, background: '#3b82f6', padding: '0.2rem 0.6rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                    onClick={() => handleTestCloud(p.key, currentPath)}
+                    disabled={testingCloud === p.key}
+                    title="Перевірити доступність папки"
+                  >
+                    {testingCloud === p.key ? '...' : '🔍 Перевірити'}
+                  </button>
+                  <button
+                    style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.6rem', fontSize: '0.8rem' }}
+                    onClick={() => setForm(f => ({ ...f, [p.key]: '' }))}
+                    title="Вимкнути синхронізацію"
+                  >
+                    ✕
+                  </button>
+                </>
               )}
             </div>
           )
