@@ -794,16 +794,37 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 - **Шифрування БД**: SQLite БД не шифрована. Захист — через права Windows (`C:\ProgramData\Bakery` доступний лише адміну машини).
 - **Архітектура для одного магазину**: код підтримує кілька магазинів через `client_kind='shop'`, але UI оптимізовано під 1-3 точки.
 
-## Безпека (стан на v0.9.x)
+## Безпека (стан на v1.0.x)
 
 - **Паролі**: bcrypt (cost=12) з прозорим апгрейдом legacy SHA256 при login
 - **API auth**: усі мутації (POST/PUT/DELETE) на 12 роутерах вимагають Bearer токен через `require_user`/`require_admin`
-- **OAuth токени**: зберігаються відкритим текстом у налаштуваннях БД (план N8 — шифрування Fernet)
-- **Сесії**: безстрокові (план N8 — таймаут 30 днів)
-- **Rate-limiting**: відсутнє на /auth/login (план N8)
+- **Rate-limiting**: на `/auth/login` — in-memory dict `{ip: attempts}`, >5 спроб за 5 хв → 429 Too Many Requests з `Retry-After` header (cleanup кожні 10 хв)
+- **Сесії**: таймаут **30 днів неактивності** через `UserSession.last_used_at` — оновлюється при кожному `get_current_user`, прострочені сесії видаляються автоматично (міграція 028)
+- **OAuth токени**: зберігаються відкритим текстом у налаштуваннях БД (запланований Batch 4.2 — шифрування Fernet з ключем у `BAKERY_DATA_DIR/.fernet_key`)
 
-## Аудит-фікси v0.9.36-v0.9.39
+## Аудит-фікси v0.9.36-v1.0.4
 
-- **B1-B7 (блокери)**: бекап з WAL checkpoint, ідемпотентні міграції, SQL injection захист, bcrypt, авторизація, dashboard NULL fixes
+**v0.9.36-v0.9.39:**
+- **B1-B7 (блокери)**: бекап з WAL checkpoint, ідемпотентні міграції, SQL injection захист, bcrypt, авторизація на роутерах, dashboard NULL fixes
 - **V1-V10 (важливі)**: safe_commit helper, логування пригнічених винятків, Toast/ConfirmDialog компоненти, sanitize помилок, orphan-checks, atomic update.ps1
-- **N5+N6+N7** (пост-реліз): synchronous=FULL, безпечніший cache_size, retry на release upload, try/finally для токенів installer, документація обмежень
+- **N5+N6+N7** (пост-реліз): synchronous=FULL, cache_size=-32768 (32MB), retry на release upload, try/finally для токенів installer
+
+**v1.0.0-v1.0.4:**
+- **Магазин/POS**: `compute_current_stock()` — lazy-обчислення стоку без потреби у відкритій звірці; POS-валідація стоку (HTTP 422 коли продаж перевищує залишок); атомарна перевірка cart у `setCart` callback (без race при швидких кліках); секція "📦 Залишки магазину" з пропорційним горизонтальним grid; кнопки Звірка ↔ Початковий залишок — взаємовиключні
+- **БД (міграції 029-031)**:
+  - 029: `shop_disposal_lines.price` + перебудова orphan FK (`_v2` → правильна таблиця); CHECK розширено до `'sale'`
+  - 030: PARTIAL UNIQUE INDEX на `clients(client_kind)` WHERE writeoff/ration/underbaked — захист від дублів системних клієнтів
+  - 031: PARTIAL UNIQUE INDEX на `finance_articles(name, direction)` WHERE is_system=1
+- **schema.sql sync (B1)**: повна синхронізація з моделями SQLAlchemy — 29 таблиць, 24 індекси, 24 default settings; видалено застарілі `surplus_*`, `route_cancellations`, `cancellation_lines`
+- **safe_commit() поширено** на категорії, магазин, auth, bot (~34 місця разом)
+- **Frontend stability**: останні `alert()` → toast у BakingPage і ImportPage; fix race у `ReconciliationCalendar` (`selectedRec.lines.length` падав при slim-об'єкті); fix кирилиці у трей-діалогах; update.ps1 без credential helper
+
+## Memory і agent-context
+
+Розробник-агент Claude Code зберігає персональну пам'ять у `C:\Users\<user>\.claude\projects\c--Bakery\memory\` (поза репо). Це позаконтекстна тримана знання про:
+- Дозволи (PowerShell/CMD без підтверджень)
+- Workflow (релізи тільки за підтвердженням користувача)
+- Конвенції (без AI-атрибуції у git/PR/release notes)
+- Project-specific факти (пароль до .accdb, активний клієнт у проді)
+
+Файл `MEMORY.md` — індекс. Окремі факти зберігаються як `feedback_*.md`, `project_*.md`, `reference_*.md`. Не зачіпайте при cleanup репозиторію.
