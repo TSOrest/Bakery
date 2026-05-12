@@ -15,6 +15,10 @@ from backend.database import get_db
 from backend.models.settings import Setting
 from backend.services import backup as backup_svc
 from backend.services import archive as archive_svc
+from backend.schemas.api_responses import (
+    CloudFolders, StatusDetail, DemoStatus, DemoActionResult,
+    RestoreCheckResult, RestoreRequest, UploadBackupResult, DeleteResult,
+)
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +94,7 @@ def backup_now(db: Session = Depends(get_db)):
 
 # ── Видалити бекап ─────────────────────────────────────────────────────────────
 
-@router.delete("/{filename}")
+@router.delete("/{filename}", response_model=DeleteResult)
 def delete_backup(filename: str, db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     ok = backup_svc.delete_backup(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
@@ -151,13 +155,13 @@ def _detect_sync_folders() -> dict:
     return result
 
 
-@router.get("/cloud/detect")
+@router.get("/cloud/detect", response_model=CloudFolders)
 def cloud_detect():
     """Повертає автоматично виявлені папки синхронізації хмарних провайдерів."""
     return _detect_sync_folders()
 
 
-@router.post("/cloud/test")
+@router.post("/cloud/test", response_model=StatusDetail)
 def cloud_test(body: dict):
     """
     Перевіряє чи папка хмарної синхронізації доступна для запису.
@@ -219,7 +223,7 @@ def download_backup(filename: str, db: Session = Depends(get_db)):
 
 # ── Імпортувати файл бекапу (OpenFile) ─────────────────────────────────────────
 
-@router.post("/upload")
+@router.post("/upload", response_model=UploadBackupResult)
 async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Приймає .db файл і зберігає його в папку бекапів."""
     if not file.filename or not file.filename.endswith(".db"):
@@ -274,7 +278,7 @@ async def upload_backup(file: UploadFile = File(...), db: Session = Depends(get_
 
 # ── Перевірка сумісності бекапу з поточною версією ────────────────────────────
 
-@router.get("/restore/{filename}/check")
+@router.get("/restore/{filename}/check", response_model=RestoreCheckResult)
 def check_restore(filename: str, db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     meta = backup_svc.get_backup_meta(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
@@ -305,7 +309,7 @@ def check_restore(filename: str, db: Session = Depends(get_db)):
 
 # ── Ініціювати відновлення бекапу ─────────────────────────────────────────────
 
-@router.post("/restore/{filename}")
+@router.post("/restore/{filename}", response_model=RestoreRequest)
 def restore_backup(
     filename: str,
     rollback_first: bool = Query(default=False),
@@ -335,7 +339,7 @@ def restore_backup(
 
 # ── Демо режим ─────────────────────────────────────────────────────────────────
 
-@router.get("/demo/status")
+@router.get("/demo/status", response_model=DemoStatus)
 def demo_status():
     active = DEMO_ACTIVE.exists()
     since = None
@@ -349,7 +353,7 @@ def demo_status():
     return {"active": active, "since": since, "demo_db_exists": demo_db_exists}
 
 
-@router.post("/demo/enter")
+@router.post("/demo/enter", response_model=DemoActionResult)
 def demo_enter():
     if not (DATA_DIR / "demo.db").exists():
         raise HTTPException(status_code=404, detail="demo.db не знайдено. Спочатку згенеруйте демо базу.")
@@ -363,7 +367,7 @@ def demo_enter():
     return {"status": "requested"}
 
 
-@router.post("/demo/exit")
+@router.post("/demo/exit", response_model=DemoActionResult)
 def demo_exit():
     if not DEMO_ACTIVE.exists():
         raise HTTPException(status_code=400, detail="Демо режим не активний")

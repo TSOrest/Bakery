@@ -20,6 +20,9 @@ from backend.schemas.import_accdb import (
     AccdbPreview, ImportContext, ImportMapping, ImportReport,
     ExistingClient, ExistingRoute, ExistingCategory,
 )
+from backend.schemas.api_responses import (
+    AccdbDbStatus, AccdbDriverCheck, AccdbImportStatus, AccdbImportStart,
+)
 from backend.services import import_accdb as svc
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -46,7 +49,7 @@ def _cleanup_old_tmp() -> None:
             pass
 
 
-@router.get("/db-status")
+@router.get("/db-status", response_model=AccdbDbStatus)
 def db_status(db: Session = Depends(get_db)):
     """
     Повертає кількість записів у всіх цільових таблицях імпорту.
@@ -67,7 +70,7 @@ def db_status(db: Session = Depends(get_db)):
     return {"total": total, "counts": counts}
 
 
-@router.get("/driver-check")
+@router.get("/driver-check", response_model=AccdbDriverCheck)
 def driver_check():
     """Перевіряє наявність Microsoft Access ODBC Driver."""
     err = svc.check_access_driver()
@@ -112,7 +115,7 @@ async def upload_accdb(
     return preview
 
 
-@router.post("/run")
+@router.post("/run", response_model=AccdbImportStart)
 def run_import(mapping: ImportMapping):
     """
     Запускає імпорт у фоновому потоці. Повертає {"status": "started"}.
@@ -134,7 +137,7 @@ def run_import(mapping: ImportMapping):
     return {"status": "started"}
 
 
-@router.get("/status")
+@router.get("/status", response_model=AccdbImportStatus)
 def import_status():
     """Повертає поточний стан імпорту (step, progress, error)."""
     state = svc.get_import_status()

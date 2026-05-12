@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --- Units ---
@@ -129,23 +129,30 @@ class RouteOut(BaseModel):
 # --- Clients ---
 
 class ClientCreate(BaseModel):
-    full_name: str
-    short_name: Optional[str] = None
-    address: Optional[str] = None
-    phone: Optional[str] = None
-    director: Optional[str] = None
+    full_name: str = Field(..., example="ФОП Брунько О.І.", max_length=200)
+    short_name: Optional[str] = Field(None, example="Брунько", max_length=100)
+    address: Optional[str] = Field(None, example="вул. Шевченка 15, м. Львів", max_length=300)
+    phone: Optional[str] = Field(None, example="+380501234567", max_length=50)
+    director: Optional[str] = Field(None, example="Брунько О.І.", max_length=200)
     accountant: Optional[str] = None
-    route_id: Optional[int] = None
-    discount_pct: float = 0
-    is_own_shop: int = 0
-    print_invoice: int = 1
+    route_id: Optional[int] = Field(None, example=3)
+    discount_pct: float = Field(default=0, example=5.0, ge=0, le=100)
+    is_own_shop: int = Field(default=0, ge=0, le=1)
+    print_invoice: int = Field(default=1, ge=0, le=1)
     receiver_name: Optional[str] = None
     delivery_agent: Optional[str] = None
     delivery_note_number: Optional[str] = None
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
-    client_kind: str = 'customer'  # customer | shop | writeoff | ration | underbaked
-    bot_phones: Optional[str] = None
+    client_kind: str = Field(
+        default='customer',
+        example='customer',
+        description="customer | shop | writeoff | ration | underbaked",
+    )
+    bot_phones: Optional[str] = Field(
+        None, example="+380501234567,+380671234567",
+        description="Номери для авторизації у боті (через кому)",
+    )
 
 
 class ClientUpdate(BaseModel):

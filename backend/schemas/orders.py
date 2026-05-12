@@ -3,7 +3,7 @@
 from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrderSource(str, Enum):
@@ -19,17 +19,17 @@ class ExchangeType(str, Enum):
 
 class OrderCreate(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
-    client_id: int
-    product_id: int
-    qty: float
-    order_date: str                         # YYYY-MM-DD
+    client_id: int = Field(..., example=42)
+    product_id: int = Field(..., example=7)
+    qty: float = Field(..., example=10, ge=0)
+    order_date: str = Field(..., example="2026-05-14", description="YYYY-MM-DD")
     source: OrderSource = OrderSource.phone
     exchange_type: ExchangeType = ExchangeType.none
-    exchange_qty: float = 0
-    exchange_price: Optional[float] = None
+    exchange_qty: float = Field(default=0, example=0)
+    exchange_price: Optional[float] = Field(None, example=None)
     exchange_notes: Optional[str] = None
-    price_override: Optional[float] = None
-    notes: Optional[str] = None
+    price_override: Optional[float] = Field(None, example=None)
+    notes: Optional[str] = Field(None, example=None)
     parent_order_id: Optional[int] = None
     delivered_qty: Optional[float] = None
     origin_id: Optional[int] = None

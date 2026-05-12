@@ -7,7 +7,7 @@ API для роботи з Telegram-ботом:
 
 import logging
 from datetime import date, timedelta
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -16,6 +16,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, safe_commit
+from backend.schemas.api_responses import (
+    BotOrderPending, BotOrderStatus, BotVerifyResult, BotUserInfo, Ok,
+)
 from backend.models.orders import Order
 from backend.models.references import Client, ClientBotUser, Product
 from backend.models.settings import Setting
@@ -87,7 +90,7 @@ def _order_sum(db: Session, order_date: str, client_id: int) -> float:
 
 # ── Ендпоінти ─────────────────────────────────────────────────────────────────
 
-@router.get("/pending-orders")
+@router.get("/pending-orders", response_model=List[BotOrderPending])
 def get_pending_orders(order_date: Optional[str] = None, db: Session = Depends(get_db)):
     """Список замовлень від бота зі статусом pending."""
     target = order_date or date.today().isoformat()
@@ -123,7 +126,7 @@ def get_pending_orders(order_date: Optional[str] = None, db: Session = Depends(g
     return result
 
 
-@router.put("/orders/{order_id}/verify")
+@router.put("/orders/{order_id}/verify", response_model=BotVerifyResult)
 def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db)):
     """Підтвердити / відхилити / змінити кількість у bot-замовленні."""
     order = db.get(Order, order_id)
@@ -285,7 +288,7 @@ def _bot_accepting(db: Session) -> tuple[bool, str]:
     return True, ""
 
 
-@router.get("/order-status")
+@router.get("/order-status", response_model=BotOrderStatus)
 def get_order_status(db: Session = Depends(get_db)):
     """Чи приймає бот замовлення зараз."""
     from backend.services.telegram_bot import bot_is_running
@@ -297,7 +300,7 @@ def get_order_status(db: Session = Depends(get_db)):
     }
 
 
-@router.post("/order-status/stop")
+@router.post("/order-status/stop", response_model=BotOrderStatus)
 def stop_order_acceptance(db: Session = Depends(get_db)):
     """Зупинити прийом до ранку наступного дня (час з налаштувань bot_order_start_time)."""
     from datetime import date, timedelta
@@ -314,7 +317,7 @@ def stop_order_acceptance(db: Session = Depends(get_db)):
     return {"accepting": False, "closed_until": closed_until}
 
 
-@router.post("/order-status/resume")
+@router.post("/order-status/resume", response_model=BotOrderStatus)
 def resume_order_acceptance(db: Session = Depends(get_db)):
     """Відновити прийом негайно."""
     row = db.get(Setting, "bot_orders_closed_until")
@@ -326,7 +329,7 @@ def resume_order_acceptance(db: Session = Depends(get_db)):
 
 # ── Управління авторизованими користувачами бота ──────────────────────────────
 
-@router.get("/clients/{client_id}/bot-users")
+@router.get("/clients/{client_id}/bot-users", response_model=List[BotUserInfo])
 def get_bot_users(client_id: int, db: Session = Depends(get_db)):
     """Список авторизованих користувачів бота для клієнта."""
     rows = (
@@ -348,7 +351,7 @@ def get_bot_users(client_id: int, db: Session = Depends(get_db)):
     ]
 
 
-@router.delete("/clients/{client_id}/bot-users/{user_id}")
+@router.delete("/clients/{client_id}/bot-users/{user_id}", response_model=Ok)
 def revoke_bot_user(client_id: int, user_id: int, db: Session = Depends(get_db)):
     """Відкликати авторизацію користувача бота."""
     row = db.get(ClientBotUser, user_id)

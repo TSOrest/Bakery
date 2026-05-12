@@ -3,7 +3,7 @@
 from __future__ import annotations
 from enum import Enum
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvoiceStatus(str, Enum):
@@ -15,12 +15,12 @@ class InvoiceStatus(str, Enum):
 
 
 class InvoiceLineCreate(BaseModel):
-    product_id: int
-    qty: float
-    price: float
-    price_override: Optional[float] = None
-    is_exchange: int = 0
-    is_stale: int = 0
+    product_id: int = Field(..., example=7)
+    qty: float = Field(..., example=10, ge=0)
+    price: float = Field(..., example=25.0, ge=0)
+    price_override: Optional[float] = Field(None, example=None)
+    is_exchange: int = Field(default=0, ge=0, le=1)
+    is_stale: int = Field(default=0, ge=0, le=1)
 
 
 class InvoiceLineQtyUpdate(BaseModel):
@@ -46,9 +46,9 @@ class InvoiceLineOut(BaseModel):
 
 
 class InvoiceCreate(BaseModel):
-    invoice_date: str
-    client_id: int
-    route_id: Optional[int] = None
+    invoice_date: str = Field(..., example="2026-05-14", description="YYYY-MM-DD")
+    client_id: int = Field(..., example=42)
+    route_id: Optional[int] = Field(None, example=3)
     notes: Optional[str] = None
     lines: List[InvoiceLineCreate] = []
 

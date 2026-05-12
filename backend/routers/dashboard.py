@@ -15,6 +15,7 @@ from backend.models.references import Client, Product
 from backend.models.pricing import Price
 from backend.models.shop import ShopSale, ShopReconciliation, ShopReconciliationLine
 from backend.services.finance import get_all_balances, get_summary
+from backend.schemas.api_responses import DashboardCalendar
 
 router = APIRouter(prefix="/dashboard", tags=["Дашборд"])
 
@@ -331,7 +332,7 @@ def get_shop_summary(date: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/calendar/")
+@router.get("/calendar/", response_model=DashboardCalendar)
 def get_calendar(year: int, month: int, db: Session = Depends(get_db)):
     """Поденні підсумки для календаря дашборду."""
     from backend.models.finances import FinanceArticle
