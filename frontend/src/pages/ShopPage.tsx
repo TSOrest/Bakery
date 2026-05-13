@@ -141,9 +141,12 @@ export default function ShopPage() {
     })
   }
 
+  // load — стабільна функція в межах render (не useCallback бо викликається лише тут);
+  // включення у deps призвело б до infinite loop через setState всередині load.
   useEffect(() => { load() }, [workDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Авто-вибір першого магазину
+  // Авто-вибір першого магазину — спрацьовує тільки коли appearing shops (масив),
+  // навмисно не реагує на зміну activeShopId щоб не зациклюватись
   useEffect(() => {
     if (shops.length > 0 && !activeShopId) setActiveShopId(shops[0].id)
   }, [shops]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -293,6 +296,8 @@ function ShopTabContent({
       })
       .catch(() => {})
 
+  // loadReceipts/checkOpeningRec — closure-stable helpers (не useCallback —
+  // викликаються лише тут і всередині залежать від api.get який стабільний)
   useEffect(() => {
     loadReceipts()
     checkOpeningRec()
@@ -301,7 +306,8 @@ function ShopTabContent({
     api.get<{ id: number; name: string; is_baked: number }[]>('/categories').then(setCategories)
   }, [shopId, receiptRefresh]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Поточні залишки магазину — оновлюються при зміні дати/магазину/нового надходження/звірки
+  // Поточні залишки магазину — оновлюються при зміні дати/магазину/нового надходження/звірки.
+  // setStock — stable React reference, не потребує включення у deps
   useEffect(() => {
     api.get<typeof stock>(`/shop/pos/products?shop_client_id=${shopId}&date=${workDate}`)
       .then(setStock)
@@ -773,11 +779,14 @@ function ReconciliationCalendar({
       .catch(() => setLoadingRec(false))
   }
 
+  // price-change-alert: перезавантажити лише при зміні магазину
   useEffect(() => {
     api.get<{has_alert: boolean; products: {id:number;name:string}[]}>('/shop/price-change-alert')
       .then(setPriceAlert).catch(() => {})
   }, [shopId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Список звірок: loadRecDetail у deps дав би infinite loop —
+  // функція пересоздається при кожному render
   useEffect(() => {
     // Завантажуємо список без рядків (50 KB замість 3.6 MB)
     api.get<Reconciliation[]>(`/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`)
@@ -1274,6 +1283,7 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     }
   }
 
+  // Завантаження products+clients для модального вибору; initRec — closure-stable
   useEffect(() => {
     initRec()
     api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
@@ -1323,6 +1333,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
         setCashActual(total.toFixed(2))
       }
     })
+    // Свідомо беремо лише id+period — re-fetch POS-продажів при зміні цих ключів
+    // достатньо; cashActual у deps призведе до loop через setCashActual нижче
   }, [activeRec?.id, activeRec?.period_from, activeRec?.period_to]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefreshReceived = async () => {

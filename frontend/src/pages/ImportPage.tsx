@@ -928,7 +928,9 @@ function StepExecution({
     }
   }
 
-  // Авто-копіювання для виробів з єдиною клієнтською групою
+  // Авто-копіювання для виробів з єдиною клієнтською групою.
+  // copyClientRanges — closure-stable callback що працює з setState; запуск лише
+  // при появі нового report (валідації), не при кожному перерендерингу
   useEffect(() => {
     if (!report) return
     for (const p of report.validation.zero_price_products) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, memo } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import HelpTip from '../components/HelpTip'
@@ -31,7 +31,7 @@ interface DiscrepancyPanelProps {
   onShortageChanged:    () => void   // перезавантажити underbakedOrders у батьку
 }
 
-function DiscrepancyPanel({
+const DiscrepancyPanel = memo(function DiscrepancyPanel({
   task, productName, clients, surplusLines, workDate, routeReserve,
   onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated, onShortageChanged,
 }: DiscrepancyPanelProps) {
@@ -474,7 +474,7 @@ function DiscrepancyPanel({
       )}
     </div>
   )
-}
+})
 
 // ─── Головна сторінка ─────────────────────────────────────────────────────────
 

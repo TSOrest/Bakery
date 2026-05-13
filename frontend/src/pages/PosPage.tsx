@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
 import { useToast } from '../components/Toast'
+import { IconButton } from '../components/IconButton'
 import css from './PosPage.module.css'
 
 // ─── Типи ─────────────────────────────────────────────────────────────────────
@@ -196,6 +197,8 @@ export default function PosPage() {
         }
       })
       .catch(console.error)
+    // Mount-once: завантажуємо список магазинів і автоматично вибираємо;
+    // shopId у deps дав би loop через setShopId всередині
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Завантаження товарів при зміні магазину
@@ -450,7 +453,7 @@ export default function PosPage() {
                     >+</button>
                   </div>
                   <span className={css.cartItemAmount}>{fmt(item.price * item.qty)}</span>
-                  <button className={css.removeBtn} onClick={() => removeFromCart(key)} aria-label="Прибрати з кошика" title="Прибрати з кошика">×</button>
+                  <IconButton className={css.removeBtn} onClick={() => removeFromCart(key)} label="Прибрати з кошика">×</IconButton>
                 </div>
               )})
             )}

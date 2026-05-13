@@ -965,6 +965,8 @@ export default function RoutesPage() {
       if (inv) ids.add(inv.id)
     }
     return ids
+    // clientInvoice — closure-stable lookup в межах render по invoices;
+    // вже включений побічно через invoices у deps
   }, [sortedClients, invoices]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkedCount = [...checkedIds].filter((id) => visibleInvoiceIds.has(id)).length

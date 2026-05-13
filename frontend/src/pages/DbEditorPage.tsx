@@ -329,9 +329,13 @@ export default function DbEditorPage() {
       setSchema(s)
       setData(d)
     }).catch(e => setError(e.message))
+    // Свідомо без apiFetch у deps — це stable closure-functions з модуля,
+    // включення створило б false positive trigger
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-load FK options for display when showFkNames is on or schema changes
+  // Auto-load FK options for display when showFkNames is on or schema changes.
+  // selected у deps пропущено навмисно — він уже у тригері через [schema]
+  // (schema залежить від selected у попередньому useEffect)
   useEffect(() => {
     if (!showFkNames || !schema || !selected) return
     let cancelled = false

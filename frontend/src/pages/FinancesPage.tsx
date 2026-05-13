@@ -10,6 +10,7 @@ import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import { IconButton } from '../components/IconButton'
 import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
@@ -161,7 +162,7 @@ function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onCl
       <div className={styles.modal} onClick={e => e.stopPropagation()}>
         <div className={styles.modalHeader}>
           <h3>{isClientMode ? `Оплата — ${clientName}` : 'Нова операція'}</h3>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Закрити" title="Закрити">✕</button>
+          <IconButton className={styles.closeBtn} onClick={onClose} label="Закрити">✕</IconButton>
         </div>
         <form onSubmit={handleSubmit} className={styles.form}>
           <label>Дата
@@ -305,7 +306,7 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
           <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
             + Оплата
           </button>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Закрити" title="Закрити">✕</button>
+          <IconButton className={styles.closeBtn} onClick={onClose} label="Закрити">✕</IconButton>
         </div>
       </div>
 
