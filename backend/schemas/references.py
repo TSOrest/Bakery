@@ -183,6 +183,8 @@ class ClientOut(BaseModel):
     short_name: Optional[str]
     address: Optional[str]
     phone: Optional[str]
+    director: Optional[str] = None
+    accountant: Optional[str] = None
     route_id: Optional[int]
     # Default — float, але з БД може прийти None для legacy-записів
     discount_pct: Optional[float] = 0
