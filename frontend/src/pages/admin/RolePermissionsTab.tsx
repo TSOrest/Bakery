@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { api } from '../../api/client'
-import { ADMIN_TAB_GROUPS } from '../AdminPage'
+import { ADMIN_TAB_GROUPS } from './tabConfig'
 import { addBtnStyle, tableStyle } from './shared'
 
 // Основні вкладки (не Довідники)
