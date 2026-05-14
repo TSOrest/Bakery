@@ -207,10 +207,15 @@ class AccdbImportStart(BaseModel):
 
 
 class DashboardCalendar(BaseModel):
-    """Місячний календар для дашборду."""
+    """Місячний календар для дашборду.
+
+    days — dict з ключем 'YYYY-MM-DD'. Значення містить агрегати дня
+    (clients, invoices_sum, payments_sum) — поля опційні, можуть бути відсутні
+    якщо у відповідний день нічого не сталось.
+    """
     year: int = Field(..., example=2026)
     month: int = Field(..., example=5, ge=1, le=12)
-    days: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Список днів з агрегованими даними",
+    days: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        example={"2026-05-14": {"clients": 12, "invoices_sum": 4500.0, "payments_sum": 3200.0}},
     )
