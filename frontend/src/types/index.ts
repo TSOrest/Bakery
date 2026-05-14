@@ -42,6 +42,8 @@ export interface Client {
   short_name: string | null
   address: string | null
   phone: string | null
+  director: string | null
+  accountant: string | null
   route_id: number | null
   discount_pct: number
   is_active: number
