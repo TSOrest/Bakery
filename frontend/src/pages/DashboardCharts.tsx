@@ -65,6 +65,50 @@ const CARD_TITLE: React.CSSProperties = {
   textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10,
 }
 
+/**
+ * BarChart: топ виробів за qty з динамічною шириною YAxis
+ * (щоб довгі назви на кшталт "Хліб Стрийський особливий"
+ * не переносились у два рядки).
+ */
+function TopProductsChart({ products }: { products: TopProduct[] }) {
+  if (products.length === 0) {
+    return (
+      <div style={CARD}>
+        <div style={CARD_TITLE}>📊 Топ-10 виробів (за кількістю)</div>
+        <div style={{ color: '#888', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>
+          Дані відсутні
+        </div>
+      </div>
+    )
+  }
+  // Динамічна ширина YAxis за найдовшою назвою (~6.5px на символ для fontSize=11)
+  const maxLen = Math.max(...products.map(p => p.name.length))
+  const yWidth = Math.min(260, Math.max(100, Math.ceil(maxLen * 6.5) + 8))
+  return (
+    <div style={CARD}>
+      <div style={CARD_TITLE}>📊 Топ-10 виробів (за кількістю)</div>
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={products} layout="vertical"
+          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false} />
+          <XAxis type="number" tickFormatter={fmtK} tick={{ fontSize: 11, fill: '#888' }} />
+          <YAxis type="category" dataKey="name"
+            tick={{ fontSize: 11, fill: '#444' }} width={yWidth} interval={0} />
+          <Tooltip
+            formatter={(value, name) => {
+              const n = Number(value)
+              if (name === 'qty') return [fmtK(n) + ' шт', 'Кількість']
+              return [fmtMoney(n), 'Сума']
+            }}
+            contentStyle={{ fontSize: 12, border: '1px solid #ccc', borderRadius: 4 }}
+          />
+          <Bar dataKey="qty" fill="#1a3a5c" />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 export default function DashboardCharts() {
   const [days, setDays]   = useState<7 | 14 | 30 | 90>(30)
   const [data, setData]   = useState<TrendsData | null>(null)
@@ -131,33 +175,7 @@ export default function DashboardCharts() {
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14 }}>
 
         {/* 2. BarChart: топ-10 виробів за qty */}
-        <div style={CARD}>
-          <div style={CARD_TITLE}>📊 Топ-10 виробів (за кількістю)</div>
-          {data.top_products.length === 0 ? (
-            <div style={{ color: '#888', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>
-              Дані відсутні
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.top_products} layout="vertical"
-                margin={{ top: 5, right: 20, left: 100, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false} />
-                <XAxis type="number" tickFormatter={fmtK} tick={{ fontSize: 11, fill: '#888' }} />
-                <YAxis type="category" dataKey="name"
-                  tick={{ fontSize: 11, fill: '#444' }} width={100} />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const n = Number(value)
-                    if (name === 'qty') return [fmtK(n) + ' шт', 'Кількість']
-                    return [fmtMoney(n), 'Сума']
-                  }}
-                  contentStyle={{ fontSize: 12, border: '1px solid #ccc', borderRadius: 4 }}
-                />
-                <Bar dataKey="qty" fill="#1a3a5c" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        <TopProductsChart products={data.top_products} />
 
         {/* 3. PieChart: розподіл по категоріях */}
         <div style={CARD}>
