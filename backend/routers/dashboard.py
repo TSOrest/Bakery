@@ -392,3 +392,145 @@ def get_calendar(year: int, month: int, db: Session = Depends(get_db)):
             d["payments_sum"] = round(d.get("payments_sum", 0.0) + float(r.total or 0), 2)
 
     return {"year": year, "month": month, "days": days}
+
+
+# ── Trends для дашборду з графіками ───────────────────────────────────────────
+
+@router.get("/trends")
+def get_trends(days: int = 30, db: Session = Depends(get_db)):
+    """
+    Денні агрегати за останні N днів для chart-візуалізації.
+
+    Повертає три масиви:
+    - daily: [{date, revenue, payments, orders_qty}] для LineChart
+    - top_products: [{name, qty, sum}] топ-10 за період для BarChart
+    - by_category: [{category, qty, sum}] для PieChart
+    """
+    from datetime import datetime as _dt
+    end_d   = date.today()
+    start_d = end_d - timedelta(days=days - 1)
+    start   = start_d.isoformat()
+    end     = end_d.isoformat()
+
+    # Денні агрегати замовлень (qty)
+    order_rows = (
+        db.query(
+            Order.order_date,
+            func.sum(Order.qty).label("qty"),
+        )
+        .filter(Order.order_date >= start, Order.order_date <= end,
+                Order.parent_order_id.is_(None), Order.qty > 0)
+        .group_by(Order.order_date)
+        .all()
+    )
+
+    # Виручка — invoices.total_sum (status='accepted' or 'sent' — фактично відправлено)
+    from backend.models.invoices import Invoice, InvoiceLine
+    revenue_rows = (
+        db.query(
+            Invoice.invoice_date,
+            func.sum(Invoice.total_sum).label("revenue"),
+        )
+        .filter(
+            Invoice.invoice_date >= start, Invoice.invoice_date <= end,
+            Invoice.status.in_(["accepted", "sent", "processing"]),
+        )
+        .group_by(Invoice.invoice_date)
+        .all()
+    )
+
+    # Оплати — finances типу "Оплата"
+    payment_article = (
+        db.query(FinanceArticle)
+        .filter(FinanceArticle.name == "Оплата", FinanceArticle.direction == "income")
+        .first()
+    )
+    payment_rows = []
+    if payment_article:
+        payment_rows = (
+            db.query(
+                Finance.finance_date,
+                func.sum(Finance.amount).label("paid"),
+            )
+            .filter(
+                Finance.finance_date >= start, Finance.finance_date <= end,
+                Finance.article_id == payment_article.id, Finance.sign == 1,
+            )
+            .group_by(Finance.finance_date)
+            .all()
+        )
+
+    # Збираємо у dict by date
+    by_date: dict[str, dict] = {}
+    cur = start_d
+    while cur <= end_d:
+        by_date[cur.isoformat()] = {"date": cur.isoformat(), "revenue": 0.0, "payments": 0.0, "orders_qty": 0.0}
+        cur += timedelta(days=1)
+    for r in order_rows:
+        if r.order_date in by_date:
+            by_date[r.order_date]["orders_qty"] = round(float(r.qty or 0), 2)
+    for r in revenue_rows:
+        if r.invoice_date in by_date:
+            by_date[r.invoice_date]["revenue"] = round(float(r.revenue or 0), 2)
+    for r in payment_rows:
+        if r.finance_date in by_date:
+            by_date[r.finance_date]["payments"] = round(float(r.paid or 0), 2)
+    daily = sorted(by_date.values(), key=lambda x: x["date"])
+
+    # Топ-10 виробів за qty (invoice_lines * is_exchange=0)
+    top_prod_rows = (
+        db.query(
+            Product.name,
+            func.sum(InvoiceLine.qty).label("qty"),
+            func.sum(InvoiceLine.sum).label("total"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .join(Product, Product.id == InvoiceLine.product_id)
+        .filter(
+            Invoice.invoice_date >= start, Invoice.invoice_date <= end,
+            Invoice.status.in_(["accepted", "sent", "processing"]),
+            InvoiceLine.is_exchange == 0,
+        )
+        .group_by(Product.id, Product.name)
+        .order_by(func.sum(InvoiceLine.qty).desc())
+        .limit(10)
+        .all()
+    )
+    top_products = [
+        {"name": r.name, "qty": round(float(r.qty or 0), 2), "sum": round(float(r.total or 0), 2)}
+        for r in top_prod_rows
+    ]
+
+    # Розподіл по категоріях (qty + sum)
+    from backend.models.references import Category
+    cat_rows = (
+        db.query(
+            Category.name,
+            func.sum(InvoiceLine.qty).label("qty"),
+            func.sum(InvoiceLine.sum).label("total"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .join(Product, Product.id == InvoiceLine.product_id)
+        .outerjoin(Category, Category.id == Product.category_id)
+        .filter(
+            Invoice.invoice_date >= start, Invoice.invoice_date <= end,
+            Invoice.status.in_(["accepted", "sent", "processing"]),
+            InvoiceLine.is_exchange == 0,
+        )
+        .group_by(Category.id, Category.name)
+        .order_by(func.sum(InvoiceLine.sum).desc())
+        .all()
+    )
+    by_category = [
+        {"category": r.name or "Без категорії",
+         "qty": round(float(r.qty or 0), 2),
+         "sum": round(float(r.total or 0), 2)}
+        for r in cat_rows
+    ]
+
+    return {
+        "from": start, "to": end, "days": days,
+        "daily": daily,
+        "top_products": top_products,
+        "by_category": by_category,
+    }

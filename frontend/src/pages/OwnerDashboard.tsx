@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
+import DashboardCharts from './DashboardCharts'
 import styles from './OwnerDashboard.module.css'
 
 // ── Інтерфейси ────────────────────────────────────────────────────────────────
@@ -569,6 +570,11 @@ export default function OwnerDashboard() {
           <DayDetailPanel date={selectedDay} />
         </div>
 
+      </div>
+
+      {/* ── Графічна аналітика ───────────────────────────────────────── */}
+      <div style={{ marginTop: 16 }}>
+        <DashboardCharts />
       </div>
 
     </div>
