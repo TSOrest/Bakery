@@ -249,6 +249,35 @@ export interface OrderWithChildren extends Order {
   children: Order[]
 }
 
+// ── Зведений вид замовлень (pivot grid) ─────────────────────────────────────
+
+export interface GridExtraLine {
+  kind: 'exchange' | 'discount' | 'transfer_in' | 'surplus' | 'other'
+  qty: number
+  price: number | null
+}
+
+export interface GridCell {
+  qty: number
+  base_order_id: number | null
+  extra_qty: number
+  extra_count: number
+  extra_lines: GridExtraLine[]
+  has_pending_bot: boolean
+}
+
+export interface GridResponse {
+  order_date: string
+  locked_client_ids: number[]
+  cells: Record<number, Record<number, GridCell>>  // cells[client_id][product_id]
+}
+
+export interface BulkOrderUpsertResponse {
+  created: number
+  updated: number
+  deleted: number
+}
+
 export type ClientState =
   | 'no_activity'    // активний клієнт, немає замовлень і накладної
   | 'virtual_draft'  // є замовлення, але немає накладної

@@ -3,6 +3,7 @@ import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type { BotBroadcastResult, BotPendingOrder, Category, Client, Order, Product, Route } from '../types'
 import OrderModal from '../components/OrderModal'
+import GridOrderModal from '../components/GridOrderModal'
 import PriceTypeBadge, { type PriceSource } from '../components/PriceTypeBadge'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
@@ -114,6 +115,7 @@ export default function OrdersPage() {
   const [broadcastLoading,  setBroadcastLoading]  = useState(false)
   const [printNotice,       setPrintNotice]       = useState<string | null>(null)
   const [printDropdownOpen, setPrintDropdownOpen] = useState(false)
+  const [gridOpen,          setGridOpen]          = useState(false)
 
   const [botStatus,        setBotStatus]        = useState<{ accepting: boolean; closed_until: string | null; bot_running?: boolean } | null>(null)
   const [botStatusLoading, setBotStatusLoading] = useState(false)
@@ -479,6 +481,14 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       <div className={styles.toolbar}>
         <h2 className={styles.title}>Замовлення — {workDate}</h2>
         <div className={styles.bakingBtns}>
+          {/* Зведений вид (Excel-подібна сітка клієнти × вироби) */}
+          <button
+            className={styles.btnBaking}
+            onClick={() => setGridOpen(true)}
+            title="Швидке внесення замовлень у вигляді зведеної таблиці"
+          >
+            ❖ Зведений вид
+          </button>
           {/* Дропдаун друку завдань */}
           {bakedCategories.length > 0 && (
             <div className={styles.printDropdown}>
@@ -837,6 +847,18 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
           onClose={() => setModalClientId(null)}
         />
       )}
+
+      {/* ── Зведений вид замовлень ── */}
+      <GridOrderModal
+        open={gridOpen}
+        onClose={() => setGridOpen(false)}
+        onSaved={() => loadAll(workDate)}
+        workDate={workDate}
+        categories={categories}
+        clients={clients}
+        products={products}
+        routes={routes}
+      />
 
     </div>
   )
