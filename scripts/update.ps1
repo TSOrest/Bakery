@@ -231,18 +231,47 @@ if ($oauthToken) {
             Remove-Item $distZip -Force -ErrorAction SilentlyContinue
             $distDownloaded = $true
             Write-Log '  Фронтенд завантажено з release assets' Green
+        } else {
+            Write-Log "  release $TargetTag не містить frontend-dist.zip → npm build" Yellow
         }
     } catch {
-        Write-Log "  dist download failed: $_ — спробуємо npm" Yellow
+        Write-Log "  dist download failed: $($_.Exception.Message) — спробуємо npm" Yellow
     }
+} else {
+    Write-Log '  немає OAuth токена → пропускаємо release dist, збираємо локально' Yellow
 }
 
 if (-not $distDownloaded) {
     $env:npm_config_cache = "$SAFE_TEMP\npm-cache"
-    $build = Start-Process -FilePath $npm -ArgumentList 'run build' `
-        -WorkingDirectory (Join-Path $ROOT 'frontend') -Wait -PassThru
+    $logDir = 'C:\ProgramData\Bakery\logs'
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    $npmInstallLog = "$logDir\update-npm-install.log"
+    $npmBuildLog   = "$logDir\update-npm-build.log"
+    $frontendDir   = Join-Path $ROOT 'frontend'
+
+    Write-Log '  npm install...'
+    $install = Start-Process -FilePath $npm -ArgumentList 'install','--no-audit','--no-fund' `
+        -WorkingDirectory $frontendDir -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $npmInstallLog -RedirectStandardError "$npmInstallLog.err"
+    if ($install.ExitCode -ne 0) {
+        Write-Log "ERROR: npm install failed (exit $($install.ExitCode))" Red
+        Write-Log "  Лог: $npmInstallLog" Yellow
+        Get-Content "$npmInstallLog.err" -Tail 20 -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "    $_" -ForegroundColor DarkRed }
+        & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
+        Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
+        Read-Host 'Press Enter'; exit 1
+    }
+
+    Write-Log '  npm run build...'
+    $build = Start-Process -FilePath $npm -ArgumentList 'run','build' `
+        -WorkingDirectory $frontendDir -Wait -PassThru -NoNewWindow `
+        -RedirectStandardOutput $npmBuildLog -RedirectStandardError "$npmBuildLog.err"
     if ($build.ExitCode -ne 0) {
-        Write-Log 'ERROR: Frontend build failed.' Red
+        Write-Log "ERROR: Frontend build failed (exit $($build.ExitCode))" Red
+        Write-Log "  Лог: $npmBuildLog" Yellow
+        Get-Content "$npmBuildLog.err" -Tail 30 -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "    $_" -ForegroundColor DarkRed }
         & git -C $ROOT checkout $currentVersion 2>&1 | Out-Null
         Set-Content -Path (Join-Path $ROOT 'VERSION') -Value $currentVersion -Encoding UTF8
         Read-Host 'Press Enter'; exit 1
