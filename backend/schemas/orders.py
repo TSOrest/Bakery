@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -78,3 +78,53 @@ class TransferRequest(BaseModel):
 
 class OrderWithChildrenOut(OrderOut):
     children: List[OrderOut] = []
+
+
+# ─── Зведений вид (pivot grid) ────────────────────────────────────────────────
+
+
+class GridExtraLine(BaseModel):
+    """Опис «не-базового» рядка для tooltip клітинки сітки."""
+    kind: str = Field(..., description="exchange | discount | transfer_out | transfer_in | surplus")
+    qty: float
+    price: Optional[float] = None
+
+
+class GridCell(BaseModel):
+    """Одна клітинка сітки клієнти×вироби на конкретну дату."""
+    qty: float = 0
+    base_order_id: Optional[int] = None
+    extra_qty: float = 0
+    extra_count: int = 0
+    extra_lines: List[GridExtraLine] = []
+    has_pending_bot: bool = False
+
+
+class GridResponse(BaseModel):
+    """Матриця замовлень для зведеного виду."""
+    order_date: str
+    locked_client_ids: List[int] = []
+    cells: Dict[int, Dict[int, GridCell]] = Field(
+        default_factory=dict,
+        description="cells[client_id][product_id] → GridCell",
+    )
+
+
+class BulkUpsertItem(BaseModel):
+    """Одна зміна у bulk-операції зведеного виду."""
+    client_id: int
+    product_id: int
+    qty: float = Field(..., ge=0, description="0 → DELETE базового рядка")
+
+
+class BulkOrderUpsertRequest(BaseModel):
+    """Масове збереження замовлень із зведеного виду."""
+    order_date: str = Field(..., example="2026-05-19")
+    items: List[BulkUpsertItem] = Field(default_factory=list)
+
+
+class BulkOrderUpsertResponse(BaseModel):
+    """Підсумок bulk-апдейту."""
+    created: int = 0
+    updated: int = 0
+    deleted: int = 0
