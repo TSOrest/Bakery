@@ -851,8 +851,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       {/* ── Зведений вид замовлень ── */}
       <GridOrderModal
         open={gridOpen}
-        onClose={() => setGridOpen(false)}
-        onSaved={() => loadAll(workDate)}
+        onClose={() => { setGridOpen(false); loadAll(workDate) }}
         workDate={workDate}
         categories={categories}
         clients={clients}

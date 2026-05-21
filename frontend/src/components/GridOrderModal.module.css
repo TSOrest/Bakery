@@ -7,90 +7,91 @@
   background: #f7f9fc;
 }
 
-/* ── Тулбар з табами категорій, пілками рейсів, статистикою ──────────────── */
+/* ── Статистика у header-смузі модалки (передається через headerExtra) ───── */
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 16px;
-  background: #fff;
-  border-bottom: 1px solid #dde3ea;
-  flex-wrap: wrap;
-}
-
-.tabGroup {
-  display: flex;
-  gap: 4px;
-  background: #eef2f7;
-  padding: 3px;
-  border-radius: 6px;
-}
-
-.tabButton {
-  padding: 5px 14px;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.88rem;
-  color: #555;
-  font-weight: 500;
-}
-
-.tabButtonActive {
-  background: #1a3a5c;
-  color: #fff;
-}
-
-.routePills {
-  display: flex;
-  gap: 4px;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.routePill {
-  padding: 4px 10px;
-  background: #fff;
-  border: 1px solid #c5d0dc;
-  border-radius: 14px;
-  cursor: pointer;
+.stats {
   font-size: 0.82rem;
   color: #555;
   white-space: nowrap;
 }
+.statBig {
+  font-weight: 700;
+  color: #1a3a5c;
+}
 
-.routePillActive {
+/* ── Кутова клітинка шапки (замість напису "Клієнт") ─────────────────────── */
+
+.cornerCell {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  min-height: 150px;
+  gap: 4px;
+}
+
+.cornerRoutes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;   /* нижній лівий кут (вертикальний список рейсів) */
+  gap: 3px;
+}
+
+.cornerRouteBtn {
+  padding: 2px 9px;
+  background: #fff;
+  border: 1px solid #c5d0dc;
+  border-radius: 11px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: #555;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.cornerRouteBtnActive {
   background: #1a3a5c;
   color: #fff;
   border-color: #1a3a5c;
   font-weight: 600;
 }
 
-.routeBadge {
+.cornerRouteBadge {
   margin-left: 4px;
   padding: 0 4px;
-  border-radius: 8px;
-  background: #fff3;
-  font-size: 0.72rem;
-}
-.routePill:not(.routePillActive) .routeBadge {
+  border-radius: 7px;
+  font-size: 0.66rem;
   background: #eef2f7;
   color: #1a3a5c;
 }
-
-.stats {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  font-size: 0.82rem;
-  color: #555;
+.cornerRouteBtnActive .cornerRouteBadge {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
-.statBig {
-  font-weight: 700;
-  color: #1a3a5c;
+
+.cornerCats {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end; /* верхній правий кут (горизонтальні таби виробів) */
+  gap: 4px;
+}
+
+.cornerCatBtn {
+  padding: 3px 10px;
+  background: #fff;
+  border: 1px solid #c5d0dc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: #555;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.cornerCatBtnActive {
+  background: #1a3a5c;
+  color: #fff;
+  border-color: #1a3a5c;
 }
 
 /* ── Скрол з сіткою ──────────────────────────────────────────────────────── */
@@ -105,59 +106,71 @@
 .grid {
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.85rem;
-  width: max-content;
-  min-width: 100%;
+  font-size: 0.88rem;
+  width: max-content;        /* ширина = сума колонок (без авто-розтяжки) */
 }
 
 /* ── Шапка ───────────────────────────────────────────────────────────────── */
 
 .grid thead th {
-  background: #eef2f7;
+  background: #e6ecf2;
   border-bottom: 2px solid #1a3a5c;
+  border-right: 1px solid #c5d0dc;
   position: sticky;
   top: 0;
   z-index: 3;
-  padding: 6px 4px;
+  padding: 3px 2px;          /* вдвічі менше за попередні 6px 4px */
   font-weight: 600;
   color: #1a3a5c;
   text-align: center;
 }
 
 .thProduct {
-  min-width: 44px;
-  max-width: 70px;
-  height: 130px;
-  font-size: 0.78rem;
+  /* Ширина задається inline через measureProductWidths() у GridOrderModal.tsx.
+     Padding боків винесено на .label (бо vertical-text-span розпирає клітинку
+     і обходить padding th). */
+  height: 150px;
+  font-size: 0.82rem;
   vertical-align: bottom;
+  padding: 3px 0 4px;
 }
 
 .thProduct .label {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  white-space: nowrap;
+  white-space: normal;
+  height: 134px;             /* фіксована висота → активує переніс vertical-text */
+  line-height: 1.15;
   display: inline-block;
-  max-height: 116px;
-  overflow: hidden;
+  text-align: left;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
-.thClient,
-.tdClient {
+/* Підвищена специфіка (.grid .thClient) щоб перебити .grid thead th { text-align:center } */
+.grid .thClient,
+.grid .tdClient {
   position: sticky;
   left: 0;
   z-index: 2;
   background: #fff;
-  border-right: 1px solid #c5d0dc;
-  text-align: left;
-  padding: 4px 8px;
-  min-width: 180px;
-  max-width: 220px;
+  border-right: 2px solid #8fa5bd;
+  text-align: left;          /* п.4 — клієнти по лівому краю */
+  padding: 4px 10px;
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
   font-weight: 500;
+  font-size: 0.78rem;        /* п.3 — той самий розмір що й .thProduct */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 2px 0 4px -2px rgba(26, 58, 92, 0.1);
 }
 
 .grid thead .thClient {
-  z-index: 4;          /* top-left corner вище за обидва sticky */
-  background: #e6ecf2;
+  z-index: 4;
+  background: #d8e0ea;
 }
 
 .thRowSum,
@@ -166,17 +179,20 @@
   right: 0;
   z-index: 2;
   background: #f5f7fa;
-  border-left: 1px solid #c5d0dc;
+  border-left: 2px solid #8fa5bd;
   text-align: right;
-  padding: 4px 8px;
-  min-width: 70px;
-  font-weight: 600;
+  padding: 6px 10px;
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+  font-weight: 700;
   color: #1a3a5c;
+  box-shadow: -2px 0 4px -2px rgba(26, 58, 92, 0.1);
 }
 
 .grid thead .thRowSum {
-  z-index: 4;          /* top-right corner */
-  background: #d8e0ea;
+  z-index: 4;
+  background: #c8d4e0;
 }
 
 /* ── Підсумковий рядок (footer) ──────────────────────────────────────────── */
@@ -185,102 +201,96 @@
   position: sticky;
   bottom: 0;
   z-index: 3;
-  background: #f5f7fa;
+  background: #e6ecf2;
   border-top: 2px solid #1a3a5c;
+  border-right: 1px solid #c5d0dc;
   font-weight: 700;
   color: #1a3a5c;
   text-align: center;
-  padding: 5px 4px;
+  padding: 6px 4px;
+  box-shadow: 0 -2px 4px -2px rgba(26, 58, 92, 0.1);
 }
 
 .grid tfoot .tdClient {
   z-index: 4;
-  background: #e6ecf2;
+  background: #d8e0ea;
+  text-align: right;
 }
 
 .grid tfoot .tdRowSum {
   z-index: 4;
-  background: #d8e0ea;
+  background: #c8d4e0;
 }
 
 /* ── Тіло ────────────────────────────────────────────────────────────────── */
 
-.routeHeaderRow td {
-  background: #f0f6fc;
-  border-top: 1px solid #c5d0dc;
-  border-bottom: 1px solid #c5d0dc;
-  padding: 6px 8px;
-  font-weight: 700;
-  color: #1a3a5c;
-  text-align: left;
-  cursor: pointer;
-  user-select: none;
-}
-.routeHeaderRow td.tdClient {
-  background: #e3edf6;     /* sticky-cell — окремий фон */
-}
-.routeHeaderRow:hover td { background: #e3edf6; }
-.routeHeaderRow:hover td.tdClient { background: #d3e1ee; }
-
-.routeChevron {
-  display: inline-block;
-  width: 14px;
-}
-
-.routeSummaryRow td {
-  background: #fafbfd;
-  border-bottom: 1px dashed #c5d0dc;
-  padding: 3px 4px;
+.lockIcon {
   font-size: 0.78rem;
-  color: #888;
-  text-align: center;
+  margin-right: 4px;
 }
-.routeSummaryRow .tdClient {
-  background: #f0f3f7;
-  font-style: italic;
-}
-
-.clientLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.lockIcon { font-size: 0.8rem; }
 
 .grid tbody td {
-  border-bottom: 1px solid #eef0f3;
-  border-right: 1px solid #f2f4f7;
+  border-bottom: 1px solid #d0d6dd;
+  border-right: 1px solid #d0d6dd;
   padding: 0;
   text-align: center;
-  height: 28px;
+  height: 30px;
+  background: #fff;
+}
+
+/* Zebra striping — лише на body td, sticky-стовпчики окремо */
+.grid tbody tr:nth-child(even) > td {
+  background: #fafbfd;
+}
+.grid tbody tr:nth-child(even) > td.tdClient {
+  background: #f5f7fa;
+}
+.grid tbody tr:nth-child(even) > td.tdRowSum {
+  background: #eef2f6;
+}
+
+.grid tbody tr:hover > td {
+  background: #eef6fb !important;
+}
+.grid tbody tr:hover > td.tdClient {
+  background: #d8e8f3 !important;
+}
+.grid tbody tr:hover > td.tdRowSum {
+  background: #d8e3ed !important;
 }
 
 .cellInput {
   width: 100%;
   height: 100%;
-  min-width: 38px;
+  min-width: 0;
   border: 1px solid transparent;
   background: transparent;
   text-align: center;
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   outline: none;
   box-sizing: border-box;
   padding: 0 4px;
   transition: border-color 0.15s, background 0.15s;
+  color: #1a3a5c;
+  font-weight: 500;
 }
 
-.cellInput:hover { background: #f5f9fd; }
-.cellInput:focus { border-color: #1a3a5c; background: #f0f5ff; }
+.cellInput::-webkit-outer-spin-button,
+.cellInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.cellInput { -moz-appearance: textfield; }
+
+.cellInput:hover { background: rgba(26, 58, 92, 0.04); }
+.cellInput:focus { border-color: #1a3a5c; background: #f0f5ff; box-shadow: 0 0 0 1px #1a3a5c inset; }
 
 .cellSaving { border-color: #f5a623 !important; background: #fff9f0 !important; }
 .cellSaved  { border-color: #27ae60 !important; background: #f0fff5 !important; }
 .cellError  { border-color: #e74c3c !important; background: #fff5f5 !important; }
 
 .cellLocked {
-  background: #f5f5f5;
+  background: #f0f0f0;
   color: #999;
   cursor: not-allowed;
 }

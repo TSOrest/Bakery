@@ -4,7 +4,7 @@
  * Етап 2: auto-save 1-клітинка через існуючі POST/PUT/DELETE /orders.
  * Етап 3 (далі): bulk-flush + paste TSV з Excel.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Modal from './Modal'
 import { api } from '../api/client'
 import type {
@@ -14,8 +14,7 @@ import styles from './GridOrderModal.module.css'
 
 interface Props {
   open: boolean
-  onClose: () => void
-  onSaved: () => void           // OrdersPage перевантажує дані після закриття
+  onClose: () => void           // OrdersPage перевантажує дані всередині onClose
   workDate: string
   categories: Category[]
   clients: Client[]
@@ -31,13 +30,21 @@ const EMPTY_CELL: GridCell = {
   extra_lines: [], has_pending_bot: false,
 }
 
+// Off-screen DOM-вимірювач прибрано: position: absolute міняв контекст
+// переносу vertical-rl → давав 1 рядок там де реал був 2.
+// CSS-only варіант (width: max-content) теж не спрацював — браузер
+// розтягував усі колонки рівномірно (~186px кожна) бо max-content для
+// vertical-text = height: 134px. Тепер двоетапний рендер через
+// useLayoutEffect: 1) рендер th без width, 2) зчитати label.offsetWidth,
+// 3) ре-рендер з inline style width = label width + border.
+
 function nf(n: number): string {
   if (!n) return ''
   return Number.isInteger(n) ? String(n) : n.toFixed(1)
 }
 
 export default function GridOrderModal({
-  open, onClose, onSaved, workDate, categories, clients, products, routes,
+  open, onClose, workDate, categories, clients, products, routes,
 }: Props) {
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -208,6 +215,29 @@ export default function GridOrderModal({
     }, 600)
   }
 
+  // ── Двоетапне вимірювання ширин колонок виробів ───────────────────────────
+  // Після першого рендеру (без width) зчитуємо реальний label.offsetWidth і
+  // встановлюємо його inline на th. Це обходить проблему max-content для
+  // vertical-text що змушує table-layout: auto розтягувати колонки.
+  const productThRefs = useRef<Record<number, HTMLTableCellElement | null>>({})
+  const [productWidths, setProductWidths] = useState<Record<number, number>>({})
+
+  useLayoutEffect(() => {
+    if (loading || activeProducts.length === 0) return
+    const next: Record<number, number> = {}
+    let changed = false
+    for (const p of activeProducts) {
+      const th = productThRefs.current[p.id]
+      const label = th?.querySelector('span') as HTMLElement | null
+      if (!label) continue
+      const w = label.offsetWidth + 2  // +2 на border-right
+      next[p.id] = w
+      if (productWidths[p.id] !== w) changed = true
+    }
+    if (changed) setProductWidths(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProducts, loading])
+
   // ── Клавіатурна навігація: Enter ↓, Tab → (стандартний) ───────────────────
   const inputRefs = useRef<Record<CellKey, HTMLInputElement | null>>({})
 
@@ -226,53 +256,23 @@ export default function GridOrderModal({
 
   if (!open) return null
 
+  const statsNode = (
+    <span className={styles.stats}>
+      <span className={styles.statBig}>{grandTotal}</span> шт по {activeProducts.length} виробах × {visibleClients.length} клієнтах
+    </span>
+  )
+
   return (
     <Modal
       fullscreen
       onClose={onClose}
       title={`❖ Зведений вид замовлень — ${workDate}`}
+      headerExtra={statsNode}
     >
       <div
         className={styles.shell}
-        onKeyDown={(e) => { if (e.key === 'Escape') { onSaved(); onClose() } }}
+        onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
       >
-        {/* ── Toolbar ───────────────────────────────────────────────────── */}
-        <div className={styles.toolbar}>
-          <div className={styles.tabGroup}>
-            {bakedCats.map(cat => (
-              <button
-                key={cat.id}
-                className={`${styles.tabButton} ${activeCategoryId === cat.id ? styles.tabButtonActive : ''}`}
-                onClick={() => setActiveCategoryId(cat.id)}
-              >
-                {cat.name}
-              </button>
-            ))}
-          </div>
-
-          <div className={styles.routePills}>
-            {activeRoutes.map(route => {
-              const count = (clientsByRoute[route.id] || []).length
-              if (count === 0) return null
-              return (
-                <button
-                  key={route.id}
-                  className={`${styles.routePill} ${activeRouteId === route.id ? styles.routePillActive : ''}`}
-                  onClick={() => setActiveRouteId(route.id)}
-                >
-                  {route.name}<span className={styles.routeBadge}>{count}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          <div className={styles.stats}>
-            <span>
-              <span className={styles.statBig}>{grandTotal}</span> шт по {activeProducts.length} виробах × {visibleClients.length} клієнтах
-            </span>
-          </div>
-        </div>
-
         {/* ── Сітка ─────────────────────────────────────────────────────── */}
         <div className={styles.gridWrap}>
           {loading ? (
@@ -281,12 +281,55 @@ export default function GridOrderModal({
             <table className={styles.grid}>
               <thead>
                 <tr>
-                  <th className={styles.thClient}>Клієнт</th>
-                  {activeProducts.map(p => (
-                    <th key={p.id} className={styles.thProduct} title={p.name}>
-                      <span className={styles.label}>{p.short_name || p.name}</span>
-                    </th>
-                  ))}
+                  <th className={styles.thClient}>
+                    <div className={styles.cornerCell}>
+                      {/* Категорії виробів — top-right (горизонтально, як таби виробів зверху) */}
+                      <div className={styles.cornerCats}>
+                        {bakedCats.map(cat => (
+                          <button
+                            key={cat.id}
+                            className={`${styles.cornerCatBtn} ${activeCategoryId === cat.id ? styles.cornerCatBtnActive : ''}`}
+                            onClick={() => setActiveCategoryId(cat.id)}
+                          >
+                            {cat.name}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Рейси клієнтів — bottom-left (вертикально, як sidebar з клієнтами зліва) */}
+                      <div className={styles.cornerRoutes}>
+                        {activeRoutes.map(route => {
+                          const count = (clientsByRoute[route.id] || []).length
+                          if (count === 0) return null
+                          const active = activeRouteId === route.id
+                          return (
+                            <button
+                              key={route.id}
+                              className={`${styles.cornerRouteBtn} ${active ? styles.cornerRouteBtnActive : ''}`}
+                              onClick={() => setActiveRouteId(route.id)}
+                            >
+                              {route.name}<span className={styles.cornerRouteBadge}>{count}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </th>
+                  {activeProducts.map(p => {
+                    const name = p.short_name || p.name
+                    const w = productWidths[p.id]
+                    const widthStyle = w ? { width: w, minWidth: w, maxWidth: w } : undefined
+                    return (
+                      <th
+                        key={p.id}
+                        ref={el => { productThRefs.current[p.id] = el }}
+                        className={styles.thProduct}
+                        title={p.name}
+                        style={widthStyle}
+                      >
+                        <span className={styles.label}>{name}</span>
+                      </th>
+                    )
+                  })}
                   <th className={styles.thRowSum}>Σ</th>
                 </tr>
               </thead>
@@ -300,13 +343,12 @@ export default function GridOrderModal({
                 )}
                 {visibleClients.map(client => {
                   const locked = isLocked(client.id)
+                  const clientName = client.short_name || client.full_name
                   return (
                     <tr key={client.id}>
-                      <td className={styles.tdClient}>
-                        <div className={styles.clientLabel}>
-                          {locked && <span className={styles.lockIcon}>🔒</span>}
-                          <span>{client.short_name || client.full_name}</span>
-                        </div>
+                      <td className={styles.tdClient} title={clientName}>
+                        {locked && <span className={styles.lockIcon}>🔒</span>}
+                        {clientName}
                       </td>
                       {activeProducts.map(p => {
                         const key: CellKey = `${client.id}-${p.id}`

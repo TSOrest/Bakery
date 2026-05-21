@@ -54,6 +54,19 @@
   border-bottom: 1px solid #e0e0e0;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.modalFullscreen .header {
+  padding: 4px 12px;
+}
+.modalFullscreen .title {
+  font-size: 0.95rem;
+}
+
 .title {
   margin: 0;
   font-size: 1.05rem;
