@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Modal from './Modal'
 import { api } from '../api/client'
 import type {
-  Category, Client, GridCell, GridResponse, Product, Route,
+  BulkOrderUpsertResponse, Category, Client, GridCell, GridResponse, Product, Route,
 } from '../types'
 import styles from './GridOrderModal.module.css'
 
@@ -53,7 +53,12 @@ export default function GridOrderModal({
   const [saving, setSaving] = useState<Record<CellKey, SaveStatus>>({})
   const [activeCategoryId, setActiveCategoryId] = useState<number | null>(null)
   const [activeRouteId, setActiveRouteId] = useState<number | null>(null)
-  const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+
+  // Bulk-flush: усі зміни накопичуються тут і відправляються одним POST
+  // /orders/bulk-upsert якщо в одному 600мс-вікні прилетіло ≥2 змін
+  // (типово при paste з Excel). Single change → старі POST/PUT/DELETE.
+  const pendingRef = useRef<Map<CellKey, { cid: number; pid: number; qty: number }>>(new Map())
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Завантаження сітки ────────────────────────────────────────────────────
   const loadGrid = () => {
@@ -181,17 +186,28 @@ export default function GridOrderModal({
     })
   }
 
-  const handleCellChange = (cid: number, pid: number, raw: string) => {
-    if (isLocked(cid)) return
-    const qty = raw === '' ? 0 : Number(raw)
-    if (isNaN(qty) || qty < 0) return
-    setCellLocal(cid, pid, { qty })
-
+  const enqueueChange = (cid: number, pid: number, qty: number) => {
     const key: CellKey = `${cid}-${pid}`
-    if (timers.current[key]) clearTimeout(timers.current[key])
+    setCellLocal(cid, pid, { qty })
+    pendingRef.current.set(key, { cid, pid, qty })
+    setSavingFlag(key, 'saving')
+  }
 
-    timers.current[key] = setTimeout(async () => {
-      setSavingFlag(key, 'saving')
+  const scheduleFlush = (delay = 600) => {
+    if (flushTimer.current) clearTimeout(flushTimer.current)
+    flushTimer.current = setTimeout(() => { void flush() }, delay)
+  }
+
+  const flush = async () => {
+    const items = Array.from(pendingRef.current.values())
+    if (items.length === 0) return
+    pendingRef.current.clear()
+    flushTimer.current = null
+
+    // Single-change → старий шлях (надійніший для одиничних DELETE/POST)
+    if (items.length === 1) {
+      const { cid, pid, qty } = items[0]
+      const key: CellKey = `${cid}-${pid}`
       try {
         const existingId = getCell(cid, pid).base_order_id
         if (existingId) {
@@ -212,7 +228,91 @@ export default function GridOrderModal({
       } catch {
         setSavingFlag(key, 'error')
       }
-    }, 600)
+      return
+    }
+
+    // Bulk-flush: ≥2 змін одним POST
+    try {
+      await api.post<BulkOrderUpsertResponse>('/orders/bulk-upsert', {
+        order_date: workDate,
+        items: items.map(it => ({ client_id: it.cid, product_id: it.pid, qty: it.qty })),
+      })
+      // Сервер міг створити нові базові рядки — оновити base_order_id через
+      // silent refetch (без loading-indicator).
+      try {
+        const g = await api.get<GridResponse>(`/orders/grid?order_date=${workDate}`)
+        setGrid(g)
+      } catch {}
+      for (const it of items) {
+        const k: CellKey = `${it.cid}-${it.pid}`
+        setSavingFlag(k, 'saved')
+        setTimeout(() => setSavingFlag(k, null), 1500)
+      }
+    } catch (e: unknown) {
+      // 409 → backend кинув locked_client_ids у detail
+      const detail = (e as { response?: { data?: { detail?: { locked_client_ids?: number[] } } } })
+        ?.response?.data?.detail
+      const lockedList = detail?.locked_client_ids
+      if (Array.isArray(lockedList) && lockedList.length > 0) {
+        setGrid(prev => prev
+          ? { ...prev, locked_client_ids: [...new Set([...prev.locked_client_ids, ...lockedList])] }
+          : prev,
+        )
+      }
+      for (const it of items) {
+        setSavingFlag(`${it.cid}-${it.pid}` as CellKey, 'error')
+      }
+    }
+  }
+
+  const handleCellChange = (cid: number, pid: number, raw: string) => {
+    if (isLocked(cid)) return
+    const qty = raw === '' ? 0 : Number(raw)
+    if (isNaN(qty) || qty < 0) return
+    enqueueChange(cid, pid, qty)
+    scheduleFlush(600)
+  }
+
+  // Paste з Excel/TSV: <Tab> між колонками, <CR/LF> між рядками.
+  // Anchor = клітинка у фокусі; заповнюємо вправо/вниз від неї.
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, anchorCid: number, anchorPid: number) => {
+    const text = e.clipboardData?.getData('text') ?? ''
+    // single value без табів/переносів — звичайний браузерний paste у поле
+    if (!text.includes('\t') && !text.includes('\n')) return
+    e.preventDefault()
+
+    const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
+    if (lines.length === 0) return
+
+    const anchorRow = visibleClients.findIndex(c => c.id === anchorCid)
+    const anchorCol = activeProducts.findIndex(p => p.id === anchorPid)
+    if (anchorRow < 0 || anchorCol < 0) return
+
+    let applied = 0
+    let skipped = 0
+    for (let r = 0; r < lines.length; r++) {
+      const targetRow = anchorRow + r
+      if (targetRow >= visibleClients.length) break
+      const targetCid = visibleClients[targetRow].id
+      if (isLocked(targetCid)) { skipped++; continue }
+
+      const cells = lines[r].split('\t')
+      for (let c = 0; c < cells.length; c++) {
+        const targetCol = anchorCol + c
+        if (targetCol >= activeProducts.length) break
+        const targetPid = activeProducts[targetCol].id
+        const trimmed = cells[c].trim().replace(',', '.')
+        const qty = trimmed === '' ? 0 : Number(trimmed)
+        if (isNaN(qty) || qty < 0) continue
+        enqueueChange(targetCid, targetPid, qty)
+        applied++
+      }
+    }
+    if (applied > 0) scheduleFlush(100)
+    if (skipped > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(`Paste: пропущено ${skipped} клієнт(ів) з накладною (locked)`)
+    }
   }
 
   // ── Двоетапне вимірювання ширин колонок виробів ───────────────────────────
@@ -377,6 +477,7 @@ export default function GridOrderModal({
                                 onChange={e => handleCellChange(client.id, p.id, e.target.value)}
                                 onFocus={e => e.target.select()}
                                 onKeyDown={e => handleKeyDown(e, client.id, p.id)}
+                                onPaste={e => handlePaste(e, client.id, p.id)}
                                 readOnly={locked}
                                 title={tooltip}
                               />
