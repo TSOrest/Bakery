@@ -65,24 +65,33 @@ dst.close(); src.close()
 if (Test-Path -LiteralPath $pyBackup) { Remove-Item -LiteralPath $pyBackup -Force }
 if (Test-Path -LiteralPath $backupPath) { Ok "бекап: $backupName" } else { Warn 'бекап не створено (продовжуємо)' }
 
-Step "4. Git fetch + checkout $TAG (без credential manager)"
+Step "4. Git fetch + checkout $TAG"
 $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE     = 'Never'
-$hdr = "AUTHORIZATION: bearer $tok"
 
-& git -C $ROOT -c "credential.helper=" -c "http.extraHeader=$hdr" fetch origin --tags 2>&1 | ForEach-Object { Write-Host "   $_" }
-if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
+# Підхід з update.ps1: тимчасово вбудувати токен в origin URL, fetch, потім
+# очистити. Надійніше за http.extraHeader (той у деяких випадках не задовольняє
+# credential dance і git все одно просить username).
+$REPO_URL = 'https://github.com/TSOrest/Bakery.git'
+$authUrl  = "https://x-access-token:$tok@github.com/TSOrest/Bakery.git"
+
+& git -C $ROOT remote set-url origin $authUrl 2>&1 | Out-Null
+$fetchExit = 0
+try {
+    & git -C $ROOT fetch origin --tags 2>&1 | ForEach-Object { Write-Host "   $_" }
+    $fetchExit = $LASTEXITCODE
+} finally {
+    & git -C $ROOT remote set-url origin $REPO_URL 2>&1 | Out-Null
+}
+if ($fetchExit -ne 0) { throw "git fetch failed (exit $fetchExit)" }
 Ok 'fetch OK'
 
 & git -C $ROOT reset --hard HEAD 2>&1 | Out-Null
 & git -C $ROOT clean -fd 2>&1 | Out-Null
 & git -C $ROOT checkout $TAG 2>&1 | ForEach-Object { Write-Host "   $_" }
 if ($LASTEXITCODE -ne 0) { throw "git checkout $TAG failed" }
-Set-Content (Join-Path $ROOT 'VERSION') $TAG -Encoding UTF8
+Set-Content -LiteralPath (Join-Path $ROOT 'VERSION') -Value $TAG -Encoding UTF8
 Ok "checkout $TAG OK"
-
-# Зробити локальний credential.helper для майбутніх git операцій з цього репо
-& git -C $ROOT config --local credential.helper store 2>&1 | Out-Null
 
 Step '5. Backend dependencies'
 $pip = Join-Path $ROOT 'backend\venv\Scripts\pip.exe'
