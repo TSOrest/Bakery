@@ -70,26 +70,36 @@ $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE     = 'Never'
 
 # Підхід з update.ps1: тимчасово вбудувати токен в origin URL, fetch, потім
-# очистити. Надійніше за http.extraHeader (той у деяких випадках не задовольняє
-# credential dance і git все одно просить username).
+# очистити. Надійніше за http.extraHeader.
 $REPO_URL = 'https://github.com/TSOrest/Bakery.git'
 $authUrl  = "https://x-access-token:$tok@github.com/TSOrest/Bakery.git"
 
-& git -C $ROOT remote set-url origin $authUrl 2>&1 | Out-Null
-$fetchExit = 0
+# PowerShell 5.1: 2>&1 для native exe загортає всі stderr-лінії у
+# ErrorRecord, навіть git success-повідомлення (HEAD is now at...),
+# і з $ErrorActionPreference='Stop' це валить скрипт. Локально знижуємо
+# до 'Continue' — перевіряємо успіх через $LASTEXITCODE.
+$savedEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
-    & git -C $ROOT fetch origin --tags 2>&1 | ForEach-Object { Write-Host "   $_" }
-    $fetchExit = $LASTEXITCODE
-} finally {
-    & git -C $ROOT remote set-url origin $REPO_URL 2>&1 | Out-Null
-}
-if ($fetchExit -ne 0) { throw "git fetch failed (exit $fetchExit)" }
-Ok 'fetch OK'
+    & git -C $ROOT remote set-url origin $authUrl | Out-Null
 
-& git -C $ROOT reset --hard HEAD 2>&1 | Out-Null
-& git -C $ROOT clean -fd 2>&1 | Out-Null
-& git -C $ROOT checkout $TAG 2>&1 | ForEach-Object { Write-Host "   $_" }
-if ($LASTEXITCODE -ne 0) { throw "git checkout $TAG failed" }
+    try {
+        & git -C $ROOT fetch origin --tags --quiet
+        $fetchExit = $LASTEXITCODE
+    } finally {
+        & git -C $ROOT remote set-url origin $REPO_URL | Out-Null
+    }
+    if ($fetchExit -ne 0) { throw "git fetch failed (exit $fetchExit)" }
+    Ok 'fetch OK'
+
+    & git -C $ROOT reset --hard HEAD --quiet | Out-Null
+    & git -C $ROOT clean -fd --quiet | Out-Null
+    & git -C $ROOT checkout --quiet $TAG | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "git checkout $TAG failed (exit $LASTEXITCODE)" }
+} finally {
+    $ErrorActionPreference = $savedEAP
+}
+
 Set-Content -LiteralPath (Join-Path $ROOT 'VERSION') -Value $TAG -Encoding UTF8
 Ok "checkout $TAG OK"
 
