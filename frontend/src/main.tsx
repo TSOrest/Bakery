@@ -3,6 +3,16 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 
+// Запобігає зміні значення <input type="number"> при прокручуванні колесом миші
+// (issue #6: оператор скролив сторінку, число у фокусованому полі змінювалось).
+// blur знімає фокус → wheel-handler на input більше не діє → скрол продовжується нормально.
+document.addEventListener('wheel', (e) => {
+  const t = e.target as HTMLElement
+  if (t instanceof HTMLInputElement && t.type === 'number' && document.activeElement === t) {
+    t.blur()
+  }
+}, { passive: true })
+
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null }
   static getDerivedStateFromError(error: Error) { return { error } }
