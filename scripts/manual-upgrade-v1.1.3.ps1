@@ -13,6 +13,9 @@ $ErrorActionPreference = 'Stop'
 $ROOT = 'C:\Program Files\Bakery'
 $DATA = 'C:\ProgramData\Bakery'
 $TAG  = 'v1.1.3'
+# Тимчасова папка — system-wide щоб уникнути проблем з 8.3 short names коли
+# username клієнта у кирилиці (напр. $env:TEMP = C:\Users\9734~1\AppData\...).
+$TMP  = 'C:\Windows\Temp'
 
 function Step($msg) { Write-Host ">> $msg" -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "   $msg" -ForegroundColor Green }
@@ -30,7 +33,7 @@ Start-Sleep -Seconds 2
 
 Step '2. OAuth-токен з БД пекарні'
 $py     = Join-Path $ROOT 'backend\venv\Scripts\python.exe'
-$pyFile = Join-Path $env:TEMP 'bakery-get-token.py'
+$pyFile = Join-Path $TMP 'bakery-get-token.py'
 $pyCode = @"
 import sqlite3
 db = sqlite3.connect(r'$DATA\bakery.db')
@@ -38,9 +41,9 @@ row = db.execute("SELECT value FROM settings WHERE key='github_oauth_token'").fe
 print(row[0] if row and row[0] else '', end='')
 db.close()
 "@
-Set-Content -Path $pyFile -Value $pyCode -Encoding UTF8
+Set-Content -LiteralPath $pyFile -Value $pyCode -Encoding UTF8
 $tok = (& $py $pyFile).Trim()
-Remove-Item $pyFile -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $pyFile) { Remove-Item -LiteralPath $pyFile -Force }
 if (-not $tok) { throw 'OAuth-токен не знайдено в settings — потрібен GitHub login через UI пекарні' }
 Ok "токен довжиною $($tok.Length)"
 
@@ -49,7 +52,7 @@ $backupDir = Join-Path $DATA 'backups'
 New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 $backupName = "bakery_pre-manual-upgrade-$($TAG)_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').db"
 $backupPath = Join-Path $backupDir $backupName
-$pyBackup = Join-Path $env:TEMP 'bakery-backup.py'
+$pyBackup = Join-Path $TMP 'bakery-backup.py'
 @"
 import sqlite3
 src = sqlite3.connect(r'$DATA\bakery.db')
@@ -57,10 +60,10 @@ src.execute('PRAGMA wal_checkpoint(TRUNCATE)')
 dst = sqlite3.connect(r'$backupPath')
 with dst: src.backup(dst)
 dst.close(); src.close()
-"@ | Set-Content -Path $pyBackup -Encoding UTF8
+"@ | Set-Content -LiteralPath $pyBackup -Encoding UTF8
 & $py $pyBackup | Out-Null
-Remove-Item $pyBackup -Force -ErrorAction SilentlyContinue
-if (Test-Path $backupPath) { Ok "бекап: $backupName" } else { Warn 'бекап не створено (продовжуємо)' }
+if (Test-Path -LiteralPath $pyBackup) { Remove-Item -LiteralPath $pyBackup -Force }
+if (Test-Path -LiteralPath $backupPath) { Ok "бекап: $backupName" } else { Warn 'бекап не створено (продовжуємо)' }
 
 Step "4. Git fetch + checkout $TAG (без credential manager)"
 $env:GIT_TERMINAL_PROMPT = '0'
@@ -89,7 +92,7 @@ Ok 'pip OK'
 
 Step '6. Database migrations'
 $env:BAKERY_DATA_DIR = $DATA
-$pyMig = Join-Path $env:TEMP 'bakery-migrate.py'
+$pyMig = Join-Path $TMP 'bakery-migrate.py'
 $rootEsc = $ROOT.Replace('\','\\')
 @"
 import sys, os, sqlite3, pathlib
@@ -113,9 +116,9 @@ if mig_dir.exists():
         db.commit()
 db.close()
 print('Migrations OK')
-"@ | Set-Content -Path $pyMig -Encoding UTF8
+"@ | Set-Content -LiteralPath $pyMig -Encoding UTF8
 & $py $pyMig
-Remove-Item $pyMig -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $pyMig) { Remove-Item -LiteralPath $pyMig -Force }
 Ok 'migrations OK'
 
 Step "7. Завантаження frontend-dist.zip з release $TAG"
