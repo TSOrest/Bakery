@@ -8,6 +8,7 @@ import type {
 import styles from './RoutesPage.module.css'
 import PriceTypeBadge from '../components/PriceTypeBadge'
 import HelpTip from '../components/HelpTip'
+import { useToast } from '../components/Toast'
 
 // ─── Лейбли статусів ───────────────────────────────────────────────────────────
 
@@ -719,6 +720,7 @@ const SYSTEM_KINDS = ['writeoff', 'ration', 'underbaked']
 
 export default function RoutesPage() {
   const { workDate } = useWorkDate()
+  const toast = useToast()
 
   const [routes,     setRoutes]     = useState<Route[]>([])
   const [clients,    setClients]    = useState<Client[]>([])
@@ -1046,26 +1048,47 @@ export default function RoutesPage() {
   const sendCheckedDrafts = async () => {
     if (visibleCheckedDraftIds.length === 0 && sendableDraftInvoiceIds.length === 0) return
     setSendingDrafts(true)
-    // 1. virtual_draft клієнти у поточному фільтрі → генеруємо накладну з замовлень
-    await Promise.all(
-      visibleCheckedDraftIds.map((clientId) =>
-        api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${clientId}`, {})
-      )
-    )
-    // 2. існуючі draft-накладні у поточному фільтрі → переводимо у sent
-    await Promise.all(
-      sendableDraftInvoiceIds.map((id) =>
-        api.put(`/invoices/${id}/status?status=sent`, {})
-      )
-    )
-    setSendingDrafts(false)
-    // Знімаємо виділення тільки з оброблених, не зачіпаємо інші маршрути
-    setCheckedDraftIds(prev => {
-      const next = new Set(prev)
-      visibleCheckedDraftIds.forEach(id => next.delete(id))
-      return next
-    })
-    await load(workDate)
+    // Послідовно (не Promise.all): generate_invoice_number не atomic —
+    // паралельні запити отримують однаковий номер → 409 UNIQUE constraint.
+    // Per-item try/catch + загальний try/finally щоб UI завжди розблоковувався.
+    const failedClients: number[] = []
+    const failedInvoices: number[] = []
+    let okCount = 0
+    try {
+      for (const clientId of visibleCheckedDraftIds) {
+        try {
+          await api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${clientId}`, {})
+          okCount++
+        } catch {
+          failedClients.push(clientId)
+        }
+      }
+      for (const id of sendableDraftInvoiceIds) {
+        try {
+          await api.put(`/invoices/${id}/status?status=sent`, {})
+          okCount++
+        } catch {
+          failedInvoices.push(id)
+        }
+      }
+      // Знімаємо виділення тільки з УСПІШНО оброблених
+      setCheckedDraftIds(prev => {
+        const next = new Set(prev)
+        visibleCheckedDraftIds
+          .filter(id => !failedClients.includes(id))
+          .forEach(id => next.delete(id))
+        return next
+      })
+      const failedTotal = failedClients.length + failedInvoices.length
+      if (failedTotal > 0) {
+        toast.error(`Не вдалось відправити ${failedTotal} з ${failedTotal + okCount} накладних. Спробуйте ще раз.`)
+      } else if (okCount > 0) {
+        toast.success(`Відправлено накладних: ${okCount}`)
+      }
+    } finally {
+      setSendingDrafts(false)
+      await load(workDate)
+    }
   }
 
   // ── Друк вибраних ──────────────────────────────────────────────────────────────
