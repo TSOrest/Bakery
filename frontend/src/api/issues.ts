@@ -41,7 +41,12 @@ export const addComment = (number: number, body: string): Promise<{ id: number }
 export async function uploadAsset(file: File): Promise<{ url: string; markdown: string }> {
   const form = new FormData()
   form.append('file', file, file.name || 'screenshot.png')
-  const res = await fetch('/api/v1/issues/assets', { method: 'POST', body: form })
+  // Для multipart/form-data api.post не підходить (серіалізує JSON).
+  // Тому raw fetch + ручне додавання Authorization header з localStorage.
+  const token = localStorage.getItem('bakery_token')
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch('/api/v1/issues/assets', { method: 'POST', body: form, headers })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

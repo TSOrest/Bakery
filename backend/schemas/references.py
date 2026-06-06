@@ -126,6 +126,29 @@ class RouteOut(BaseModel):
     is_active: Optional[int] = 1
 
 
+# --- ClientGroups ---
+
+class ClientGroupCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    route_id: int
+    sort_order: int = 0
+
+
+class ClientGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+    # route_id НЕ змінюємо — група прив'язана до маршруту назавжди
+
+
+class ClientGroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    route_id: int
+    sort_order: int = 0
+    member_count: int = 0  # обчислюється у роутері
+
+
 # --- Clients ---
 
 class ClientCreate(BaseModel):
@@ -144,6 +167,7 @@ class ClientCreate(BaseModel):
     delivery_note_number: Optional[str] = None
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
+    client_group_id: Optional[int] = None
     client_kind: str = Field(
         default='customer',
         example='customer',
@@ -172,6 +196,7 @@ class ClientUpdate(BaseModel):
     delivery_note_number: Optional[str] = None
     delivery_note_date: Optional[str] = None
     client_group: Optional[str] = None
+    client_group_id: Optional[int] = None
     client_kind: Optional[str] = None
     bot_phones: Optional[str] = None
 
@@ -196,5 +221,6 @@ class ClientOut(BaseModel):
     delivery_note_number: Optional[str]
     delivery_note_date: Optional[str]
     client_group: Optional[str]
+    client_group_id: Optional[int] = None
     client_kind: str = 'customer'  # customer | shop | writeoff | ration | underbaked
     bot_phones: Optional[str] = None

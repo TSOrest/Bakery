@@ -3,7 +3,7 @@ import { api } from '../../api/client'
 import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import { useToast } from '../../components/Toast'
-import type { Client, ClientPriceOverride, Product, Route } from '../../types'
+import type { Client, ClientGroup, ClientPriceOverride, Product, Route } from '../../types'
 import {
   addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td,
   emptyClient, type ClientFormState,
@@ -42,9 +42,14 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       .then(setClientOverrides)
       .catch(() => setClientOverrides([]))
 
+  const [clientGroups, setClientGroups] = useState<ClientGroup[]>([])
+
   const load = () => api.get<Client[]>('/clients/?active_only=false')
     .then(data => setClients(data.filter(c => c.client_kind === 'customer' || c.client_kind === 'shop')))
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    api.get<ClientGroup[]>('/client-groups/').then(setClientGroups).catch(() => {})
+  }, [])
 
   const openNew  = () => { setEditing(null); setForm(emptyClient()); setBotUsers([]); setModal(true) }
   const openEdit = (c: Client) => {
@@ -60,6 +65,7 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       discount_pct: c.discount_pct.toString(),
       client_kind:  c.client_kind ?? 'customer',
       bot_phones:  c.bot_phones ?? '',
+      client_group_id: c.client_group_id?.toString() ?? '',
     })
     api.get<BotUser[]>(`/bot/clients/${c.id}/bot-users`).then(setBotUsers).catch(() => setBotUsers([]))
     loadClientOverrides(c.id)
@@ -83,6 +89,7 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       discount_pct: Number(form.discount_pct),
       client_kind: form.client_kind || 'customer',
       bot_phones:  form.bot_phones.trim() || null,
+      client_group_id: form.client_group_id ? Number(form.client_group_id) : null,
     }
     try {
       if (editing) {
@@ -206,12 +213,33 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
                 </div>
                 <div className={formStyles.field}>
                   <label>Маршрут</label>
-                  <select value={form.route_id} onChange={(e) => setForm({ ...form, route_id: e.target.value })}>
+                  <select value={form.route_id} onChange={(e) => setForm({ ...form, route_id: e.target.value, client_group_id: '' })}>
                     <option value="">— не призначено —</option>
                     {routes.filter((r) => r.is_active).map((r) => (
                       <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
+                </div>
+                <div className={formStyles.field}>
+                  <label>Група клієнтів</label>
+                  <select
+                    value={form.client_group_id}
+                    onChange={(e) => setForm({ ...form, client_group_id: e.target.value })}
+                    disabled={!form.route_id}
+                  >
+                    <option value="">— без групи —</option>
+                    {clientGroups
+                      .filter(g => g.route_id === Number(form.route_id))
+                      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, 'uk'))
+                      .map(g => (
+                        <option key={g.id} value={g.id}>{g.name}</option>
+                      ))}
+                  </select>
+                  <span className={formStyles.hint}>
+                    {form.route_id
+                      ? 'Зміна маршруту скидає групу (групи прив\'язані до маршруту).'
+                      : 'Спочатку оберіть маршрут.'}
+                  </span>
                 </div>
                 <div className={formStyles.field}>
                   <label>Адреса</label>

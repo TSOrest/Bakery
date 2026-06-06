@@ -8,7 +8,7 @@
 
 export type Tab =
   | 'products' | 'categories' | 'units'
-  | 'clients'  | 'routes'
+  | 'clients'  | 'routes' | 'client_groups'
   | 'prices'   | 'ingredients' | 'margin'
   | 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
   | 'users' | 'permissions'
@@ -36,8 +36,9 @@ export const ADMIN_TAB_GROUPS: TabGroup[] = [
     label: 'Клієнти',
     permKey: 'admin_clients',
     tabs: [
-      { key: 'clients', label: 'Клієнти' },
-      { key: 'routes',  label: 'Маршрути' },
+      { key: 'clients',       label: 'Клієнти' },
+      { key: 'routes',        label: 'Маршрути' },
+      { key: 'client_groups', label: 'Групи клієнтів' },
     ],
   },
   {

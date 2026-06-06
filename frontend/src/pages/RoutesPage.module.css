@@ -224,6 +224,37 @@
   overflow-y: auto;
 }
 
+/* ── Друковані форми (sticky bottom панелі списку) ── */
+.printFormsBar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: #f9fafb;
+  border-top: 1px solid #e5eaf0;
+  flex-wrap: wrap;
+}
+
+.printFormsLabel {
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #555;
+  cursor: default;
+}
+
+.printFormsBtn {
+  padding: 0.32rem 0.75rem;
+  font-size: 0.82rem;
+  background: #1a3a5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.printFormsBtn:hover { background: #234974; }
+
 /* Рядок клієнта */
 .invoiceRow {
   display: flex;

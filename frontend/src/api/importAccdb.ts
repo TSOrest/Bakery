@@ -1,4 +1,13 @@
-const BASE = '/api/v1/import'
+import { api } from './client'
+
+const BASE = '/import'
+// Для multipart/form-data upload api.* не підходить (він серіалізує JSON).
+// Тому залишаємо raw fetch але вручну додаємо Authorization header.
+const TOKEN_KEY = 'bakery_token'
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY)
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,7 +201,11 @@ export async function uploadAccdb(file: File, password = ''): Promise<AccdbPrevi
   const form = new FormData()
   form.append('file', file)
   if (password) form.append('password', password)
-  const res = await fetch(`${BASE}/upload`, { method: 'POST', body: form })
+  const res = await fetch(`/api/v1${BASE}/upload`, {
+    method: 'POST',
+    body: form,
+    headers: authHeaders(),
+  })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail ?? 'Помилка завантаження файлу')
@@ -201,37 +214,40 @@ export async function uploadAccdb(file: File, password = ''): Promise<AccdbPrevi
 }
 
 export async function getImportContext(): Promise<ImportContext> {
-  const res = await fetch(`${BASE}/context`)
-  if (!res.ok) throw new Error('Помилка отримання контексту імпорту')
-  return res.json()
+  return api.get<ImportContext>(`${BASE}/context`)
 }
 
 export async function runImport(mapping: ImportMapping): Promise<{ status: string }> {
-  const res = await fetch(`${BASE}/run`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(mapping),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    const detail = err.detail
-    const msg = Array.isArray(detail)
-      ? detail.map((d: any) => d.msg ?? JSON.stringify(d)).join('; ')
-      : (detail ?? 'Помилка запуску імпорту')
-    throw new Error(msg)
+  try {
+    return await api.post<{ status: string }>(`${BASE}/run`, mapping)
+  } catch (e) {
+    // У api.* exception формат: "STATUS STATUSTEXT: BODY". Пробуємо витягти detail.
+    const msg = e instanceof Error ? e.message : String(e)
+    const match = msg.match(/:\s*(\{.*\})/)
+    if (match) {
+      try {
+        const body = JSON.parse(match[1])
+        const detail = body.detail
+        const niceMsg = Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg ?? JSON.stringify(d)).join('; ')
+          : (detail ?? 'Помилка запуску імпорту')
+        throw new Error(niceMsg)
+      } catch { /* fallthrough */ }
+    }
+    throw e
   }
-  return res.json()
 }
 
 export async function getImportStatus(): Promise<ImportStatus> {
-  const res = await fetch(`${BASE}/status`)
-  if (!res.ok) throw new Error('Помилка отримання статусу')
-  return res.json()
+  return api.get<ImportStatus>(`${BASE}/status`)
 }
 
 export async function getImportResult(): Promise<ImportReport | null> {
-  const res = await fetch(`${BASE}/result`)
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error('Помилка отримання результату')
-  return res.json()
+  try {
+    return await api.get<ImportReport>(`${BASE}/result`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.startsWith('404')) return null
+    throw e
+  }
 }

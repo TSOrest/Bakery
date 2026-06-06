@@ -45,11 +45,19 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(r
 
 @router.put("/{client_id}", response_model=ClientOut)
 def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    from backend.models.references import ClientGroup
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
-    for field, value in data.model_dump(exclude_none=True).items():
+    patch = data.model_dump(exclude_none=True)
+    for field, value in patch.items():
         setattr(c, field, value)
+    # Cascade: якщо змінили маршрут — група старого маршруту вже не валідна.
+    # Перевіряємо актуальну групу клієнта (після setattr) на відповідність route_id.
+    if c.client_group_id is not None:
+        g = db.get(ClientGroup, c.client_group_id)
+        if g is None or g.route_id != c.route_id:
+            c.client_group_id = None
     safe_commit(db, conflict_msg="Клієнт із такими даними вже існує")
     db.refresh(c)
     return c

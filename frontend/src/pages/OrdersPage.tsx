@@ -422,14 +422,11 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
         if (rOrd !== 0) return rOrd
         const cName = (ca?.short_name ?? ca?.full_name ?? '').localeCompare(cb?.short_name ?? cb?.full_name ?? '', 'uk')
         if (cName !== 0) return cName
-        const pName = (productMap.get(a.product_id)?.name ?? '').localeCompare(productMap.get(b.product_id)?.name ?? '', 'uk')
-        if (pName !== 0) return pName
-        // Однаковий продукт: основний рядок перед exchange/discount
-        const aMain = a.exchange_type === 'none' && a.price_override == null ? 0 : 1
-        const bMain = b.exchange_type === 'none' && b.price_override == null ? 0 : 1
-        return aMain - bMain
+        // У межах клієнта — за id запису (порядок внесення),
+        // щоб відповідало послідовності з паперового бланку.
+        return a.id - b.id
       }),
-    [orders, selectedRouteId, selectedClientId, clientMap, routeMap, productMap]
+    [orders, selectedRouteId, selectedClientId, clientMap, routeMap]
   )
 
   // ─── Рендер ────────────────────────────────────────────────────────────────

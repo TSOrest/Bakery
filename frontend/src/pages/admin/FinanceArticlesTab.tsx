@@ -10,9 +10,11 @@ export default function FinanceArticlesTab() {
   const [editId,          setEditId]         = useState<number | null>(null)
   const [editName,        setEditName]       = useState('')
   const [editNeedsClient, setEditNeedsClient] = useState(0)
+  const [editEditable,    setEditEditable]   = useState(0)
   const [newName,         setNewName]        = useState('')
   const [newDir,          setNewDir]         = useState<'income' | 'expense'>('income')
   const [newNeedsClient,  setNewNeedsClient] = useState(0)
+  const [newEditable,     setNewEditable]    = useState(0)
   const [saving,          setSaving]         = useState(false)
   const [error,           setError]          = useState('')
 
@@ -33,8 +35,8 @@ export default function FinanceArticlesTab() {
     if (!newName.trim()) return
     setSaving(true); setError('')
     try {
-      await createFinanceArticle({ name: newName.trim(), direction: newDir, needs_client: newNeedsClient })
-      setNewName(''); setNewNeedsClient(0); load()
+      await createFinanceArticle({ name: newName.trim(), direction: newDir, needs_client: newNeedsClient, editable: newEditable })
+      setNewName(''); setNewNeedsClient(0); setNewEditable(0); load()
     } catch { setError('Помилка збереження') }
     finally { setSaving(false) }
   }
@@ -43,7 +45,7 @@ export default function FinanceArticlesTab() {
     if (!editName.trim()) return
     setSaving(true); setError('')
     try {
-      await updateFinanceArticle(id, { name: editName.trim(), needs_client: editNeedsClient })
+      await updateFinanceArticle(id, { name: editName.trim(), needs_client: editNeedsClient, editable: editEditable })
       setEditId(null); load()
     } catch { setError('Помилка збереження') }
     finally { setSaving(false) }
@@ -78,6 +80,7 @@ export default function FinanceArticlesTab() {
             <th style={{ ...s, textAlign: 'left', padding: '6px 10px' }}>Назва</th>
             <th style={{ ...s, textAlign: 'left', padding: '6px 10px' }}>Напрям</th>
             <th style={{ ...s, textAlign: 'center', padding: '6px 10px' }}>Клієнтська</th>
+            <th style={{ ...s, textAlign: 'center', padding: '6px 10px' }} title="Дозволити редагувати суму операції поточного дня">Редаг.&nbsp;суми</th>
             <th style={{ ...s, padding: '6px 10px' }}></th>
           </tr>
         </thead>
@@ -119,6 +122,20 @@ export default function FinanceArticlesTab() {
                     : <span style={{ color: '#d1d5db', fontSize: '0.8rem' }}>—</span>
                 )}
               </td>
+              <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                {editId === a.id ? (
+                  <input
+                    type="checkbox"
+                    checked={editEditable === 1}
+                    onChange={e => setEditEditable(e.target.checked ? 1 : 0)}
+                    style={checkboxStyle}
+                  />
+                ) : (
+                  a.editable === 1
+                    ? <span style={{ color: '#27ae60', fontSize: '0.8rem', fontWeight: 600 }}>✓</span>
+                    : <span style={{ color: '#d1d5db', fontSize: '0.8rem' }}>—</span>
+                )}
+              </td>
               <td style={{ padding: '6px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                 {editId === a.id ? (
                   <>
@@ -127,7 +144,7 @@ export default function FinanceArticlesTab() {
                   </>
                 ) : (
                   <>
-                    <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client) }} aria-label="Редагувати" title="Редагувати">✎</button>
+                    <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client); setEditEditable(a.editable) }} aria-label="Редагувати" title="Редагувати">✎</button>
                     {!a.is_system && (
                       <button style={{ ...btnS, color: '#e74c3c', borderColor: '#fca5a5' }} onClick={() => handleDelete(a.id)} aria-label="Видалити" title="Видалити">×</button>
                     )}
@@ -160,6 +177,15 @@ export default function FinanceArticlesTab() {
             style={checkboxStyle}
           />
           Клієнтська
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.85rem', cursor: 'pointer' }} title="Дозволити редагувати суму операції поточного дня">
+          <input
+            type="checkbox"
+            checked={newEditable === 1}
+            onChange={e => setNewEditable(e.target.checked ? 1 : 0)}
+            style={checkboxStyle}
+          />
+          Редаг.&nbsp;суми
         </label>
         <button type="submit" disabled={saving}
           style={{ ...btnS, background: '#2563eb', color: '#fff', border: 'none', padding: '5px 14px' }}>

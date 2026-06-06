@@ -1,6 +1,7 @@
 import type { Finance, ClientBalance, FinanceSummary, InternalKpi } from '../types'
+import { api } from './client'
 
-const BASE = '/api/v1/finances'
+const BASE = '/finances'
 
 export async function fetchFinances(params?: {
   client_id?: number
@@ -15,29 +16,19 @@ export async function fetchFinances(params?: {
   if (params?.date_to)      q.set('date_to',      params.date_to)
   if (params?.finance_type) q.set('finance_type', params.finance_type)
   if (params?.article_id)   q.set('article_id',   String(params.article_id))
-  const res = await fetch(`${BASE}/?${q}`)
-  if (!res.ok) throw new Error('Помилка завантаження операцій')
-  return res.json()
+  return api.get<Finance[]>(`${BASE}/?${q}`)
 }
 
 export async function fetchBalances(date?: string): Promise<ClientBalance[]> {
-  const q = date ? `?date=${date}` : ''
-  const res = await fetch(`${BASE}/balances${q}`)
-  if (!res.ok) throw new Error('Помилка завантаження балансів')
-  return res.json()
+  return api.get<ClientBalance[]>(`${BASE}/balances${date ? `?date=${date}` : ''}`)
 }
 
 export async function fetchSummary(date?: string): Promise<FinanceSummary> {
-  const q = date ? `?date=${date}` : ''
-  const res = await fetch(`${BASE}/summary${q}`)
-  if (!res.ok) throw new Error('Помилка завантаження зведення')
-  return res.json()
+  return api.get<FinanceSummary>(`${BASE}/summary${date ? `?date=${date}` : ''}`)
 }
 
 export async function fetchInternalKpi(date: string): Promise<InternalKpi> {
-  const res = await fetch(`${BASE}/internal-kpi?date=${date}`)
-  if (!res.ok) throw new Error('Помилка завантаження KPI')
-  return res.json()
+  return api.get<InternalKpi>(`${BASE}/internal-kpi?date=${date}`)
 }
 
 export async function fetchClientHistory(
@@ -47,9 +38,7 @@ export async function fetchClientHistory(
   const q = new URLSearchParams()
   if (params?.date_from) q.set('date_from', params.date_from)
   if (params?.date_to)   q.set('date_to',   params.date_to)
-  const res = await fetch(`${BASE}/client/${clientId}?${q}`)
-  if (!res.ok) throw new Error('Помилка завантаження історії')
-  return res.json()
+  return api.get<Finance[]>(`${BASE}/client/${clientId}?${q}`)
 }
 
 export async function createFinance(data: {
@@ -62,22 +51,16 @@ export async function createFinance(data: {
   notes?: string
   created_by?: string
 }): Promise<Finance> {
-  const res = await fetch(`${BASE}/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || 'Помилка збереження')
-  }
-  return res.json()
+  return api.post<Finance>(`${BASE}/`, data)
+}
+
+export async function updateFinance(
+  id: number,
+  data: { amount: number; notes?: string | null },
+): Promise<Finance> {
+  return api.patch<Finance>(`${BASE}/${id}`, data)
 }
 
 export async function deleteFinance(id: number): Promise<void> {
-  const res = await fetch(`${BASE}/${id}`, { method: 'DELETE' })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.detail || 'Помилка видалення')
-  }
+  return api.delete(`${BASE}/${id}`)
 }

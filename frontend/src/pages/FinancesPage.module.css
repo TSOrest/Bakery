@@ -383,6 +383,17 @@
 .delBtn:hover { color: #e74c3c; }
 .delBtn:disabled { opacity: 0.4; cursor: default; }
 
+.editBtn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: #93a3b3;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.editBtn:hover { color: #2563eb; }
+
 /* ── Модальне вікно ── */
 .modalOverlay {
   position: fixed;

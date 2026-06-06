@@ -12,7 +12,7 @@ from backend.database import engine, Base, run_migrations
 import backend.models  # noqa: F401 — реєструємо всі моделі
 
 from backend.routers import (
-    products, categories, clients, routes, prices, orders, baking, invoices, shop, print_views,
+    products, categories, clients, routes, client_groups, prices, orders, baking, invoices, shop, print_views,
     auth, settings, finances, finances_articles, ingredients, dashboard, issues, bot,
 )
 from backend.routers import auth_github, db_editor, backup, import_accdb
@@ -164,6 +164,7 @@ app.include_router(products.router,   prefix=PREFIX)
 app.include_router(categories.router, prefix=PREFIX)
 app.include_router(clients.router,    prefix=PREFIX)
 app.include_router(routes.router,     prefix=PREFIX)
+app.include_router(client_groups.router, prefix=PREFIX)
 app.include_router(prices.router,     prefix=PREFIX)
 app.include_router(orders.router,     prefix=PREFIX)
 app.include_router(baking.router,     prefix=PREFIX)

@@ -1362,6 +1362,32 @@ export default function RoutesPage() {
               </div>
             )}
           </div>
+
+          {/* ── Друковані форми (sticky bottom) ─────────────────────────────── */}
+          <div className={styles.printFormsBar}>
+            <span className={styles.printFormsLabel} title="Друковані форми" aria-label="Друковані форми">🖨</span>
+            <button
+              className={styles.printFormsBtn}
+              onClick={() => window.open(`/api/v1/print/group-sort?date=${workDate}`, '_blank')}
+              title="Сортування виробів по групах клієнтів — для завантаження машини"
+            >
+              Сортування
+            </button>
+            <button
+              className={styles.printFormsBtn}
+              onClick={() => window.open(`/api/v1/print/route-sheet?date=${workDate}`, '_blank')}
+              title="Маршрутний лист водія — підсумки по групах клієнтів"
+            >
+              Маршрутний лист
+            </button>
+            <button
+              className={styles.printFormsBtn}
+              onClick={() => window.open(`/api/v1/print/address-sheet?date=${workDate}`, '_blank')}
+              title="Адресний лист — адреси, телефони і суми замовлень клієнтів"
+            >
+              Адресний лист
+            </button>
+          </div>
         </div>
 
         {/* ── Розділювач ───────────────────────────────────────────────────────── */}

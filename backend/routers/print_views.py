@@ -2052,3 +2052,731 @@ def client_statement(
 </body>
 </html>"""
     return HTMLResponse(content=html)
+
+
+# ── Сортування за групами клієнтів (для завантаження машини) ──────────────────
+
+@router.get("/group-sort", response_class=HTMLResponse)
+def print_group_sort(date: str, db: Session = Depends(get_db)):
+    """Друкована форма А4: вироби, агреговані за маршрутом → групою клієнтів.
+
+    Кожен маршрут починається з нової сторінки. У межах маршруту — секції
+    по групах (sort_order, потім name); клієнти без групи — секція 'Без групи'.
+    Всередині секції рядки — Тип (категорія) → Виріб → Сумарна кількість.
+    """
+    from backend.models.references import ClientGroup
+
+    # Базовий SELECT всіх замовлень на дату з потрібними join-ами.
+    rows = (
+        db.query(
+            Order.product_id,
+            Order.qty,
+            Client.id.label("client_id"),
+            Client.route_id,
+            Client.client_group_id,
+        )
+        .join(Client, Client.id == Order.client_id)
+        .filter(
+            Order.order_date == date,
+            Order.parent_order_id.is_(None),
+            Order.origin_id.is_(None),
+            Order.qty > 0,
+            ~((Order.source == "bot") & (Order.bot_status == "pending")),
+            Client.client_kind == "customer",
+        )
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Замовлень на {date} не знайдено")
+
+    # Lookup-словники
+    routes_by_id: dict[int, Route] = {
+        r.id: r for r in db.query(Route).order_by(Route.sort_order, Route.name).all()
+    }
+    groups_by_id: dict[int, ClientGroup] = {
+        g.id: g for g in db.query(ClientGroup).all()
+    }
+    products_by_id: dict[int, Product] = {p.id: p for p in db.query(Product).all()}
+    categories_by_id: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
+
+    # Агрегація: (route_id, group_id_or_none, product_id) -> sum(qty)
+    from collections import defaultdict
+    agg: dict[tuple[Optional[int], Optional[int], int], float] = defaultdict(float)
+    for r in rows:
+        rid = r.route_id
+        gid = r.client_group_id
+        # Якщо група була видалена, але client_group_id ще не скинутий — трактуємо як без групи.
+        if gid is not None and gid not in groups_by_id:
+            gid = None
+        # Якщо у клієнта призначена група іншого маршруту (legacy) — теж без групи у цьому маршруті.
+        elif gid is not None and groups_by_id[gid].route_id != rid:
+            gid = None
+        agg[(rid, gid, r.product_id)] += float(r.qty or 0)
+
+    # Структура для рендеру: route_id -> list of (group_label, sort_key, items)
+    # items: list[(category_name, product_name, qty)] вже відсортовано
+    route_pages: list[tuple[Route, list[dict]]] = []
+
+    # Збираємо групи у порядку маршруту
+    by_route: dict[Optional[int], list[tuple[Optional[int], int, str, dict[int, float]]]] = defaultdict(list)
+    # У кожному маршруті: список (gid, sort_order, name, {product_id: qty})
+    tmp: dict[tuple[Optional[int], Optional[int]], dict[int, float]] = defaultdict(dict)
+    for (rid, gid, pid), qty in agg.items():
+        tmp[(rid, gid)][pid] = qty
+
+    for (rid, gid), pid_map in tmp.items():
+        if gid is None:
+            label = "Без групи"
+            sort_key = (9_999, label)
+        else:
+            g = groups_by_id[gid]
+            label = g.name
+            sort_key = (g.sort_order or 0, label)
+        by_route[rid].append((gid, sort_key, label, pid_map))
+
+    # Сортуємо маршрути за sort_order/name, формуємо сторінки
+    sorted_rids = sorted(
+        by_route.keys(),
+        key=lambda x: (
+            (routes_by_id[x].sort_order if x in routes_by_id else 9999, routes_by_id[x].name) if x else (9999, "Без маршруту")
+        ),
+    )
+
+    pages_html = ""
+    for idx, rid in enumerate(sorted_rids):
+        route = routes_by_id.get(rid)
+        route_name = route.name if route else "Без маршруту"
+        groups = sorted(by_route[rid], key=lambda g: g[1])
+
+        groups_html = ""
+        route_total = 0.0
+        for _gid, _sk, label, pid_map in groups:
+            # Сортуємо вироби: category.sort_order → category.name → product.name
+            items = []
+            for pid, qty in pid_map.items():
+                p = products_by_id.get(pid)
+                if not p:
+                    continue
+                cat = categories_by_id.get(p.category_id) if p.category_id else None
+                items.append((
+                    cat.sort_order if cat else 9999,
+                    cat.name if cat else "—",
+                    p.name,
+                    qty,
+                ))
+            items.sort(key=lambda x: (x[0], x[1], x[2]))
+
+            rows_html = ""
+            group_total = 0.0
+            for _co, cat_name, p_name, qty in items:
+                rows_html += (
+                    f"<tr><td class='cat'>{cat_name}</td>"
+                    f"<td>{p_name}</td>"
+                    f"<td class='r'>{qty:g}</td></tr>"
+                )
+                group_total += qty
+            route_total += group_total
+
+            groups_html += f"""
+            <div class="group-title">Група: <strong>{label}</strong></div>
+            <table class="sort-tbl">
+              <thead>
+                <tr>
+                  <th style="width:24%">Тип</th>
+                  <th>Назва</th>
+                  <th class="r" style="width:24%">Сумарна кількість</th>
+                </tr>
+              </thead>
+              <tbody>{rows_html}</tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="2" class="r"><strong>Разом по групі</strong></td>
+                  <td class="r"><strong>{group_total:g}</strong></td>
+                </tr>
+              </tfoot>
+            </table>"""
+
+        page_break = "" if idx == 0 else 'style="page-break-before: always;"'
+        pages_html += f"""
+        <div class="sort-page" {page_break}>
+          <div class="route-title">Маршрут: <strong>{route_name}</strong>
+            <span class="route-meta">· {ua_date(date)}</span>
+          </div>
+          {groups_html}
+          <div class="route-grand">Разом по маршруту: <strong>{route_total:g}</strong></div>
+        </div>"""
+
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    css = """<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 10.5pt; color: #000; background: #fff; }
+@page { size: A4; margin: 12mm 14mm; }
+
+/* Кнопки «Друкувати» / «✕» — лише в preview, на друк не виходять */
+@media print { .no-print { display: none !important; } }
+
+.sort-page { padding: 0 0 6mm; }
+.doc-title { font-size: 13pt; font-weight: bold; text-align: center; padding-bottom: 4mm; }
+.doc-subtitle { text-align: center; font-size: 9pt; color: #555; margin-bottom: 4mm; }
+
+.route-title { font-size: 13pt; font-weight: 500; padding: 2mm 0 3mm; border-bottom: 2px solid #1a3a5c; margin-bottom: 4mm; color: #1a3a5c; }
+.route-meta { font-size: 9.5pt; color: #888; font-style: italic; }
+
+.group-title { font-size: 11pt; margin: 4mm 0 1.5mm; color: #555; }
+.group-title strong { color: #000; }
+
+.sort-tbl { width: 100%; border-collapse: collapse; margin-bottom: 2mm; font-size: 10pt; }
+.sort-tbl th { background: #e8eef5; border: 1px solid #888; padding: 1.5mm 2mm; font-weight: bold; text-align: left; font-size: 9.5pt; }
+.sort-tbl td { border: 1px solid #bbb; padding: 1.2mm 2mm; }
+.sort-tbl .cat { color: #555; }
+.sort-tbl .r { text-align: right; }
+.sort-tbl tfoot td { background: #f5f7fa; }
+
+.route-grand { font-size: 11pt; text-align: right; padding: 2mm 4mm; margin-top: 3mm; border-top: 1px solid #1a3a5c; }
+</style>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Сортування за групами — {date}</title>
+  {css}
+</head>
+<body>
+{PRINT_BTN}
+<div class="doc-title">{bakery_name} — Сортування товару</div>
+<div class="doc-subtitle">для завантаження машини на {ua_date(date)}</div>
+{pages_html}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+# ── Маршрутні листи (для водіїв) ─────────────────────────────────────────────
+
+@router.get("/route-sheet", response_class=HTMLResponse)
+def print_route_sheet(date: str, db: Session = Depends(get_db)):
+    """Друкована форма А4: маршрутний лист водія.
+
+    Кожен маршрут починається з нової сторінки. У межах маршруту:
+    - Шапка з підсумком по маршруту (всього шт і грн)
+    - Розбивка по групах клієнтів (sort_order, потім name)
+    - Усередині групи — рядки виробів, згруповані за категорією
+      (Булка / Хліб) з підсумком категорії
+    - Колонки: Назва | Кількість | Ціна | Брак | Ціна браку | Сума
+      (Брак і Ціна браку — порожні для ручного заповнення водієм)
+    """
+    from backend.models.invoices import Invoice, InvoiceLine
+    from backend.models.references import ClientGroup
+
+    # Дані беремо з рядків накладних (status != cancelled) — те що водій
+    # фактично везе. Включаємо draft/sent/processing/accepted.
+    rows = (
+        db.query(
+            InvoiceLine.product_id,
+            InvoiceLine.qty,
+            InvoiceLine.price,
+            InvoiceLine.price_override,
+            InvoiceLine.sum,
+            InvoiceLine.is_exchange,
+            Client.id.label("client_id"),
+            Client.route_id,
+            Client.client_group_id,
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .join(Client, Client.id == Invoice.client_id)
+        .filter(
+            Invoice.invoice_date == date,
+            Invoice.status != "cancelled",
+            Client.client_kind == "customer",
+        )
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Немає сформованих накладних на {date}")
+
+    routes_by_id: dict[int, Route] = {
+        r.id: r for r in db.query(Route).order_by(Route.sort_order, Route.name).all()
+    }
+    groups_by_id: dict[int, ClientGroup] = {g.id: g for g in db.query(ClientGroup).all()}
+    products_by_id: dict[int, Product] = {p.id: p for p in db.query(Product).all()}
+    categories_by_id: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
+
+    from collections import defaultdict
+    # agg[(route_id, group_id_or_none, product_id)] = {qty, sum}
+    agg: dict[tuple[Optional[int], Optional[int], int], dict[str, float]] = defaultdict(
+        lambda: {"qty": 0.0, "sum": 0.0}
+    )
+    for r in rows:
+        # Пропускаємо рядки обміну — на маршрутному листі не показуємо
+        if r.is_exchange:
+            continue
+        rid = r.route_id
+        gid = r.client_group_id
+        if gid is not None and gid not in groups_by_id:
+            gid = None
+        elif gid is not None and groups_by_id[gid].route_id != rid:
+            gid = None
+        key = (rid, gid, r.product_id)
+        agg[key]["qty"] += float(r.qty or 0)
+        agg[key]["sum"] += float(r.sum or 0)
+
+    if not agg:
+        raise HTTPException(status_code=404, detail=f"Немає виробів для друку на {date}")
+
+    # Структуруємо: by_route[rid] = list of (gid, sort_key, label, dict[pid]={qty, sum})
+    by_route: dict[Optional[int], list[tuple[Optional[int], tuple, str, dict[int, dict]]]] = defaultdict(list)
+    tmp: dict[tuple[Optional[int], Optional[int]], dict[int, dict]] = defaultdict(dict)
+    for (rid, gid, pid), totals in agg.items():
+        tmp[(rid, gid)][pid] = totals
+    for (rid, gid), pid_map in tmp.items():
+        if gid is None:
+            label, sort_key = "Без групи", (9_999, "Без групи")
+        else:
+            g = groups_by_id[gid]
+            label, sort_key = g.name, (g.sort_order or 0, g.name)
+        by_route[rid].append((gid, sort_key, label, pid_map))
+
+    sorted_rids = sorted(
+        by_route.keys(),
+        key=lambda x: (
+            (routes_by_id[x].sort_order if x in routes_by_id else 9999, routes_by_id[x].name) if x else (9999, "Без маршруту")
+        ),
+    )
+
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    pages_html = ""
+    for idx, rid in enumerate(sorted_rids):
+        route = routes_by_id.get(rid)
+        route_name = route.name if route else "Без маршруту"
+        groups = sorted(by_route[rid], key=lambda g: g[1])
+
+        # Підсумки по маршруту
+        route_qty = sum(t["qty"] for _g, _sk, _lb, pm in groups for t in pm.values())
+        route_sum = sum(t["sum"] for _g, _sk, _lb, pm in groups for t in pm.values())
+
+        groups_html = ""
+        for _gid, _sk, label, pid_map in groups:
+            # Розкладаємо по категоріях виробу
+            cat_buckets: dict[Optional[int], list[tuple[Product, dict]]] = defaultdict(list)
+            for pid, totals in pid_map.items():
+                p = products_by_id.get(pid)
+                if not p:
+                    continue
+                cat_buckets[p.category_id].append((p, totals))
+
+            # Сортуємо категорії за sort_order
+            sorted_cats = sorted(
+                cat_buckets.keys(),
+                key=lambda cid: (
+                    categories_by_id[cid].sort_order if cid in categories_by_id else 9999,
+                    categories_by_id[cid].name if cid in categories_by_id else "—",
+                ),
+            )
+
+            cat_rows_html = ""
+            for cid in sorted_cats:
+                items = sorted(cat_buckets[cid], key=lambda x: x[0].name)
+                cat_name = categories_by_id[cid].name if cid in categories_by_id else "—"
+                cat_qty = sum(t["qty"] for _p, t in items)
+                cat_sum = sum(t["sum"] for _p, t in items)
+                cat_rows_html += f"""
+                <tr class="cat-row">
+                  <td class="cat-name">{cat_name}</td>
+                  <td class="r"><strong>{cat_qty:g}</strong></td>
+                  <td></td><td></td><td></td>
+                  <td class="r"><strong>{fmt(cat_sum)}</strong></td>
+                </tr>"""
+                for p, t in items:
+                    eff_price = (t["sum"] / t["qty"]) if t["qty"] else 0.0
+                    cat_rows_html += f"""
+                <tr>
+                  <td class="prod-name">{p.name}</td>
+                  <td class="r">{t['qty']:g}</td>
+                  <td class="r">{fmt(eff_price)}</td>
+                  <td></td>
+                  <td></td>
+                  <td class="r">{fmt(t['sum'])}</td>
+                </tr>"""
+
+            # Підсумки по групі
+            grp_qty = sum(t["qty"] for pm in [pid_map] for t in pm.values())
+            grp_sum = sum(t["sum"] for pm in [pid_map] for t in pm.values())
+
+            groups_html += f"""
+            <div class="group-block">
+              <div class="group-title">
+                <span class="group-label">Група</span>
+                <span class="group-name">{label}</span>
+                <span class="group-route">· маршрут {route_name}</span>
+                <span class="group-stats">
+                  <span class="stat-qty">{grp_qty:g} шт</span>
+                  <span class="stat-sum">{fmt(grp_sum)} грн</span>
+                </span>
+              </div>
+              <table class="route-tbl">
+                <colgroup>
+                  <col><col style="width:13%"><col style="width:11%">
+                  <col style="width:10%"><col style="width:11%"><col style="width:14%">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Виріб</th>
+                    <th class="r">К-сть</th>
+                    <th class="r">Ціна</th>
+                    <th class="c">Брак</th>
+                    <th class="c">Ціна браку</th>
+                    <th class="r">Сума</th>
+                  </tr>
+                </thead>
+                <tbody>{cat_rows_html}</tbody>
+              </table>
+            </div>"""
+
+        page_break = "" if idx == 0 else 'style="page-break-before: always;"'
+        pages_html += f"""
+        <div class="route-page" {page_break}>
+          <header class="page-head">
+            <h1 class="doc-title">Маршрутний лист — {route_name}</h1>
+            <div class="meta-line">
+              <span>{ua_date(date)}</span>
+              <span class="meta-sep">·</span>
+              <span>Всього: <strong>{route_qty:g}</strong> шт</span>
+              <span class="meta-sep">·</span>
+              <span>Сума: <strong>{fmt(route_sum)}</strong> грн</span>
+            </div>
+          </header>
+          {groups_html}
+          <footer class="page-foot">
+            <div class="sig-row">
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-cap">Видав (підпис)</div>
+              </div>
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-cap">Прийняв водій (підпис)</div>
+              </div>
+            </div>
+          </footer>
+        </div>"""
+
+    css = """<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', 'Arial', sans-serif;
+  font-size: 10pt; color: #1f2937; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+@page { size: A4; margin: 8mm 10mm; }
+@media print { .no-print { display: none !important; } }
+
+.route-page { padding: 0 0 3mm; }
+
+/* ── Шапка сторінки (компактна, в один рядок) ──────────────────────────── */
+.page-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-bottom: 1.5mm; margin-bottom: 3mm;
+  border-bottom: 2px solid #1a3a5c;
+}
+.doc-title {
+  font-size: 14pt; font-weight: 700; color: #1a3a5c; line-height: 1.1;
+}
+.meta-line {
+  font-size: 9.5pt; color: #555;
+  display: flex; align-items: baseline; gap: 2mm;
+}
+.meta-line strong { color: #1a3a5c; font-weight: 700; }
+.meta-line .meta-sep { color: #bbb; }
+
+/* ── Група ──────────────────────────────────────────────────────────────── */
+.group-block { margin-top: 3mm; page-break-inside: avoid; }
+.group-title {
+  display: flex; align-items: baseline; gap: 2.5mm;
+  padding: 1mm 2.5mm; background: #1a3a5c; color: #fff;
+  border-radius: 1mm 1mm 0 0;
+}
+.group-label {
+  font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #c5d4e3;
+}
+.group-name { font-size: 11pt; font-weight: 700; }
+.group-route {
+  font-size: 9.5pt; font-weight: 500; color: #c5d4e3;
+  flex: 1;
+}
+.group-stats { display: flex; gap: 3mm; font-size: 9.5pt; color: #c5d4e3; }
+.group-stats .stat-qty,
+.group-stats .stat-sum { color: #fff; font-weight: 600; }
+
+/* ── Таблиця ────────────────────────────────────────────────────────────── */
+.route-tbl {
+  width: 100%; border-collapse: collapse; font-size: 10pt;
+  border: 1px solid #cfd6df; border-top: none;
+}
+.route-tbl th {
+  background: #e8eef5; padding: 1mm 2mm;
+  font-weight: 600; text-align: left; font-size: 9pt;
+  color: #1a3a5c; border-bottom: 1px solid #1a3a5c;
+}
+.route-tbl th.r { text-align: right; }
+.route-tbl th.c { text-align: center; }
+
+.route-tbl td {
+  padding: 0.8mm 2mm; border-bottom: 1px solid #e5e9ee;
+}
+.route-tbl tr:last-child td { border-bottom: none; }
+.route-tbl .r { text-align: right; font-variant-numeric: tabular-nums; }
+.route-tbl .c { text-align: center; }
+.route-tbl .prod-name { padding-left: 3.5mm; color: #1f2937; }
+
+/* Рядок-категорія (Булка / Хліб) — акцентний підзаголовок */
+.route-tbl tr.cat-row td {
+  background: #f5f7fa;
+  border-top: 1px solid #cfd6df;
+  border-bottom: 1px solid #cfd6df;
+  padding-top: 1.2mm; padding-bottom: 1.2mm;
+}
+.route-tbl tr.cat-row .cat-name {
+  font-weight: 700; color: #1a3a5c; font-size: 10pt;
+}
+
+/* ── Підпис ─────────────────────────────────────────────────────────────── */
+.page-foot { margin-top: 5mm; page-break-inside: avoid; }
+.sig-row { display: flex; gap: 10mm; }
+.sig-block { flex: 1; }
+.sig-line {
+  border-bottom: 1px solid #1f2937;
+  height: 6mm; margin-bottom: 0.5mm;
+}
+.sig-cap {
+  font-size: 8.5pt; color: #6b7280; text-align: center;
+}
+</style>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Маршрутний лист — {date}</title>
+  {css}
+</head>
+<body>
+{PRINT_BTN}
+{pages_html}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+# ── Адресний лист (адреси і телефони клієнтів з сумами) ──────────────────────
+
+@router.get("/address-sheet", response_class=HTMLResponse)
+def print_address_sheet(date: str, db: Session = Depends(get_db)):
+    """Друкована форма А4: адресний лист водія.
+
+    Кожен маршрут на окремій сторінці. Усередині — групи клієнтів
+    (sort_order, потім name; "Без групи" в кінці). У кожній групі —
+    список клієнтів: Клієнт | Адреса | Телефон | Сума замовлення.
+    Сума береться з накладної (Invoice.total_sum). Включаються накладні
+    зі статусом != cancelled.
+    """
+    from backend.models.invoices import Invoice
+    from backend.models.references import ClientGroup
+
+    invoices = (
+        db.query(Invoice)
+        .join(Client, Client.id == Invoice.client_id)
+        .filter(
+            Invoice.invoice_date == date,
+            Invoice.status != "cancelled",
+            Invoice.corrective_for_id.is_(None),  # тільки базові, без корекцій
+            Client.client_kind == "customer",
+        )
+        .all()
+    )
+    if not invoices:
+        raise HTTPException(status_code=404, detail=f"Немає сформованих накладних на {date}")
+
+    routes_by_id: dict[int, Route] = {
+        r.id: r for r in db.query(Route).order_by(Route.sort_order, Route.name).all()
+    }
+    groups_by_id: dict[int, ClientGroup] = {g.id: g for g in db.query(ClientGroup).all()}
+    clients_by_id: dict[int, Client] = {c.id: c for c in db.query(Client).all()}
+
+    from collections import defaultdict
+    # by_route[rid][(gid, sort_key, label)] = list of (client, total_sum)
+    by_route: dict[Optional[int], dict[tuple, list]] = defaultdict(lambda: defaultdict(list))
+
+    for inv in invoices:
+        client = clients_by_id.get(inv.client_id)
+        if not client:
+            continue
+        rid = client.route_id
+        gid = client.client_group_id
+        if gid is not None and gid not in groups_by_id:
+            gid = None
+        elif gid is not None and groups_by_id[gid].route_id != rid:
+            gid = None
+        if gid is None:
+            grp_key = (None, (9_999, "Без групи"), "Без групи")
+        else:
+            g = groups_by_id[gid]
+            grp_key = (gid, (g.sort_order or 0, g.name), g.name)
+        by_route[rid][grp_key].append((client, float(inv.total_sum or 0)))
+
+    sorted_rids = sorted(
+        by_route.keys(),
+        key=lambda x: (
+            (routes_by_id[x].sort_order if x in routes_by_id else 9999, routes_by_id[x].name) if x else (9999, "Без маршруту")
+        ),
+    )
+
+    cfg = get_settings(db)
+    bakery_name = cfg.get("bakery_name", "Пекарня")
+
+    pages_html = ""
+    for idx, rid in enumerate(sorted_rids):
+        route = routes_by_id.get(rid)
+        route_name = route.name if route else "Без маршруту"
+        groups = sorted(by_route[rid].items(), key=lambda kv: kv[0][1])
+        route_total = sum(s for _grp_key, lst in groups for _c, s in lst)
+
+        groups_html = ""
+        for grp_key, lst in groups:
+            label = grp_key[2]
+            # Сортуємо клієнтів за коротким іменем
+            lst_sorted = sorted(lst, key=lambda x: (x[0].short_name or x[0].full_name).lower())
+            grp_total = sum(s for _c, s in lst_sorted)
+
+            rows_html = ""
+            for c, s in lst_sorted:
+                name = c.short_name or c.full_name
+                addr = c.address or "—"
+                phone = c.phone or "—"
+                rows_html += f"""
+                <tr>
+                  <td class="cl-name">{name}</td>
+                  <td class="cl-addr">{addr}</td>
+                  <td class="cl-phone">{phone}</td>
+                  <td class="r">{fmt(s)} ₴</td>
+                </tr>"""
+
+            groups_html += f"""
+            <div class="group-block">
+              <div class="group-title">
+                <span class="group-label">Група</span>
+                <span class="group-name">{label}</span>
+                <span class="group-route">· маршрут {route_name}</span>
+                <span class="group-stats">
+                  <span class="stat-cnt">{len(lst_sorted)} кл.</span>
+                  <span class="stat-sum">{fmt(grp_total)} ₴</span>
+                </span>
+              </div>
+              <table class="addr-tbl">
+                <colgroup>
+                  <col><col><col style="width:24%"><col style="width:18%">
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Клієнт</th>
+                    <th>Адреса</th>
+                    <th>Телефон</th>
+                    <th class="r">Сума зам.</th>
+                  </tr>
+                </thead>
+                <tbody>{rows_html}</tbody>
+              </table>
+            </div>"""
+
+        page_break = "" if idx == 0 else 'style="page-break-before: always;"'
+        pages_html += f"""
+        <div class="route-page" {page_break}>
+          <header class="page-head">
+            <h1 class="doc-title">Адресний лист — {route_name}</h1>
+            <div class="meta-line">
+              <span>{ua_date(date)}</span>
+              <span class="meta-sep">·</span>
+              <span>Клієнтів: <strong>{sum(len(lst) for _gk, lst in groups)}</strong></span>
+              <span class="meta-sep">·</span>
+              <span>Сума: <strong>{fmt(route_total)}</strong> ₴</span>
+            </div>
+          </header>
+          {groups_html}
+        </div>"""
+
+    css = """<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', 'Arial', sans-serif;
+  font-size: 10pt; color: #1f2937; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+@page { size: A4; margin: 8mm 10mm; }
+@media print { .no-print { display: none !important; } }
+
+.route-page { padding: 0 0 3mm; }
+
+.page-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-bottom: 1.5mm; margin-bottom: 3mm;
+  border-bottom: 2px solid #1a3a5c;
+}
+.doc-title { font-size: 14pt; font-weight: 700; color: #1a3a5c; line-height: 1.1; }
+.meta-line { font-size: 9.5pt; color: #555; display: flex; gap: 2mm; align-items: baseline; }
+.meta-line strong { color: #1a3a5c; font-weight: 700; }
+.meta-line .meta-sep { color: #bbb; }
+
+.group-block { margin-top: 3mm; page-break-inside: avoid; }
+.group-title {
+  display: flex; align-items: baseline; gap: 2.5mm;
+  padding: 1mm 2.5mm; background: #1a3a5c; color: #fff;
+  border-radius: 1mm 1mm 0 0;
+}
+.group-label {
+  font-size: 8pt; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #c5d4e3;
+}
+.group-name { font-size: 11pt; font-weight: 700; }
+.group-route { font-size: 9.5pt; font-weight: 500; color: #c5d4e3; flex: 1; }
+.group-stats { display: flex; gap: 3mm; font-size: 9.5pt; color: #c5d4e3; }
+.group-stats .stat-cnt,
+.group-stats .stat-sum { color: #fff; font-weight: 600; }
+
+.addr-tbl {
+  width: 100%; border-collapse: collapse; font-size: 10pt;
+  border: 1px solid #cfd6df; border-top: none;
+}
+.addr-tbl th {
+  background: #e8eef5; padding: 1mm 2mm;
+  font-weight: 600; text-align: left; font-size: 9pt;
+  color: #1a3a5c; border-bottom: 1px solid #1a3a5c;
+}
+.addr-tbl th.r { text-align: right; }
+.addr-tbl td {
+  padding: 0.8mm 2mm; border-bottom: 1px solid #e5e9ee;
+}
+.addr-tbl tr:last-child td { border-bottom: none; }
+.addr-tbl .r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.addr-tbl .cl-name { font-weight: 500; color: #111; }
+.addr-tbl .cl-phone { color: #1f2937; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.addr-tbl .cl-addr { color: #4b5563; }
+</style>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Адресний лист — {date}</title>
+  {css}
+</head>
+<body>
+{PRINT_BTN}
+{pages_html}
+</body>
+</html>"""
+    return HTMLResponse(content=html)

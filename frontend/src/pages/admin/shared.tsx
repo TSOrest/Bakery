@@ -82,12 +82,14 @@ export interface ClientFormState {
   phone: string; director: string; accountant: string
   route_id: string; discount_pct: string
   client_kind: string; bot_phones: string
+  client_group_id: string
 }
 
 export const emptyClient = (): ClientFormState => ({
   full_name: '', short_name: '', address: '', phone: '',
   director: '', accountant: '', route_id: '', discount_pct: '0',
   client_kind: 'customer', bot_phones: '',
+  client_group_id: '',
 })
 
 export const CLIENT_KIND_LABELS: Record<string, string> = {

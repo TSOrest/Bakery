@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import FinanceArticlesTab from './admin/FinanceArticlesTab'
 import CategoriesTab from './admin/CategoriesTab'
 import RoutesTab from './admin/RoutesTab'
+import ClientGroupsTab from './admin/ClientGroupsTab'
 import SimpleListTab from './admin/SimpleListTab'
 import SystemClientsTab from './admin/SystemClientsTab'
 import ProductsTab from './admin/ProductsTab'
@@ -158,6 +159,7 @@ export default function AdminPage() {
         {activeTab === 'clients'        && <ClientsTab routes={routes} products={products} />}
         {activeTab === 'system_clients' && <SystemClientsTab routes={routes} />}
         {activeTab === 'routes'      && <RoutesTab routes={routes} onReload={reloadRoutes} />}
+        {activeTab === 'client_groups' && <ClientGroupsTab routes={routes} />}
         {activeTab === 'prices'      && <PricesTab products={products} clients={clients} categories={categories} />}
         {activeTab === 'units'       && (
           <SimpleListTab

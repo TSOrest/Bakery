@@ -92,6 +92,23 @@ class Route(Base):
     is_active  = Column(Integer, default=1)
 
     clients = relationship("Client", back_populates="route")
+    groups  = relationship("ClientGroup", back_populates="route",
+                           cascade="all, delete-orphan")
+
+
+class ClientGroup(Base):
+    """Група клієнтів у межах маршруту (для сортування завантаження машини)."""
+    __tablename__ = "client_groups"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(Text, nullable=False)
+    route_id   = Column(Integer, ForeignKey("routes.id"), nullable=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(Text)
+
+    route  = relationship("Route", back_populates="groups")
+    members = relationship("Client", back_populates="group",
+                           foreign_keys="Client.client_group_id")
 
 
 class Client(Base):
@@ -115,13 +132,18 @@ class Client(Base):
     delivery_agent       = Column(Text)                 # через кого відправляється
     delivery_note_number = Column(Text)                 # номер доручення
     delivery_note_date   = Column(Text)                 # дата доручення
-    client_group         = Column(Text)                 # підгрупа в маршруті
+    client_group         = Column(Text)                 # legacy: текстова підгрупа (з .accdb імпорту)
+    # Новий FK на нормалізовану таблицю client_groups (з міграції 033).
+    # ON DELETE SET NULL — при видаленні групи клієнти лишаються без групи.
+    client_group_id      = Column(Integer, ForeignKey("client_groups.id"), nullable=True)
     # customer=звичайний, shop=власний магазин, writeoff=списання, ration=пайок
     client_kind          = Column(Text, default='customer')
     bot_chat_id          = Column(Text)           # застаріле, залишено для сумісності
     bot_phones           = Column(Text)           # телефони для авторизації в боті (через кому)
 
     route     = relationship("Route", back_populates="clients")
+    group     = relationship("ClientGroup", back_populates="members",
+                             foreign_keys=[client_group_id])
     bot_users = relationship("ClientBotUser", back_populates="client",
                              cascade="all, delete-orphan")
 

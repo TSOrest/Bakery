@@ -54,8 +54,17 @@ export interface Client {
   delivery_note_number: string | null
   delivery_note_date: string | null
   client_group: string | null
+  client_group_id: number | null
   client_kind: 'customer' | 'shop' | 'writeoff' | 'ration' | 'underbaked'
   bot_phones: string | null
+}
+
+export interface ClientGroup {
+  id: number
+  name: string
+  route_id: number
+  sort_order: number
+  member_count: number
 }
 
 export interface Order {
@@ -151,6 +160,7 @@ export interface FinanceArticle {
   direction: 'income' | 'expense'
   is_system: number
   needs_client: number
+  editable: number  // 1 = дозволено PATCH amount/notes у поточному дні
 }
 
 export interface Finance {

@@ -14,6 +14,7 @@ class FinanceArticle(Base):
     direction    = Column(Text, nullable=False)   # 'income' | 'expense'
     is_system    = Column(Integer, default=0)     # 1 = системна (не видаляється)
     needs_client = Column(Integer, default=0)     # 1 = потребує прив'язки до клієнта
+    editable     = Column(Integer, default=0)     # 1 = дозволено PATCH amount/notes у поточному дні
 
 
 class Finance(Base):

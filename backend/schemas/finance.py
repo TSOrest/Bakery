@@ -24,12 +24,14 @@ class FinanceArticleCreate(BaseModel):
     name: str
     direction: Literal["income", "expense"]
     needs_client: int = 0
+    editable: int = 0
 
 
 class FinanceArticleUpdate(BaseModel):
     name: Optional[str] = None
     direction: Optional[Literal["income", "expense"]] = None
     needs_client: Optional[int] = None
+    editable: Optional[int] = None
 
 
 class FinanceArticleOut(BaseModel):
@@ -39,6 +41,7 @@ class FinanceArticleOut(BaseModel):
     direction: str
     is_system: int
     needs_client: int = 0
+    editable: int = 0
 
 
 # ── Фінансові операції ─────────────────────────────────────────────────────────
@@ -52,6 +55,21 @@ class FinanceCreate(BaseModel):
     sign:         Literal[1, -1]
     notes:        Optional[str] = None
     created_by:   Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def positive_amount(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("amount має бути > 0")
+        return round(v, 2)
+
+
+class FinanceUpdate(BaseModel):
+    """PATCH /finances/{id} — редагування суми і нотатки.
+    Дату, статтю, клієнта, sign — НЕ змінюємо.
+    """
+    amount: float
+    notes:  Optional[str] = None
 
     @field_validator("amount")
     @classmethod

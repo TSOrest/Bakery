@@ -3,13 +3,12 @@ import OwnerDashboard from './OwnerDashboard'
 import type { ClientBalance, Finance, FinanceSummary, InternalKpi, FinanceArticle } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
-  createFinance, deleteFinance, fetchFinances, fetchInternalKpi,
+  createFinance, updateFinance, fetchFinances, fetchInternalKpi,
 } from '../api/finances'
 import { fetchFinanceArticles } from '../api/financeArticles'
 import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
 import { useToast } from '../components/Toast'
-import { useConfirm } from '../components/ConfirmDialog'
 import { IconButton } from '../components/IconButton'
 import styles from './FinancesPage.module.css'
 
@@ -236,22 +235,99 @@ function PaymentForm({ clientId, clientName, defaultDate, balances, onSave, onCl
   )
 }
 
+// ── Модалка редагування суми операції ─────────────────────────────────────────
+
+interface EditFinanceFormProps {
+  finance: Finance
+  onClose: () => void
+  onSaved: () => void
+}
+
+function EditFinanceForm({ finance, onClose, onSaved }: EditFinanceFormProps) {
+  const [amount, setAmount] = useState(String(finance.amount))
+  const [notes,  setNotes]  = useState(finance.notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState('')
+  const toast = useToast()
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const num = parseFloat(amount.replace(',', '.'))
+    if (!num || num <= 0) { setError('Введіть суму > 0'); return }
+    setSaving(true)
+    setError('')
+    try {
+      await updateFinance(finance.id, { amount: num, notes: notes || null })
+      toast.success('Суму оновлено')
+      onSaved()
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Помилка')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modal} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHeader}>
+          <h3>Редагувати суму — {finance.type_label ?? finance.finance_type}</h3>
+          <IconButton className={styles.closeBtn} onClick={onClose} label="Закрити">✕</IconButton>
+        </div>
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label>Дата
+            <input type="date" value={finance.finance_date} readOnly disabled />
+          </label>
+          {finance.client_name && (
+            <label>Клієнт
+              <input type="text" value={finance.client_name} readOnly disabled />
+            </label>
+          )}
+          <label>Сума (грн)
+            <input
+              type="number" min="0.01" step="0.01" autoFocus
+              value={amount} onChange={e => setAmount(e.target.value)}
+              required
+            />
+          </label>
+          <label>Примітка
+            <input
+              type="text" value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Необов'язково"
+            />
+          </label>
+          {error && <p className={styles.error}>{error}</p>}
+          <div className={styles.formActions}>
+            <button type="button" className={styles.btnSecondary} onClick={onClose}>
+              Скасувати
+            </button>
+            <button type="submit" className={styles.btnPrimary} disabled={saving}>
+              {saving ? 'Зберігаємо…' : 'Зберегти'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Панель деталей клієнта ────────────────────────────────────────────────────
 
 interface ClientPanelProps {
   balance:        ClientBalance
   workDate:       string
+  articles:       FinanceArticle[]
   onChanged:      () => void
   onClose:        () => void
 }
 
-function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps) {
+function ClientPanel({ balance, workDate, articles, onChanged, onClose }: ClientPanelProps) {
   const [history,  setHistory]  = useState<Finance[]>([])
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [deleting, setDeleting] = useState<number | null>(null)
-  const toast = useToast()
-  const confirmDialog = useConfirm()
+  const [editingFinance, setEditingFinance] = useState<Finance | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -267,20 +343,13 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
     onChanged()
   }
 
-  async function handleDelete(id: number) {
-    const ok = await confirmDialog({ message: 'Видалити запис?', danger: true, confirmText: 'Видалити' })
-    if (!ok) return
-    setDeleting(id)
-    try {
-      await deleteFinance(id)
-      await load()
-      onChanged()
-      toast.success('Запис видалено')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Помилка видалення')
-    } finally {
-      setDeleting(null)
-    }
+  const canEditFinance = (e: Finance): boolean => {
+    if (e.finance_date !== workDate) return false
+    if (e.created_by === 'system') return false
+    if (e.finance_type === 'invoice') return false
+    if (!e.article_id) return false
+    const art = articles.find(a => a.id === e.article_id)
+    return !!art && art.editable === 1
   }
 
   const recentHistory = useMemo(() => {
@@ -339,14 +408,13 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
               <span className={`${styles.historyRowAmount} ${e.sign === 1 ? styles.creditColor : styles.debtColor}`}>
                 {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
               </span>
-              {e.finance_type !== 'invoice' ? (
+              {canEditFinance(e) ? (
                 <button
-                  className={styles.delBtn}
-                  title="Видалити"
-                  disabled={deleting === e.id}
-                  onClick={() => handleDelete(e.id)}
+                  className={styles.editBtn}
+                  title="Редагувати суму"
+                  onClick={() => setEditingFinance(e)}
                 >
-                  ×
+                  ✎
                 </button>
               ) : <span />}
             </div>
@@ -367,6 +435,14 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
           onClose={() => setShowForm(false)}
         />
       )}
+
+      {editingFinance && (
+        <EditFinanceForm
+          finance={editingFinance}
+          onClose={() => setEditingFinance(null)}
+          onSaved={() => { load(); onChanged() }}
+        />
+      )}
     </div>
   )
 }
@@ -376,8 +452,6 @@ function ClientPanel({ balance, workDate, onChanged, onClose }: ClientPanelProps
 export default function FinancesPage() {
   const { workDate } = useWorkDate()
   const today = workDate ?? new Date().toISOString().slice(0, 10)
-  const toast = useToast()
-  const confirmDialog = useConfirm()
 
   const [tab,           setTab]           = useState<TabId>('dashboard')
   const [balances,      setBalances]      = useState<ClientBalance[]>([])
@@ -496,17 +570,15 @@ export default function FinancesPage() {
     if (tab === 'journal') await loadJournal()
   }
 
-  async function handleJournalDelete(id: number) {
-    const ok = await confirmDialog({ message: 'Видалити запис?', danger: true, confirmText: 'Видалити' })
-    if (!ok) return
-    try {
-      await deleteFinance(id)
-      await loadJournal()
-      await loadBalances()
-      toast.success('Запис видалено')
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Помилка видалення')
-    }
+  const [editingFinance, setEditingFinance] = useState<Finance | null>(null)
+
+  const canEditFinance = (e: Finance): boolean => {
+    if (e.finance_date !== today) return false
+    if (e.created_by === 'system') return false
+    if (e.finance_type === 'invoice') return false
+    if (!e.article_id) return false
+    const art = articles.find(a => a.id === e.article_id)
+    return !!art && art.editable === 1
   }
 
   return (
@@ -725,6 +797,7 @@ export default function FinancesPage() {
                 key={selected.client_id}
                 balance={selected}
                 workDate={today}
+                articles={articles}
                 onChanged={loadBalances}
                 onClose={() => setSelected(null)}
               />
@@ -782,13 +855,13 @@ export default function FinancesPage() {
                     {e.sign === 1 ? '+' : '−'}{fmt(e.amount)}
                   </td>
                   <td>
-                    {e.finance_type !== 'invoice' && (
+                    {canEditFinance(e) && (
                       <button
-                        className={styles.delBtn}
-                        title="Видалити"
-                        onClick={() => handleJournalDelete(e.id)}
+                        className={styles.editBtn}
+                        title="Редагувати суму"
+                        onClick={() => setEditingFinance(e)}
                       >
-                        ×
+                        ✎
                       </button>
                     )}
                   </td>
@@ -902,6 +975,14 @@ export default function FinancesPage() {
           balances={balances}
           onSave={handleSaveGlobal}
           onClose={() => setShowForm(false)}
+        />
+      )}
+
+      {editingFinance && (
+        <EditFinanceForm
+          finance={editingFinance}
+          onClose={() => setEditingFinance(null)}
+          onSaved={() => { loadJournal(); loadBalances() }}
         />
       )}
     </div>

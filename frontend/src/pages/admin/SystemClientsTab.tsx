@@ -35,6 +35,7 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
       discount_pct: c.discount_pct.toString(),
       client_kind:  c.client_kind,
       bot_phones:   c.bot_phones ?? '',
+      client_group_id: c.client_group_id?.toString() ?? '',
     })
     setModal(true)
   }

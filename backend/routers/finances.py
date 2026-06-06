@@ -12,7 +12,7 @@ from backend.models.references import Client
 from backend.services.prices import get_price
 from backend.models.finances import FinanceArticle
 from backend.schemas.finance import (
-    FinanceCreate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
+    FinanceCreate, FinanceUpdate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
 )
 from backend.services.finance import get_all_balances, get_summary
 from backend.routers.auth import require_user
@@ -229,6 +229,48 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends
         created_by   = data.created_by,
     )
     db.add(entry)
+    safe_commit(db)
+    db.refresh(entry)
+    return _batch_enrich([entry], db)[0]
+
+
+# ── Редагування суми ──────────────────────────────────────────────────────────
+
+@router.patch("/{finance_id}", response_model=FinanceOut)
+def update_finance(
+    finance_id: int,
+    data: FinanceUpdate,
+    db: Session = Depends(get_db),
+    _=Depends(require_user),
+):
+    """Редагування суми і нотатки фінансового запису.
+
+    Дозволено лише якщо:
+    - стаття має editable=1;
+    - запис створено вручну (created_by != 'system') — автоматичні від накладних не торкаємось.
+
+    Перевірку дати робить frontend (показує кнопку лише для finance_date == workDate).
+    """
+    entry = db.get(Finance, finance_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Запис не знайдено")
+
+    if entry.created_by == "system":
+        raise HTTPException(
+            status_code=400,
+            detail="Автоматичний запис не можна редагувати вручну",
+        )
+
+    article = db.get(FinanceArticle, entry.article_id) if entry.article_id else None
+    if not article or (article.editable or 0) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Для цієї статті редагування суми не дозволено",
+        )
+
+    entry.amount = data.amount
+    if data.notes is not None:
+        entry.notes = data.notes
     safe_commit(db)
     db.refresh(entry)
     return _batch_enrich([entry], db)[0]
