@@ -950,6 +950,11 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         ep.skipped += 1; continue
 
                     weight = _safe_float(row.get(cm.get("weight", "")) if cm.get("weight") else None)
+                    # Access поле Single зберігає 0.3 як ~0.30000001192… або, після арифметики,
+                    # як 0.30004515. У формах Access це маскує display-формат, у нас — раніше
+                    # потрапляло у БД як є. Округлюємо до 3 знаків (точність 1 г).
+                    if weight is not None:
+                        weight = round(weight, 3)
                     active = _safe_bool(row.get(cm.get("active", ""), True)) if cm.get("active") else True
                     ptype  = _safe_str(row.get(cm.get("type", "")) if cm.get("type") else None, 50)
                     init_s = _safe_float(row.get(cm.get("initial_stock", "")) if cm.get("initial_stock") else None) or 0.0
