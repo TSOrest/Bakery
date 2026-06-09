@@ -140,8 +140,34 @@ CREATE TABLE clients (
     route_id INTEGER REFERENCES routes(id),
     discount_pct REAL DEFAULT 0,  -- % знижки
     is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    -- Поля Фази 3.5 (реалізовані)
+    is_own_shop INTEGER DEFAULT 0,        -- власний магазин пекарні
+    print_invoice INTEGER DEFAULT 1,
+    receiver_name TEXT,                   -- ПІБ того хто приймає товар
+    delivery_agent TEXT,                  -- "ВідпЧерез"
+    delivery_note_number TEXT,
+    delivery_note_date TEXT,
+    client_group TEXT,                    -- legacy текстова підгрупа (з .accdb імпорту)
+    -- v1.1.7: нормалізоване поле — FK на client_groups
+    client_group_id INTEGER REFERENCES client_groups(id) ON DELETE SET NULL,
+    client_kind TEXT DEFAULT 'customer',  -- customer|shop|writeoff|ration|underbaked
+    bot_chat_id TEXT,
+    bot_phones TEXT
+);
+
+-- Групи клієнтів (v1.1.7) — об'єднання клієнтів у межах маршруту
+-- для друку Сортування / Маршрутного / Адресного листів.
+CREATE TABLE client_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    route_id INTEGER NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+    sort_order INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
+-- Cascade: видалення маршруту → видалення груп → клієнти стають "Без групи"
+-- (clients.client_group_id = NULL). PUT /clients зі зміною route_id скидає
+-- client_group_id якщо група належить іншому маршруту.
 ```
 
 ### Ціни
@@ -359,6 +385,22 @@ CREATE TABLE other_stock_in (
 
 ### Фінанси
 ```sql
+-- Статті фінансових операцій (реалізовано у Фазі 3.5).
+-- Системні статті (is_system=1) видаляти не можна, лише редагувати.
+-- editable (v1.1.7) дозволяє ✏ редагування суми операції поточного дня
+-- через PATCH /finances/{id} замість видалення.
+CREATE TABLE finance_articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('income','expense')),
+    is_system INTEGER DEFAULT 0,
+    needs_client INTEGER DEFAULT 0,  -- 1 = операція потребує прив'язки до клієнта
+    editable INTEGER DEFAULT 0       -- 1 = PATCH amount/notes дозволено (поточний день)
+);
+-- PARTIAL UNIQUE INDEX: системні статті унікальні за (name, direction).
+-- За замовчуванням editable=1: Оплата, Внесення в касу, Виплата з каси,
+-- Готівка водія, Списання.
+
 CREATE TABLE finances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     finance_date TEXT NOT NULL,
@@ -371,11 +413,12 @@ CREATE TABLE finances (
         'route_cash',      -- готівка від водія
         'exchange_credit'  -- кредит при pre_order обміні
     )),
+    article_id INTEGER REFERENCES finance_articles(id),  -- замінює finance_type у відображенні
     amount REAL NOT NULL,  -- завжди позитивне число
     sign INTEGER NOT NULL CHECK(sign IN (1,-1)),  -- +1 або -1
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    created_by TEXT
+    created_by TEXT       -- 'system' для автоматичних записів (не редагуються)
 );
 ```
 
@@ -452,14 +495,19 @@ INSERT INTO settings VALUES
     /ingredients       GET, POST, PUT
     /clients           GET, POST, PUT, DELETE
     /routes            GET, POST, PUT
+    /client-groups     GET, POST, PUT, DELETE          ← v1.1.7
+        /{id}/members  GET, PUT — призначення клієнтів до групи
     /prices            GET, POST, PUT — з логікою дат
     /orders            GET, POST, PUT, DELETE — з копіюванням
+        /grid          GET — матриця клієнти×вироби для Зведеного виду (v1.1.4)
+        /bulk-upsert   POST — масове збереження з atomic locked-check (v1.1.4)
     /baking            GET, POST — завдання + результат + розподіл
     /invoices          GET, POST, PUT — з автонумерацією
     /movements         GET — журнал
     /balances          GET — daily_balances з перерахунком
     /shop              GET, POST — shop_counts + other_stock
-    /finances          GET, POST — з каскадним перерахунком
+    /finances          GET, POST, PATCH /{id} (v1.1.7), DELETE
+        articles       GET, POST, PUT, DELETE (з прапором editable)
     /cancellations     GET, POST — скасування рейсів
     /reports           GET — різні звіти
     /settings          GET, PUT
@@ -475,6 +523,17 @@ INSERT INTO settings VALUES
         clients/{id}/bot-users      GET — список авторизованих Telegram-юзерів
         clients/{id}/bot-users/{uid} DELETE — відкликати авторизацію
     /invoices/locked-clients        GET — client_ids з наявними накладними на дату
+    /print/                                            ← друковані форми
+        invoice/{id}                GET — одна накладна
+        invoices                    GET — пакет накладних (2 на A4)
+        baking                      GET — завдання пекарям
+        daily-report                GET — денний звіт
+        debts                       GET — боргова відомість
+        monthly-sales               GET — місячний звіт продажів
+        client-statement            GET — виписка клієнта
+        group-sort                  GET — Сортування товару за групами (v1.1.7)
+        route-sheet                 GET — Маршрутний лист водія (v1.1.7)
+        address-sheet               GET — Адресний лист клієнтів (v1.1.7)
 ```
 
 ### Ключові бізнес-правила для сервісів
@@ -794,13 +853,14 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 - **Шифрування БД**: SQLite БД не шифрована. Захист — через права Windows (`C:\ProgramData\Bakery` доступний лише адміну машини).
 - **Архітектура для одного магазину**: код підтримує кілька магазинів через `client_kind='shop'`, але UI оптимізовано під 1-3 точки.
 
-## Безпека (стан на v1.0.x)
+## Безпека (стан на v1.1.x)
 
 - **Паролі**: bcrypt (cost=12) з прозорим апгрейдом legacy SHA256 при login
-- **API auth**: усі мутації (POST/PUT/DELETE) на 12 роутерах вимагають Bearer токен через `require_user`/`require_admin`
+- **API auth**: усі мутації (POST/PUT/PATCH/DELETE) на роутерах вимагають Bearer токен через `require_user`/`require_admin`
 - **Rate-limiting**: на `/auth/login` — in-memory dict `{ip: attempts}`, >5 спроб за 5 хв → 429 Too Many Requests з `Retry-After` header (cleanup кожні 10 хв)
 - **Сесії**: таймаут **30 днів неактивності** через `UserSession.last_used_at` — оновлюється при кожному `get_current_user`, прострочені сесії видаляються автоматично (міграція 028)
 - **OAuth токени**: зберігаються відкритим текстом у налаштуваннях БД (запланований Batch 4.2 — шифрування Fernet з ключем у `BAKERY_DATA_DIR/.fernet_key`)
+- **Frontend API token (v1.1.7)**: усі raw `fetch()` у `frontend/src/api/*.ts` переведено на централізований `api/client.ts` що додає `Authorization: Bearer <token>` з `localStorage.bakery_token`. Для FormData-upload (`importAccdb`, `issues/assets`) — окрема обгортка з ручним додаванням headers.
 
 ## Аудит-фікси v0.9.36-v1.0.4
 
@@ -818,6 +878,40 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 - **schema.sql sync (B1)**: повна синхронізація з моделями SQLAlchemy — 29 таблиць, 24 індекси, 24 default settings; видалено застарілі `surplus_*`, `route_cancellations`, `cancellation_lines`
 - **safe_commit() поширено** на категорії, магазин, auth, bot (~34 місця разом)
 - **Frontend stability**: останні `alert()` → toast у BakingPage і ImportPage; fix race у `ReconciliationCalendar` (`selectedRec.lines.length` падав при slim-об'єкті); fix кирилиці у трей-діалогах; update.ps1 без credential helper
+
+## Релізи v1.1.x
+
+**v1.1.0-v1.1.2** — Pivot Grid (зведений вид замовлень):
+- Альтернативний UI у вкладці Замовлення: кнопка **❖ Зведений вид** відкриває fullscreen-модалку з сіткою клієнти × вироби × дата.
+- Ексклюзивні акордеони у кутовій клітинці шапки: категорії (Хліб / Булка) — горизонтально top-right; рейси — вертикально bottom-left.
+- Sticky-кути: лівий стовпчик (клієнт), правий (Σ по клієнту), верхня шапка (виріб з vertical-text), нижній footer (Σ по виробу).
+- Двоетапне вимірювання ширин колонок через `useLayoutEffect` — точна ширина за реальною шириною label (без `max-content` пастки для vertical-text).
+- Бейджі `+N↩` для extra-рядків (обмін/знижка/переміщення), оранжева крапка для pending bot-замовлень.
+- Етап 3: bulk-flush (POST `/orders/bulk-upsert` коли N≥2 змін за 600 мс) + paste TSV з Excel (`onPaste` handler, заповнення від anchor вправо/вниз, пропускає locked-клієнтів).
+- Backend: GET `/orders/grid?order_date=...` + POST `/orders/bulk-upsert` з atomic locked-check (409 з `locked_client_ids` у detail).
+
+**v1.1.3** — fix update.ps1:
+- `npm install --no-audit --no-fund` перед `npm run build` — install уже не падає на машинах з застарілим `node_modules`.
+- `Start-Process npm` тепер з `-RedirectStandardOutput`/`-RedirectStandardError` у `C:\ProgramData\Bakery\logs\update-npm-{install,build}.log{,.err}` — є що дивитись при падінні.
+- Явні рядки в логу про причину fallback на npm (нема OAuth токена / release не має `frontend-dist.zip` / exception download з повідомленням).
+- Sidecar `scripts/manual-upgrade-v1.1.3.ps1` (закомічений) для клієнтів які застрягли на v1.0.x через self-update race (PowerShell кешує старий скрипт у пам'яті). Обходить GCM-popup через `git remote set-url` з embedded токеном, PS 5.1 NativeCommandError (через `$ErrorActionPreference='Continue'` для git-блоку + `--quiet`), кирилицю у username (system-wide `C:\Windows\Temp` замість `$env:TEMP`).
+
+**v1.1.5** — wheel-blur:
+- Глобальний listener у `main.tsx`: при `wheel` на focused `<input type="number">` робимо `blur()` → значення не змінюється при прокручуванні сторінки колесом миші. Покриває всі форми з number-inputs одним патчем (Orders, OrderModal, GridOrderModal, BakingPage, FinancesPage, RoutesPage, ShopPage, ImportPage, admin tabs).
+
+**v1.1.6** — bulk-send fix:
+- Масова відправка чернеток у Маршрутах: `Promise.all` → послідовний `for...await`. `generate_invoice_number` не atomic — паралельні запити брали однаковий номер → 409 на одному з них → `Promise.all` rejects → UI зависав з "..." і не оновлювався.
+- Per-item `try/catch` + загальний `try/finally` — UI завжди розблоковує + `load()` refetch. Toast про результат. Чекбокси з невдалих залишаються виділеними.
+
+**v1.1.7** — фінанси (auth + edit) + групи клієнтів + друковані форми:
+- **Auth-fix**: `frontend/src/api/finances.ts`, `importAccdb.ts`, `issues.ts` — усі raw `fetch()` переведено на `api/client.ts` (виправляє "Не авторизовано" при збереженні оплат і копіюванні цін).
+- **Edit фінансових сум**: міграція **032** + поле `editable` у `finance_articles` + `PATCH /finances/{id}` (схема `FinanceUpdate`). UI: кнопка ✏ замість 🗑 у FinancesPage (показується тільки для `finance_date == workDate` + `article.editable=1` + `created_by != 'system'`). Чекбокс "Редаг. суми" у Довіднику фінансових статей. Default editable=1 для: Оплата, Внесення в касу, Виплата з каси, Готівка водія, Списання.
+- **Групи клієнтів**: міграція **033** + таблиця `client_groups` + `clients.client_group_id` (FK з `ON DELETE SET NULL`). Модель `ClientGroup` (route_id, name, sort_order). Роутер `/client-groups` CRUD + `GET/PUT /{id}/members`. Cascade у `update_client`: при зміні `route_id` група старого маршруту скидається у NULL. Нова вкладка AdminPage "Групи клієнтів" + dropdown у формі клієнта (фільтр за поточним route_id). У формі ClientGroupsTab — multi-select клієнтів для призначення.
+- **Друковані форми у Маршрутах** (sticky-секція `printFormsBar` внизу панелі списку, `flex-shrink: 0`):
+  - GET `/print/group-sort` — Сортування товару по групах клієнтів (агрегація orders за route → group → product, для завантаження машини).
+  - GET `/print/route-sheet` — Маршрутний лист водія. Дані з `invoice_lines` (status != cancelled, не is_exchange). Кожен маршрут на окремій сторінці. Колонки: Виріб | К-сть | Ціна | Брак | Ціна браку | Сума. Шапка з підсумками маршруту, темно-синя смуга-заголовок групи з назвою маршруту (щоб не загубитися при розриві сторінки).
+  - GET `/print/address-sheet` — Адресний лист (Клієнт | Адреса | Телефон | Сума зам.). Дані з `invoices`, окрема сторінка на маршрут, групи всередині.
+- **Сортування orders у вкладці Замовлення**: у межах клієнта вироби сортуються за `order.id` (порядок внесення) замість алфавіту — відповідає паперовим бланкам.
 
 ## Memory і agent-context
 
