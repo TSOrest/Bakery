@@ -610,6 +610,7 @@ INSERT INTO settings VALUES
   - `_poll_flags()` thread (кожні 2 сек): обробляє flag-файли від frontend — `RESTORE_REQUESTED`, `DEMO_ENTER_REQUESTED`, `DEMO_EXIT_REQUESTED`; окремий від `_poll_backup()` (60 сек) для швидкої реакції (≤2 сек)
   - `_notified_version`: balloon про нову версію надсилається лише один раз на версію, не повторюється щогодини
   - `action_install_update` запускається в окремому `threading.Thread` (як `action_rollback`) — інакше `MessageBoxW` блокує pystray event thread і кнопки діалогу не реагують
+  - об'єднаний потік оновлення (v1.1.9): "Перевірити оновлення" при знайденій новій версії одразу показує діалог Так/Ні "Встановити зараз?" і запускає встановлення на "Так" — без окремого кроку через меню. Спільний хелпер `_run_install(icon, current, latest)` (бекап → `update.ps1` → `icon.stop()`, без повторного підтвердження) використовується і `_do_check_update`, і `action_install_update` (шлях через balloon → меню)
 - [x] Система оновлень та відкату через GitHub:
   - `VERSION` файл + git-теги (`v1.0.0`, `v1.1.0`, …)
   - автоперевірка GitHub API раз на годину (balloon тільки при першому виявленні нової версії)

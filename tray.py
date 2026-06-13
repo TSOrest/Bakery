@@ -568,22 +568,46 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
 
     if _latest_version:
         if show_if_none:
+            # Ручна перевірка з меню → одразу пропонуємо встановити (Так/Ні),
+            # без окремого кроку "відкрийте меню треї".
             notes = _fetch_release_notes(latest)
             notes_block = f"\n\nЩо нового:\n{notes}" if notes else ""
-            _msgbox(
+            if _confirm(
                 "Bakery — оновлення",
                 f"Доступна нова версія: {latest}\nПоточна версія: {current}"
                 f"{notes_block}\n\n"
-                f"Натисніть 'Встановити оновлення' у меню треї.",
-                0,
-            )
+                f"Встановити зараз? Сервер буде тимчасово зупинено, "
+                f"резервна копія бази даних збережеться автоматично.",
+            ):
+                _run_install(icon, current, latest)
         elif _notified_version != latest:
-            # balloon лише якщо ще не сповіщали про цю версію
+            # Фонова перевірка — лише balloon, без діалогу
             _notified_version = latest
             _notify(icon, "Bakery — оновлення",
                     f"Доступна нова версія {latest}. Відкрийте меню треї.")
     elif show_if_none:
         _msgbox("Bakery — оновлення", f"Встановлена остання версія: {current}", 0)
+
+
+def _run_install(icon, current: str, latest: str) -> None:
+    """Бекап БД + запуск update.ps1 + зупинка трею.
+
+    Підтвердження НЕ запитує — передбачається що викликач уже підтвердив
+    (через _confirm у action_install_update або _do_check_update).
+    Після icon.stop() watchdog run-tray.ps1 підніме оновлений трей.
+    """
+    _backup_db()
+    _notify(icon, "Bakery — оновлення",
+            f"Встановлення {current} -> {latest}. Сервер буде перезапущено...")
+
+    script = str(ROOT / "scripts" / "update.ps1")
+    subprocess.Popen(
+        ["powershell", "-ExecutionPolicy", "Bypass",
+         "-File", script, "-TargetTag", latest],
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+        cwd=str(ROOT),
+    )
+    icon.stop()
 
 
 def action_install_update(icon, _item=None) -> None:
@@ -605,18 +629,7 @@ def action_install_update(icon, _item=None) -> None:
     ):
         return
 
-    _backup_db()
-    _notify(icon, "Bakery — оновлення",
-            f"Встановлення {current} -> {latest}. Сервер буде перезапущено...")
-
-    script = str(ROOT / "scripts" / "update.ps1")
-    subprocess.Popen(
-        ["powershell", "-ExecutionPolicy", "Bypass",
-         "-File", script, "-TargetTag", latest],
-        creationflags=subprocess.CREATE_NEW_CONSOLE,
-        cwd=str(ROOT),
-    )
-    icon.stop()
+    _run_install(icon, current, latest)
 
 
 def action_rollback(icon, _item=None) -> None:
