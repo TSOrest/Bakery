@@ -1341,6 +1341,11 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 parent_col = cm.get("parent_order_id")
                 access_id_to_order: dict[int, Order] = {}
                 deferred_links: list[tuple[Order, int]] = []
+                # Дедуп базових замовлень: кілька рядків Access на той самий
+                # (клієнт, виріб, дата) зливаються в один Order (qty підсумовується).
+                # Дочірні (переміщення, з Джерело) та обмінні рядки НЕ зливаються.
+                base_order_key: dict[tuple, Order] = {}
+                ep_merged_count = 0
                 for row in reader.rows(order_tname):
                     ep.found += 1
                     date_val = _safe_date(row.get(cm.get("date", "")) if cm.get("date") else None)
@@ -1377,34 +1382,52 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                         ep.skip_reasons["Кількість = 0"] = ep.skip_reasons.get("Кількість = 0", 0) + 1
                         continue
 
-                    o = Order(
-                        client_id=client_id, product_id=prod_id,
-                        qty=qty, order_date=date_val,
-                        source="phone", created_at=now_str, created_by="import",
-                    )
-                    order_objs.append(o)
-                    db.add(o)
-                    ep.imported += 1
-
-                    # Зберігаємо Access ID для маппінгу батько-дитина
-                    if id_col:
-                        try:
-                            aid = int(float(row.get(id_col, 0) or 0))
-                            if aid > 0:
-                                access_id_to_order[aid] = o
-                        except (ValueError, TypeError):
-                            pass
-
-                    # Запам'ятовуємо Джерело для другого проходу
+                    # Визначаємо чи це дочірній рядок (має Джерело/parent)
+                    parent_ref: int | None = None
                     if parent_col:
                         raw_src = row.get(parent_col)
                         if raw_src:
                             try:
                                 v = int(float(raw_src))
                                 if v > 0:
-                                    deferred_links.append((o, v))
+                                    parent_ref = v
                             except (ValueError, TypeError):
                                 pass
+
+                    def _row_aid() -> int | None:
+                        if not id_col:
+                            return None
+                        try:
+                            a = int(float(row.get(id_col, 0) or 0))
+                            return a if a > 0 else None
+                        except (ValueError, TypeError):
+                            return None
+
+                    key = (client_id, prod_id, date_val)
+                    # Дедуп: лише базові (без Джерело) рядки зливаємо за ключем
+                    if parent_ref is None and key in base_order_key:
+                        existing = base_order_key[key]
+                        existing.qty = (existing.qty or 0) + qty
+                        ep_merged_count += 1
+                        aid = _row_aid()
+                        if aid is not None:
+                            access_id_to_order[aid] = existing  # child-лінки вкажуть на злитий
+                    else:
+                        o = Order(
+                            client_id=client_id, product_id=prod_id,
+                            qty=qty, order_date=date_val,
+                            source="phone", created_at=now_str, created_by="import",
+                        )
+                        order_objs.append(o)
+                        db.add(o)
+                        ep.imported += 1
+                        if parent_ref is None:
+                            base_order_key[key] = o
+                        aid = _row_aid()
+                        if aid is not None:
+                            access_id_to_order[aid] = o
+                        if parent_ref is not None:
+                            deferred_links.append((o, parent_ref))
 
                     # Обмін: якщо є колонка і значення > 0 — окремий рядок pre_order
                     if has_exchange_col:
@@ -1436,7 +1459,8 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                     db, order_objs, draft_from=mapping.invoice_draft_from
                 )
                 exch_note = f", обмінів: {ep_exchange_count}" if ep_exchange_count else ""
-                ep.notes = f"Створено {inv_count} накладних ({inv_lines} рядків{exch_note})"
+                merge_note = f", злито дублів: {ep_merged_count}" if ep_merged_count else ""
+                ep.notes = f"Створено {inv_count} накладних ({inv_lines} рядків{exch_note}{merge_note})"
 
             entities["orders"] = ep
 

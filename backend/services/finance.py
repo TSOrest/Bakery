@@ -162,3 +162,40 @@ def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
         created_by   = "system",
     )
     db.add(entry)
+
+
+def recompute_invoice_finance(db: Session, invoice: Invoice) -> None:
+    """Синхронізує борг-запис у finances із поточним invoice.total_sum.
+
+    Викликається після зміни сум накладної (переміщення товару, редагування рядків).
+    - Тільки для accepted-накладних. До accept запис ще не існує — він з'явиться
+      при accept із уже фінальною сумою.
+    - Власний магазин і системні клієнти (shop/writeoff/ration) — борг не ведемо
+      (товар передається, не продається). Старий борг-запис прибираємо якщо є.
+    - Записи оплат (finance_type='payment') не чіпаємо.
+    """
+    if invoice.status != "accepted":
+        return
+
+    client = db.get(Client, invoice.client_id)
+    kind   = (client.client_kind if client else "customer") or "customer"
+
+    existing = (
+        db.query(Finance)
+        .filter(
+            Finance.client_id    == invoice.client_id,
+            Finance.finance_type == "invoice",
+            Finance.notes        == invoice.invoice_number,
+        )
+        .first()
+    )
+
+    if kind != "customer":
+        if existing:
+            db.delete(existing)
+        return
+
+    if existing:
+        existing.amount = round(invoice.total_sum, 2)
+    else:
+        create_invoice_finance_entry(db, invoice)

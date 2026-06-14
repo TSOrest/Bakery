@@ -21,6 +21,14 @@ const STATUS_LABELS: Record<string, string> = {
   virtual_draft: 'Чернетка',
 }
 
+// Префікс-позначка типу клієнта у дропдауні переміщення
+const CLIENT_KIND_PREFIX: Record<string, string> = {
+  shop:     '🏪 ',
+  writeoff: '🗑 ',
+  ration:   '🍞 ',
+  customer: '',
+}
+
 // ─── Форматування дати ─────────────────────────────────────────────────────────
 
 function formatDate(d: string) {
@@ -327,8 +335,8 @@ function VirtualDraftPanel({
 
 interface DetailPanelProps {
   invoice: Invoice
-  corrective: Invoice | null
   client: Client
+  allClients: Client[]
   products: Product[]
   categories: Category[]
   routes: Route[]
@@ -341,13 +349,33 @@ interface DetailPanelProps {
 }
 
 function InvoiceDetailPanel({
-  invoice, corrective, client, products, categories, routes,
+  invoice: invoiceProp, client, allClients, products, categories, routes,
   bakeryName, director, accountant, paymentAmount, onStatusChange, onRefresh,
 }: DetailPanelProps) {
   const productName = (id: number) => {
     const p = products.find((p) => p.id === id)
     return p?.short_name ?? p?.name ?? `#${id}`
   }
+
+  // Локальна копія накладної з transfers (GET /{id} збагачує). Оновлюється
+  // після кожного переміщення без перезавантаження всієї сторінки.
+  const [invoice, setInvoice] = useState<Invoice>(invoiceProp)
+  useEffect(() => { setInvoice(invoiceProp) }, [invoiceProp])
+
+  const reloadInvoice = async () => {
+    const fresh = await api.get<Invoice>(`/invoices/${invoiceProp.id}`)
+    setInvoice(fresh)
+    return fresh
+  }
+  // Підвантажити transfers при першому показі (список не містить transfers)
+  useEffect(() => {
+    let cancel = false
+    api.get<Invoice>(`/invoices/${invoiceProp.id}`)
+      .then((fresh) => { if (!cancel) setInvoice(fresh) })
+      .catch(() => {})
+    return () => { cancel = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceProp.id])
 
   // ── Відправити (draft → sent) ────────────────────────────────────────────────
   const [sending, setSending] = useState(false)
@@ -371,36 +399,53 @@ function InvoiceDetailPanel({
   }
 
 
-  // ── Форма Опрацювання (корекції) ─────────────────────────────────────────────
-  const [showProc, setShowProc]   = useState(false)
-  const [procQtys, setProcQtys]   = useState<Record<number, number>>({})
-  const [procNotes, setProcNotes] = useState('')
-  const [confirming, setConfirming] = useState(false)
+  // ── Корекція: переміщення товару (замість коригуючих накладних) ──────────────
+  const [showCorrect, setShowCorrect] = useState(false)
+  const [moveProductId, setMoveProductId] = useState<number | null>(null)  // який рядок переміщуємо
+  const [moveQty, setMoveQty]           = useState(0)
+  const [moveToClientId, setMoveTo]     = useState<number | null>(null)
+  const [moving, setMoving]             = useState(false)
 
-  const openProc = () => {
-    const qtys: Record<number, number> = {}
-    invoice.lines.forEach((l) => { qtys[l.product_id] = l.qty })
-    setProcQtys(qtys)
-    setShowProc(true)
+  // Дропдаун цілей: магазини + системні + клієнти (без самого себе, без "недопечено")
+  const KIND_ORDER: Record<string, number> = { shop: 0, writeoff: 1, ration: 2, customer: 3 }
+  const moveDestinations = allClients
+    .filter((c) => c.id !== client.id && c.client_kind !== 'underbaked')
+    .sort((a, b) => {
+      const ka = KIND_ORDER[a.client_kind] ?? 99
+      const kb = KIND_ORDER[b.client_kind] ?? 99
+      if (ka !== kb) return ka - kb
+      if (a.route_id !== b.route_id) return (a.route_id ?? 0) - (b.route_id ?? 0)
+      return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
+    })
+
+  const openMove = (productId: number, maxQty: number) => {
+    setMoveProductId(productId)
+    setMoveQty(Math.max(1, Math.floor(maxQty)))
+    setMoveTo(null)
   }
 
-  const handleConfirmProc = async () => {
-    setConfirming(true)
-    const lines = Object.entries(procQtys).map(([pid, qty]) => ({
-      product_id: Number(pid),
-      qty_delivered: qty,
-    }))
-    await api.post<Invoice>(`/invoices/${invoice.id}/corrective`, {
-      payment_amount: paymentAmount,
-      notes: procNotes,
-      lines,
-    })
-    setConfirming(false)
-    setShowProc(false)
-    onRefresh()
+  const handleMove = async () => {
+    if (moveProductId == null || !moveToClientId || moveQty <= 0) return
+    setMoving(true)
+    try {
+      await api.post(`/invoices/${invoice.id}/transfer`, {
+        product_id: moveProductId,
+        qty: moveQty,
+        to_client_id: moveToClientId,
+      })
+      setMoveProductId(null)
+      await reloadInvoice()
+      onRefresh()
+    } finally {
+      setMoving(false)
+    }
   }
 
   const { status } = invoice
+
+  // Анотації переміщень за продуктом
+  const transfersFor = (productId: number) =>
+    (invoice.transfers ?? []).filter((t) => t.product_id === productId)
 
   // ── Групування рядків по категорії ───────────────────────────────────────
   const catMap: Record<number, Category> = {}
@@ -445,32 +490,100 @@ function InvoiceDetailPanel({
             <span className={styles.correctiveBadge}>↩ коригуюча</span>
           )}
         </div>
-        {!showProc && (
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
-              className={styles.btnPrintSingle}
-              onClick={() => window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')}
-            >
-              🖨 Друкувати
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            className={styles.btnPrintSingle}
+            onClick={() => window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')}
+          >
+            🖨 Друкувати
+          </button>
+          {status === 'draft' && (
+            <button className={styles.btnSend} onClick={handleSend} disabled={sending}>
+              {sending ? 'Відправляємо...' : '▶ Відправити'}
             </button>
-            {status === 'draft' && (
-              <button className={styles.btnSend} onClick={handleSend} disabled={sending}>
-                {sending ? 'Відправляємо...' : '▶ Відправити'}
-              </button>
-            )}
-            {(status === 'sent' || status === 'processing') && (
-              <>
-                <button className={styles.btnProcess} onClick={openProc}>
-                  ✏ Внести корекції
-                </button>
-                <button className={styles.btnAccept} onClick={handleAccept} disabled={accepting}>
-                  {accepting ? '...' : '✓ Прийнято'}
-                </button>
-              </>
-            )}
-          </div>
-        )}
+          )}
+          {/* Корекція доступна доки накладна не скасована (включно з accepted —
+              бухгалтер може виправити пізніше) */}
+          {status !== 'cancelled' && status !== 'draft' && (
+            <button
+              className={`${styles.btnProcess} ${showCorrect ? styles.btnProcessActive : ''}`}
+              onClick={() => setShowCorrect((v) => !v)}
+            >
+              {showCorrect ? '✕ Закрити корекцію' : '✏ Корекція / переміщення'}
+            </button>
+          )}
+          {(status === 'sent' || status === 'processing') && (
+            <button className={styles.btnAccept} onClick={handleAccept} disabled={accepting}>
+              {accepting ? '...' : '✓ Прийнято'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* ── Секція корекції (переміщення товару) — НАД накладною ── */}
+      {showCorrect && (
+        <div className={styles.correctPanel}>
+          <div className={styles.correctTitle}>
+            Корекція накладної — переміщення товару
+          </div>
+          <div className={styles.correctHint}>
+            Вкажіть скільки товару передати і кому. Кількість у накладній зменшиться,
+            у цільовій — збільшиться. Суми й оплата перерахуються автоматично.
+          </div>
+          <table className={styles.correctTable}>
+            <thead>
+              <tr>
+                <th>Виріб</th>
+                <th className={styles.numTh}>Залишок</th>
+                <th>Перемістити</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mainLines.map((line) => (
+                <tr key={line.id}>
+                  <td>{productName(line.product_id)}</td>
+                  <td className={styles.numTd}>{line.qty}</td>
+                  <td>
+                    {moveProductId === line.product_id ? (
+                      <div className={styles.moveForm}>
+                        <input
+                          type="number" min={1} max={line.qty} step={1}
+                          value={moveQty}
+                          onChange={(e) => setMoveQty(Math.max(0, Math.min(line.qty, Number(e.target.value))))}
+                          className={styles.moveQtyInput}
+                        />
+                        <select
+                          value={moveToClientId ?? ''}
+                          onChange={(e) => setMoveTo(e.target.value ? Number(e.target.value) : null)}
+                          className={styles.moveSelect}
+                        >
+                          <option value="">— куди —</option>
+                          {moveDestinations.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {CLIENT_KIND_PREFIX[c.client_kind] ?? ''}{c.short_name ?? c.full_name}
+                            </option>
+                          ))}
+                        </select>
+                        <button className={styles.moveConfirm} onClick={handleMove}
+                          disabled={moving || !moveToClientId || moveQty <= 0}>
+                          {moving ? '...' : 'Перемістити'}
+                        </button>
+                        <button className={styles.moveCancel} onClick={() => setMoveProductId(null)}>✕</button>
+                      </div>
+                    ) : (
+                      <button className={styles.moveOpenBtn}
+                        onClick={() => openMove(line.product_id, line.qty)}
+                        disabled={line.qty <= 0}>
+                        ⇄ перемістити
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* ── Документна накладна ── */}
       <div className={styles.paper}>
@@ -526,15 +639,28 @@ function InvoiceDetailPanel({
           {catOrder.map((cid) => (
             <tbody key={cid ?? 'other'}>
               {(groups[String(cid)] ?? []).map((line: InvoiceLine) => (
-                <tr key={line.id}>
-                  <td>{productName(line.product_id)}</td>
-                  <td className={styles.numTd}>{line.qty}</td>
-                  <td className={styles.numTd}>
-                    {(line.price_override ?? line.price).toFixed(2)} ₴
-                    {line.price_override != null && <PriceTypeBadge source="manual" />}
-                  </td>
-                  <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
-                </tr>
+                <React.Fragment key={line.id}>
+                  <tr>
+                    <td>{productName(line.product_id)}</td>
+                    <td className={styles.numTd}>{line.qty}</td>
+                    <td className={styles.numTd}>
+                      {(line.price_override ?? line.price).toFixed(2)} ₴
+                      {line.price_override != null && <PriceTypeBadge source="manual" />}
+                    </td>
+                    <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
+                  </tr>
+                  {transfersFor(line.product_id).map((t) => (
+                    <tr key={`t${t.id}`} className={styles.transferAnnotRow}>
+                      <td colSpan={4} className={
+                        t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
+                      }>
+                        {t.direction === 'out'
+                          ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
+                          : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                      </td>
+                    </tr>
+                  ))}
+                </React.Fragment>
               ))}
               <tr className={styles.subtotalRow}>
                 <td colSpan={3} className={styles.numTd}>
@@ -595,121 +721,6 @@ function InvoiceDetailPanel({
           <div>Відпускає:&nbsp;<em>Диспетчер</em></div>
         </div>
       </div>
-
-      {/* ── Панель Опрацювання ── */}
-      {showProc && (
-        <div className={styles.processingPanel} style={{ maxWidth: 640, margin: '1rem auto 0' }}>
-          <div className={styles.processingTitle}>Опрацювання після повернення водія</div>
-          <div className={styles.cashRow}>
-            <span className={styles.cashLabel}>Нотатка:</span>
-            <input
-              type="text"
-              value={procNotes}
-              onChange={(e) => setProcNotes(e.target.value)}
-              className={styles.notesInput}
-              placeholder="необов'язково"
-            />
-          </div>
-          <table className={styles.procTable}>
-            <thead>
-              <tr>
-                <th>Виріб</th>
-                <th className={styles.numTh}>Відправлено</th>
-                <th className={styles.numTh}>Прийнято</th>
-                <th className={styles.numTh}>Різниця</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.lines.map((line: InvoiceLine) => {
-                const delivered = procQtys[line.product_id] ?? line.qty
-                const diff = line.qty - delivered
-                return (
-                  <tr key={line.id}>
-                    <td>{productName(line.product_id)}</td>
-                    <td className={styles.numTd}>{line.qty}</td>
-                    <td className={styles.numTd}>
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={delivered}
-                        onChange={(e) =>
-                          setProcQtys((p) => ({
-                            ...p,
-                            [line.product_id]: Math.max(0, Number(e.target.value)),
-                          }))
-                        }
-                        className={styles.procInput}
-                      />
-                    </td>
-                    <td className={`${styles.numTd} ${diff > 0 ? styles.diffPos : diff < 0 ? styles.diffNeg : ''}`}>
-                      {diff !== 0 ? (diff > 0 ? `−${diff}` : `+${Math.abs(diff)}`) : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <div className={styles.procActions}>
-            <button className={styles.btnCancel} onClick={() => setShowProc(false)}>
-              Скасувати
-            </button>
-            <button className={styles.btnConfirm} onClick={handleConfirmProc} disabled={confirming}>
-              {confirming ? 'Збереження...' : '✓ Підтвердити'}
-            </button>
-          </div>
-          {/* Кнопки дій у режимі опрацювання */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-            <button
-              className={styles.btnAccept}
-              onClick={handleAccept}
-              disabled={accepting}
-            >
-              {accepting ? '...' : '✓ Прийнято (без корекцій)'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Коригуюча накладна ── */}
-      {corrective && (
-        <div className={styles.correctivePaper}>
-          <div className={styles.correctiveHeader}>
-            <span>↩ Коригуюча накладна №{corrective.invoice_number}</span>
-            <button
-              className={styles.btnPrintSmall}
-              title="Друкувати коригуючу накладну"
-              onClick={() => window.open(`/api/v1/print/invoice/${corrective.id}`, '_blank')}
-            >🖨</button>
-          </div>
-          <table className={styles.paperTable}>
-            <thead>
-              <tr>
-                <th>Виріб</th>
-                <th className={styles.numTh}>Різниця</th>
-                <th className={styles.numTh}>Ціна</th>
-                <th className={styles.numTh}>Сума</th>
-              </tr>
-            </thead>
-            <tbody>
-              {corrective.lines.map((line: InvoiceLine) => (
-                <tr key={line.id}>
-                  <td>{productName(line.product_id)}</td>
-                  <td className={styles.numTd}>{line.qty}</td>
-                  <td className={styles.numTd}>{line.price.toFixed(2)} ₴</td>
-                  <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={{ textAlign: 'right' }}>Різниця:</td>
-                <td className={styles.numTd}>{corrective.total_sum.toFixed(2)} ₴</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
     </>
   )
 }
@@ -796,6 +807,9 @@ export default function RoutesPage() {
 
   useEffect(() => { load(workDate) }, [workDate])
 
+  // Засіяні total_sum — щоб відрізнити "ручну правку оплати" від "зміни суми накладної"
+  const seededTotals = useRef<Record<number, number>>({})
+
   // Автовибір галочок
   useEffect(() => {
     const ids = new Set(
@@ -804,11 +818,18 @@ export default function RoutesPage() {
         .map((i) => i.id)
     )
     setCheckedIds(ids)
-    // Ініціалізуємо суми оплат: для нових накладних — total_sum, для вже прийнятих — не змінюємо
+    // Суми оплат: для нових накладних — total_sum. Якщо total_sum накладної
+    // змінився (корекція/переміщення) — оновлюємо оплату на новий total
+    // (немає сенсу пропонувати стару суму). Ручні правки при незмінному
+    // total зберігаються (seededTotals[id] === inv.total_sum).
     setPaymentAmounts(prev => {
       const next = { ...prev }
       invoices.forEach(inv => {
-        if (!(inv.id in next)) next[inv.id] = inv.total_sum
+        const seeded = seededTotals.current[inv.id]
+        if (!(inv.id in next) || seeded !== inv.total_sum) {
+          next[inv.id] = inv.total_sum
+          seededTotals.current[inv.id] = inv.total_sum
+        }
       })
       return next
     })
@@ -820,9 +841,6 @@ export default function RoutesPage() {
 
   const clientInvoice = (clientId: number) =>
     baseInvoices.find((i) => i.client_id === clientId && i.status !== 'cancelled')
-
-  const correctiveFor = (invoiceId: number) =>
-    invoices.find((i) => i.corrective_for_id === invoiceId) ?? null
 
   // Ордери клієнта: батьківські + отримані переміщення, без надлишків і pending
   const ordersForClient = useMemo(() => {
@@ -1413,8 +1431,8 @@ export default function RoutesPage() {
             <InvoiceDetailPanel
               key={selectedInvoice.id}
               invoice={selectedInvoice}
-              corrective={correctiveFor(selectedInvoice.id)}
               client={selectedClient}
+              allClients={clients.filter((c) => c.is_active)}
               products={products}
               categories={categories}
               routes={routes}

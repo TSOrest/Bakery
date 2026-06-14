@@ -141,6 +141,18 @@ export interface InvoiceLine {
 
 export type InvoiceStatus = 'draft' | 'sent' | 'processing' | 'accepted' | 'cancelled'
 
+export interface InvoiceTransfer {
+  id: number
+  transfer_date: string
+  source_invoice_id: number
+  target_invoice_id: number
+  product_id: number
+  qty: number
+  notes: string | null
+  direction: 'out' | 'in' | null      // відносно запитаної накладної
+  counterparty_name: string | null    // назва клієнта-контрагента
+}
+
 export interface Invoice {
   id: number
   invoice_number: string
@@ -152,6 +164,7 @@ export interface Invoice {
   total_sum: number
   notes: string | null
   lines: InvoiceLine[]
+  transfers?: InvoiceTransfer[]        // переміщення (заповнюється у GET /{id})
 }
 
 export interface FinanceArticle {

@@ -24,13 +24,36 @@ class InvoiceLineCreate(BaseModel):
 
 
 class InvoiceLineQtyUpdate(BaseModel):
-    """Оновлення кількості рядка накладної (тільки в статусі draft)."""
+    """Оновлення кількості рядка накладної."""
     id: int
     qty: float
+    price_override: Optional[float] = None
 
 
 class InvoiceLinesUpdate(BaseModel):
     lines: List[InvoiceLineQtyUpdate]
+
+
+class InvoiceTransferCreate(BaseModel):
+    """Переміщення товару з цієї накладної на іншого клієнта/магазин/систему."""
+    product_id: int
+    qty: float = Field(..., gt=0)
+    to_client_id: int
+    notes: Optional[str] = None
+
+
+class InvoiceTransferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    transfer_date: str
+    source_invoice_id: int
+    target_invoice_id: int
+    product_id: int
+    qty: float
+    notes: Optional[str] = None
+    # Збагачені поля (заповнюються у роутері)
+    direction: Optional[str] = None        # 'out' | 'in' відносно запитаної накладної
+    counterparty_name: Optional[str] = None  # назва клієнта-контрагента
 
 
 class InvoiceLineOut(BaseModel):
@@ -85,3 +108,5 @@ class InvoiceOut(BaseModel):
     total_sum: float
     notes: Optional[str]
     lines: List[InvoiceLineOut] = []
+    # Переміщення товару (для анотацій "куди/звідки"); заповнюється у GET /{id}
+    transfers: List[InvoiceTransferOut] = []

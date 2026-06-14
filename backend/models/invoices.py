@@ -45,3 +45,26 @@ class InvoiceLine(Base):
 
     invoice = relationship("Invoice", back_populates="lines")
     product = relationship("Product")
+
+
+class InvoiceTransfer(Base):
+    """Запис переміщення товару між накладними (стадія Маршрутів).
+
+    Корекція накладної = пряме редагування рядків + запис тут.
+    Дає анотації "куди пішло / звідки прийшло" на обох накладних.
+    """
+    __tablename__ = "invoice_transfers"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    transfer_date     = Column(Text, nullable=False)
+    source_invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
+    target_invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
+    product_id        = Column(Integer, ForeignKey("products.id"), nullable=False)
+    qty               = Column(Float, nullable=False)
+    notes             = Column(Text)
+    created_at        = Column(Text)
+    created_by        = Column(Text)
+
+    source_invoice = relationship("Invoice", foreign_keys=[source_invoice_id])
+    target_invoice = relationship("Invoice", foreign_keys=[target_invoice_id])
+    product        = relationship("Product")

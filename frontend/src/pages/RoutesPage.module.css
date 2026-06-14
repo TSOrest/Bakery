@@ -654,6 +654,109 @@
   font-size: 0.85rem;
 }
 .btnProcess:hover { background: #ca6f1e; }
+.btnProcessActive { background: #b45f15; }
+
+/* ─── Секція корекції (переміщення товару, над накладною) ─────────────────── */
+
+.correctPanel {
+  margin-bottom: 1rem;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  background: #fffdf3;
+  padding: 0.75rem 1rem;
+}
+.correctTitle {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: #7a5800;
+  margin-bottom: 0.25rem;
+}
+.correctHint {
+  font-size: 0.78rem;
+  color: #8a7a4a;
+  margin-bottom: 0.7rem;
+}
+.correctTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+.correctTable th {
+  text-align: left;
+  font-weight: 600;
+  color: #7a5800;
+  border-bottom: 1px solid #ffe082;
+  padding: 0.3rem 0.5rem;
+}
+.correctTable td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #f2ead0;
+  vertical-align: middle;
+}
+
+.moveForm {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.moveQtyInput {
+  width: 60px;
+  padding: 0.22rem 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.84rem;
+  text-align: right;
+  outline: none;
+}
+.moveQtyInput:focus { border-color: #e67e22; }
+.moveSelect {
+  min-width: 150px;
+  padding: 0.22rem 0.3rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 0.84rem;
+  outline: none;
+}
+.moveSelect:focus { border-color: #e67e22; }
+.moveConfirm {
+  padding: 0.26rem 0.7rem;
+  background: #e67e22;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.moveConfirm:hover { background: #ca6f1e; }
+.moveConfirm:disabled { opacity: 0.5; cursor: default; }
+.moveCancel {
+  padding: 0.26rem 0.5rem;
+  background: #fff;
+  color: #888;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.moveCancel:hover { background: #f0f0f0; }
+.moveOpenBtn {
+  padding: 0.24rem 0.7rem;
+  background: #fff;
+  color: #c46210;
+  border: 1px solid #f0c890;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.moveOpenBtn:hover { background: #fef3cd; }
+.moveOpenBtn:disabled { opacity: 0.45; cursor: default; }
+
+/* Анотації переміщень у рядках накладної */
+.transferAnnotRow td { padding: 0.1rem 0.5rem 0.1rem 1.5rem !important; border-top: none !important; }
+.transferOutAnnot { font-size: 0.76rem; color: #d97706; }
+.transferInAnnot  { font-size: 0.76rem; color: #16a34a; }
 
 .btnAccept {
   padding: 0.38rem 1rem;

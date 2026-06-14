@@ -291,6 +291,39 @@ CREATE TABLE invoice_lines (
 **Нумерація накладних:** автоматична відносно дати, формат `YYYYMMDD-NNN`.
 Приклад: перша накладна 15 березня 2026 = `20260315-001`.
 
+```sql
+-- Переміщення товару між накладними на стадії Маршрутів (v1.2.0).
+-- Замінює механізм коригуючих накладних: корекція = пряме редагування рядків
+-- накладної + запис тут (для анотацій "куди пішло / звідки прийшло").
+CREATE TABLE invoice_transfers (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_date     TEXT NOT NULL,
+    source_invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    target_invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    product_id        INTEGER NOT NULL REFERENCES products(id),
+    qty               REAL NOT NULL,
+    notes             TEXT,
+    created_at        TEXT DEFAULT (datetime('now')),
+    created_by        TEXT
+);
+```
+
+**Корекція накладної (v1.2.0) — уніфіковане переміщення замість коригуючих:**
+- `POST /invoices/{id}/transfer {product_id, qty, to_client_id}` — переносить товар
+  з рядка цієї накладної на іншого клієнта / магазин / системного клієнта.
+- Джерело: рядок `qty ↓`, `total_sum ↓`. Ціль: накладна на ту ж дату (створюється
+  якщо нема) — рядок `qty ↑/створюється`, ціна через `get_price`, `total_sum ↑`.
+- Магазин-ціль (`client_kind='shop'`/`is_own_shop=1`): ціль-накладна стає `accepted`
+  → товар одразу у POS (`compute_current_stock`), борг магазину НЕ створюється.
+- Фінанси обох накладних синхронізуються `recompute_invoice_finance` (працює і
+  для вже accepted — оновлює борг-запис; для shop/writeoff/ration борг не ведеться).
+- `PUT /invoices/{id}/lines` розширено: редагування у draft/sent/processing/accepted
+  + перерахунок фінансів. `create_corrective_invoice` лишається лише для перегляду
+  старих коригуючих (новий UI його не викликає).
+- Оплата приймається за фінальною (скоригованою) сумою; фінанси відображають її.
+- Різниця з `/orders/{id}/transfer`: той — стадія чернеток (до накладної, дочірні
+  orders); `/invoices/{id}/transfer` — стадія сформованих накладних.
+
 ### Скасування рейсу
 ```sql
 CREATE TABLE route_cancellations (

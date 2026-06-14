@@ -6,13 +6,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime
 from backend.database import get_db, safe_commit
-from backend.models.invoices import Invoice, InvoiceLine
+from backend.models.invoices import Invoice, InvoiceLine, InvoiceTransfer
+from backend.models.references import Client
 from backend.schemas.invoices import (
-    InvoiceCreate, InvoiceOut,
+    InvoiceCreate, InvoiceOut, InvoiceTransferCreate, InvoiceTransferOut,
     InvoiceLinesUpdate, ProcessingUpdate, AcceptBody,
 )
 from backend.services.invoices import generate_invoice_number, generate_corrective_number
 from backend.services.prices import get_price
+from backend.services.finance import recompute_invoice_finance
 from backend.routers.auth import require_user
 
 router = APIRouter(prefix="/invoices", tags=["Накладні"])
@@ -219,12 +221,42 @@ def generate_from_orders(
     }
 
 
+def _client_label(db: Session, client_id: int) -> str:
+    c = db.get(Client, client_id)
+    return (c.short_name or c.full_name) if c else f"#{client_id}"
+
+
+def _build_transfers(db: Session, invoice_id: int) -> List[InvoiceTransferOut]:
+    """Переміщення для накладної з напрямком (out/in) і назвою контрагента."""
+    rows = (
+        db.query(InvoiceTransfer)
+        .filter(
+            (InvoiceTransfer.source_invoice_id == invoice_id)
+            | (InvoiceTransfer.target_invoice_id == invoice_id)
+        )
+        .order_by(InvoiceTransfer.id)
+        .all()
+    )
+    out: List[InvoiceTransferOut] = []
+    for t in rows:
+        is_out = t.source_invoice_id == invoice_id
+        other_inv_id = t.target_invoice_id if is_out else t.source_invoice_id
+        other_inv = db.get(Invoice, other_inv_id)
+        item = InvoiceTransferOut.model_validate(t)
+        item.direction = "out" if is_out else "in"
+        item.counterparty_name = _client_label(db, other_inv.client_id) if other_inv else "—"
+        out.append(item)
+    return out
+
+
 @router.get("/{invoice_id}", response_model=InvoiceOut)
 def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     inv = db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status_code=404, detail="Накладну не знайдено")
-    return inv
+    out = InvoiceOut.model_validate(inv)
+    out.transfers = _build_transfers(db, invoice_id)
+    return out
 
 
 @router.post("/", response_model=InvoiceOut, status_code=201)
@@ -272,28 +304,162 @@ def update_invoice_lines(
     db: Session = Depends(get_db),
     _=Depends(require_user),
 ):
-    """Оновлює кількості рядків накладної. Тільки в статусі draft."""
+    """Оновлює кількості (і опц. price_override) рядків накладної.
+
+    Дозволено у draft/sent/processing/accepted. Перераховує total_sum.
+    Для accepted — синхронізує фінансовий борг-запис (recompute_invoice_finance).
+    """
     inv = db.get(Invoice, invoice_id)
     if not inv:
         raise HTTPException(status_code=404, detail="Накладну не знайдено")
-    if inv.status != "draft":
-        raise HTTPException(status_code=400, detail="Редагування рядків доступне тільки в статусі draft")
+    if inv.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Скасовану накладну не можна редагувати")
 
-    total = 0.0
     for upd in data.lines:
         line = db.get(InvoiceLine, upd.id)
         if not line or line.invoice_id != invoice_id:
             continue
         line.qty = upd.qty
+        if upd.price_override is not None:
+            line.price_override = upd.price_override
         effective = line.price_override if line.price_override is not None else line.price
         line.sum = round(upd.qty * effective, 2)
-        if not line.is_exchange:
-            total += line.sum
 
-    inv.total_sum = round(total, 2)
+    inv.total_sum = _recalc_total(inv)
+    recompute_invoice_finance(db, inv)
     safe_commit(db)
     db.refresh(inv)
+    out = InvoiceOut.model_validate(inv)
+    out.transfers = _build_transfers(db, invoice_id)
+    return out
+
+
+def _recalc_total(inv: Invoice) -> float:
+    """Сума всіх неробмінних рядків накладної."""
+    return round(sum(l.sum for l in inv.lines if not l.is_exchange), 2)
+
+
+def _resolve_or_create_invoice(db: Session, client_id: int, date: str, route_id: Optional[int]) -> Invoice:
+    """Знайти не-cancelled накладну клієнта на дату або створити нову (status='sent')."""
+    inv = (
+        db.query(Invoice)
+        .filter(
+            Invoice.client_id == client_id,
+            Invoice.invoice_date == date,
+            Invoice.status != "cancelled",
+            Invoice.corrective_for_id.is_(None),
+        )
+        .order_by(Invoice.id)
+        .first()
+    )
+    if inv:
+        return inv
+    client = db.get(Client, client_id)
+    inv = Invoice(
+        invoice_number=generate_invoice_number(db, date),
+        invoice_date=date,
+        client_id=client_id,
+        route_id=route_id if route_id is not None else (client.route_id if client else None),
+        status="sent",
+        total_sum=0.0,
+        created_at=datetime.now().isoformat(),
+    )
+    db.add(inv)
+    db.flush()
     return inv
+
+
+@router.post("/{invoice_id}/transfer", response_model=InvoiceOut)
+def transfer_invoice_line(
+    invoice_id: int,
+    data: InvoiceTransferCreate,
+    db: Session = Depends(get_db),
+    _=Depends(require_user),
+):
+    """Перемістити товар з цієї накладної на іншого клієнта / магазин / систему.
+
+    Джерело: рядок product_id зменшується на qty (total_sum ↓).
+    Ціль: накладна клієнта на ту ж дату (створюється якщо нема) — рядок
+    product_id збільшується/додається (ціна через get_price, total_sum ↑).
+    Власний магазин (shop) → ціль-накладна accepted (товар у POS), без боргу.
+    Фінанси обох накладних синхронізуються (recompute_invoice_finance).
+    Записується InvoiceTransfer для анотацій.
+    """
+    src = db.get(Invoice, invoice_id)
+    if not src:
+        raise HTTPException(status_code=404, detail="Накладну не знайдено")
+    if src.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Скасовану накладну не можна коригувати")
+    if data.to_client_id == src.client_id:
+        raise HTTPException(status_code=400, detail="Не можна переміщати самому собі")
+
+    src_line = next((l for l in src.lines if l.product_id == data.product_id and not l.is_exchange), None)
+    if not src_line:
+        raise HTTPException(status_code=400, detail="У накладній немає цього виробу")
+    if data.qty <= 0 or data.qty > src_line.qty + 1e-9:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Кількість має бути 0 < qty ≤ {src_line.qty:g}",
+        )
+
+    target_client = db.get(Client, data.to_client_id)
+    if not target_client:
+        raise HTTPException(status_code=404, detail="Цільового клієнта не знайдено")
+    is_shop = (target_client.client_kind == "shop") or (target_client.is_own_shop == 1)
+
+    # 1. Джерело: зменшити рядок
+    src_line.qty = round(src_line.qty - data.qty, 4)
+    src_eff = src_line.price_override if src_line.price_override is not None else src_line.price
+    src_line.sum = round(src_line.qty * src_eff, 2)
+    src.total_sum = _recalc_total(src)
+
+    # 2. Ціль: знайти/створити накладну + рядок
+    tgt = _resolve_or_create_invoice(db, data.to_client_id, src.invoice_date, src.route_id)
+    tgt_line = next((l for l in tgt.lines if l.product_id == data.product_id and not l.is_exchange), None)
+    if tgt_line:
+        tgt_line.qty = round(tgt_line.qty + data.qty, 4)
+        eff = tgt_line.price_override if tgt_line.price_override is not None else tgt_line.price
+        tgt_line.sum = round(tgt_line.qty * eff, 2)
+    else:
+        price = get_price(db, data.product_id, data.to_client_id, src.invoice_date)
+        # append у relationship-колекцію (не db.refresh — щоб не стерти зміни)
+        tgt.lines.append(InvoiceLine(
+            invoice_id=tgt.id,
+            product_id=data.product_id,
+            qty=data.qty,
+            price=price,
+            price_override=None,
+            is_exchange=0,
+            is_stale=0,
+            sum=round(data.qty * price, 2),
+        ))
+    tgt.total_sum = _recalc_total(tgt)
+
+    # 3. Магазин — товар одразу у POS: accepted-накладна, без боргу
+    if is_shop and tgt.status != "accepted":
+        tgt.status = "accepted"
+
+    # 4. Леджер переміщення
+    db.add(InvoiceTransfer(
+        transfer_date=src.invoice_date,
+        source_invoice_id=src.id,
+        target_invoice_id=tgt.id,
+        product_id=data.product_id,
+        qty=data.qty,
+        notes=data.notes,
+        created_at=datetime.now().isoformat(),
+        created_by="operator",
+    ))
+
+    # 5. Фінанси обох накладних
+    recompute_invoice_finance(db, src)
+    recompute_invoice_finance(db, tgt)
+
+    safe_commit(db)
+    db.refresh(src)
+    out = InvoiceOut.model_validate(src)
+    out.transfers = _build_transfers(db, src.id)
+    return out
 
 
 @router.put("/{invoice_id}/status", response_model=InvoiceOut)
