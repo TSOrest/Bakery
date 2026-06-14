@@ -4,6 +4,20 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
+import { api } from '../api/client'
+
+/** Витягує detail-повідомлення з помилки api-клієнта ("STATUS TEXT: {json}"). */
+function apiErrText(e: unknown, fallback: string): string {
+  const m = e instanceof Error ? e.message : String(e)
+  const match = m.match(/:\s*(\{[\s\S]*\})\s*$/)
+  if (match) {
+    try {
+      const j = JSON.parse(match[1])
+      if (j.detail) return typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch { /* ignore */ }
+  }
+  return m || fallback
+}
 import {
   uploadAccdb,
   runImport,
@@ -848,25 +862,17 @@ function StepExecution({
       // negative diff → Access shows less debt → add invoice-like record (sign=-1)
       const sign = diff > 0 ? 1 : -1
       const amount = Math.abs(diff)
-      const res = await fetch('/api/v1/finances/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_id:    clientId,
-          finance_date: new Date().toISOString().slice(0, 10),
-          finance_type: 'payment',
-          amount,
-          sign,
-          notes: 'Корекція імпорту (баланс Access)',
-        }),
+      await api.post('/finances/', {
+        client_id:    clientId,
+        finance_date: new Date().toISOString().slice(0, 10),
+        finance_type: 'payment',
+        amount,
+        sign,
+        notes: 'Корекція імпорту (баланс Access)',
       })
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}))
-        throw new Error(e.detail ?? 'Помилка корекції')
-      }
       setCorrected(s => new Set(s).add(clientId))
-    } catch (e: any) {
-      setCorrErr(prev => ({ ...prev, [clientId]: e.message }))
+    } catch (e: unknown) {
+      setCorrErr(prev => ({ ...prev, [clientId]: apiErrText(e, 'Помилка корекції') }))
     } finally {
       setCorrecting(s => { const n = new Set(s); n.delete(clientId); return n })
     }
@@ -883,18 +889,10 @@ function StepExecution({
     setPriceErr(prev => { const n = { ...prev }; delete n[productId]; return n })
     try {
       const today = new Date().toISOString().slice(0, 10)
-      const res = await fetch('/api/v1/prices/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_id: productId, price: val, valid_from: today, is_active: 1 }),
-      })
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}))
-        throw new Error(e.detail ?? 'Помилка збереження ціни')
-      }
+      await api.post('/prices/', { product_id: productId, price: val, valid_from: today, is_active: 1 })
       setPriceSaved(s => new Set(s).add(productId))
-    } catch (e: any) {
-      setPriceErr(prev => ({ ...prev, [productId]: e.message }))
+    } catch (e: unknown) {
+      setPriceErr(prev => ({ ...prev, [productId]: apiErrText(e, 'Помилка збереження ціни') }))
     } finally {
       setPriceSaving(s => { const n = new Set(s); n.delete(productId); return n })
     }
@@ -910,19 +908,11 @@ function StepExecution({
           product_id: productId, price: r.price, valid_from: r.valid_from, is_active: 1,
         }
         if (r.valid_to) body.valid_to = r.valid_to
-        const res = await fetch('/api/v1/prices/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}))
-          throw new Error(e.detail ?? 'Помилка збереження ціни')
-        }
+        await api.post('/prices/', body)
       }
       setPriceSaved(s => new Set(s).add(productId))
-    } catch (e: any) {
-      setPriceErr(prev => ({ ...prev, [productId]: e.message }))
+    } catch (e: unknown) {
+      setPriceErr(prev => ({ ...prev, [productId]: apiErrText(e, 'Помилка збереження ціни') }))
     } finally {
       setPriceSaving(s => { const n = new Set(s); n.delete(productId); return n })
     }
@@ -1321,7 +1311,7 @@ export default function ImportPage({ onClose }: Props) {
   const checkExistingData = async () => {
     try {
       const data: { total: number; counts: Record<string, number> } =
-        await fetch('/api/v1/import/db-status').then(r => r.json())
+        await api.get('/import/db-status')
       setExistingCount(data.total)
       const LABELS: Record<string, string> = {
         clients: 'клієнтів', products: 'виробів', routes: 'маршрутів',
@@ -1341,25 +1331,20 @@ export default function ImportPage({ onClose }: Props) {
   const handleReset = async () => {
     setResetBusy(true); setResetErr('')
     try {
-      const res = await fetch('/api/v1/settings/reset-db', { method: 'POST' })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(data.detail ?? res.statusText)
-      }
+      await api.post('/settings/reset-db', null)
       setResetModal(false)
       setResetConfirm('')
       await checkExistingData()
       getImportContext().then(setContext).catch(() => {})
-    } catch (e: any) {
-      setResetErr(String(e.message ?? e))
+    } catch (e: unknown) {
+      setResetErr(apiErrText(e, 'Помилка очищення бази'))
     } finally { setResetBusy(false) }
   }
 
   // Checks on mount
   useEffect(() => {
-    fetch('/api/v1/import/driver-check')
-      .then(r => r.json())
-      .then(data => { setDriverErr(data.ok ? null : data.error); setDriverChecked(true) })
+    api.get<{ ok: boolean; error?: string }>('/import/driver-check')
+      .then(data => { setDriverErr(data.ok ? null : (data.error ?? null)); setDriverChecked(true) })
       .catch(() => setDriverChecked(true))
 
     checkExistingData()
