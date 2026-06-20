@@ -1,7 +1,13 @@
 """FastAPI — точка входу застосунку Пекарня."""
 
 import os
+import logging
 from pathlib import Path
+
+# Рівень у логах backend: повідомлення з backend.* ідуть у stderr із чітким префіксом рівня
+# (ERROR: / WARNING: / INFO:). Конвеєр run-server.ps1 додає дату й пише у файл дня
+# (bakery-YYYY-MM-DD.log), звідки їх читає переглядач логів (log_viewer.py).
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -193,18 +199,24 @@ def health():
 # ── Статичний фронтенд (production) ──────────────────────────────────────────
 # Якщо frontend/dist існує — роздаємо його. Vite dev server не потрібен.
 
-_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+_DIST   = Path(__file__).parent.parent / "frontend" / "dist"
+_ASSETS = _DIST / "assets"
+_INDEX  = _DIST / "index.html"
 
-if _DIST.exists():
+# Монтуємо ресурси лише якщо вони реально існують — інакше сервер падав би під час
+# перезбірки фронтенду (vite очищає dist на початку `build`, тож є вікно без assets)
+# та у dev-режимі (Vite окремо на 5173). Перевіряємо КОНКРЕТНІ шляхи, не лише папку dist.
+if _ASSETS.is_dir():
     # Статичні ресурси (js, css, assets)
-    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+    app.mount("/assets", StaticFiles(directory=_ASSETS), name="assets")
 
+if _INDEX.is_file():
     # POS-додаток: /pos та /pos/ отримують pos.html (окремий PWA маніфест)
     _POS_HTML = _DIST / "pos.html"
     @app.get("/pos", include_in_schema=False)
     @app.get("/pos/", include_in_schema=False)
     async def pos_app():
-        return FileResponse(_POS_HTML if _POS_HTML.exists() else _DIST / "index.html")
+        return FileResponse(_POS_HTML if _POS_HTML.exists() else _INDEX)
 
     # SPA fallback: будь-який невідомий шлях → index.html (React Router)
     @app.get("/{full_path:path}", include_in_schema=False)
@@ -212,4 +224,9 @@ if _DIST.exists():
         file = _DIST / full_path
         if file.is_file():
             return FileResponse(file)
-        return FileResponse(_DIST / "index.html")
+        return FileResponse(_INDEX)
+else:
+    logging.getLogger("backend.main").warning(
+        "frontend/dist не зібрано (немає index.html) — SPA не роздається, працює лише API. "
+        "Якщо це не dev-режим — виконайте npm run build."
+    )

@@ -489,7 +489,7 @@ def get_trends(days: int = 30, db: Session = Depends(get_db)):
         .filter(
             Invoice.invoice_date >= start, Invoice.invoice_date <= end,
             Invoice.status.in_(["accepted", "sent", "processing"]),
-            InvoiceLine.is_exchange == 0,
+            InvoiceLine.line_kind != "exchange",
         )
         .group_by(Product.id, Product.name)
         .order_by(func.sum(InvoiceLine.qty).desc())
@@ -515,7 +515,7 @@ def get_trends(days: int = 30, db: Session = Depends(get_db)):
         .filter(
             Invoice.invoice_date >= start, Invoice.invoice_date <= end,
             Invoice.status.in_(["accepted", "sent", "processing"]),
-            InvoiceLine.is_exchange == 0,
+            InvoiceLine.line_kind != "exchange",
         )
         .group_by(Category.id, Category.name)
         .order_by(func.sum(InvoiceLine.sum).desc())

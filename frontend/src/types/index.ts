@@ -128,14 +128,15 @@ export interface ShortageClientInfo {
   effective_price: number
 }
 
+export type LineKind = 'normal' | 'exchange' | 'stale' | 'surplus'
+
 export interface InvoiceLine {
   id: number
   product_id: number
   qty: number
   price: number
   price_override: number | null
-  is_exchange: number
-  is_stale: number
+  line_kind: LineKind
   sum: number
 }
 
@@ -151,6 +152,7 @@ export interface InvoiceTransfer {
   notes: string | null
   direction: 'out' | 'in' | null      // відносно запитаної накладної
   counterparty_name: string | null    // назва клієнта-контрагента
+  counterparty_kind: string | null    // client_kind контрагента (underbaked → «Знято недопечене»)
 }
 
 export interface Invoice {
@@ -303,7 +305,8 @@ export interface BulkOrderUpsertResponse {
 
 export type ClientState =
   | 'no_activity'    // активний клієнт, немає замовлень і накладної
-  | 'virtual_draft'  // є замовлення, але немає накладної
+  | 'needs_invoice'  // є замовлення, але накладну ще не сформовано
+  | 'draft'          // накладна-чернетка (з номером і рядками)
   | 'sent'
   | 'processing'
   | 'accepted'

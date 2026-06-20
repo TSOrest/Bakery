@@ -19,8 +19,7 @@ class InvoiceLineCreate(BaseModel):
     qty: float = Field(..., example=10, ge=0)
     price: float = Field(..., example=25.0, ge=0)
     price_override: Optional[float] = Field(None, example=None)
-    is_exchange: int = Field(default=0, ge=0, le=1)
-    is_stale: int = Field(default=0, ge=0, le=1)
+    line_kind: str = Field(default="normal", example="normal")  # normal|exchange|stale|surplus
 
 
 class InvoiceLineQtyUpdate(BaseModel):
@@ -42,6 +41,18 @@ class InvoiceTransferCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class SetSurplusBody(BaseModel):
+    """Долити/змінити/видалити надлишок випічки у накладну магазину (line_kind='surplus').
+
+    qty = абсолютна кількість надлишку цього виробу в накладній магазину; 0 = видалити рядок.
+    """
+    shop_client_id: int
+    product_id: int
+    qty: float = Field(..., ge=0)
+    date: str
+    notes: Optional[str] = None
+
+
 class InvoiceTransferOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -52,8 +63,9 @@ class InvoiceTransferOut(BaseModel):
     qty: float
     notes: Optional[str] = None
     # Збагачені поля (заповнюються у роутері)
-    direction: Optional[str] = None        # 'out' | 'in' відносно запитаної накладної
+    direction: Optional[str] = None          # 'out' | 'in' відносно запитаної накладної
     counterparty_name: Optional[str] = None  # назва клієнта-контрагента
+    counterparty_kind: Optional[str] = None  # client_kind контрагента (для виноски «Знято недопечене»)
 
 
 class InvoiceLineOut(BaseModel):
@@ -63,8 +75,7 @@ class InvoiceLineOut(BaseModel):
     qty: float
     price: float
     price_override: Optional[float]
-    is_exchange: int
-    is_stale: int
+    line_kind: str
     sum: float
 
 

@@ -43,10 +43,34 @@ def _shop_clients(db: Session) -> List[Client]:
     ).all()
 
 
+def _shop_invoice_dates(db: Session, shop_client_id: int, date_from: str, date_to: str) -> set[str]:
+    """Дати, на які в магазину вже є накладна (не cancelled).
+    У ці дати надходження рахуються через накладну магазину, а не через сирі
+    замовлення (origin_id IS NULL/0) — уникнення подвійного рахунку. Поки накладна
+    магазину чернетка (до «Закрити») — товар не рахується ніде (прихований); після
+    закриття (accepted) — рахується через накладну."""
+    rows = (
+        db.query(Invoice.invoice_date)
+        .filter(
+            Invoice.client_id == shop_client_id,
+            Invoice.status != "cancelled",
+            Invoice.corrective_for_id.is_(None),
+            Invoice.invoice_date >= date_from,
+            Invoice.invoice_date <= date_to,
+        )
+        .distinct()
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
 def _received_from_bakery(db: Session, shop_client_id: int, date_from: str, date_to: str) -> dict[int, float]:
     """Надходження з випічки для summary (total per product_id).
-    Враховує звичайні замовлення (origin_id IS NULL) і надлишки (origin_id=0)."""
-    rows = (
+    Сирі замовлення магазину (origin_id IS NULL/0) рахуються лише на дати БЕЗ накладної
+    магазину (legacy/імпорт). На дати з накладною — товар іде через накладну (див.
+    _received_from_invoices), щоб не було подвійного рахунку."""
+    inv_dates = _shop_invoice_dates(db, shop_client_id, date_from, date_to)
+    q = (
         db.query(Order.product_id, func.sum(Order.qty).label("total"))
         .filter(
             Order.client_id == shop_client_id,
@@ -54,9 +78,10 @@ def _received_from_bakery(db: Session, shop_client_id: int, date_from: str, date
             Order.order_date >= date_from,
             Order.order_date <= date_to,
         )
-        .group_by(Order.product_id)
-        .all()
     )
+    if inv_dates:
+        q = q.filter(Order.order_date.notin_(inv_dates))
+    rows = q.group_by(Order.product_id).all()
     return {r.product_id: float(r.total) for r in rows}
 
 
@@ -78,8 +103,11 @@ def _received_from_receipts(db: Session, shop_client_id: int, date_from: str, da
 def _received_from_bakery_batched(
     db: Session, shop_client_id: int, date_from: str, date_to: str
 ) -> dict[tuple[int, str], float]:
-    """Надходження з випічки для звірки — розбиті по (product_id, order_date)."""
-    rows = (
+    """Надходження з випічки для звірки — розбиті по (product_id, order_date).
+    Сирі замовлення магазину (origin_id IS NULL/0) рахуються лише на дати БЕЗ накладної
+    магазину (legacy/імпорт); на дати з накладною — товар іде через накладну магазину."""
+    inv_dates = _shop_invoice_dates(db, shop_client_id, date_from, date_to)
+    q = (
         db.query(Order.product_id, Order.order_date, func.sum(Order.qty).label("total"))
         .filter(
             Order.client_id == shop_client_id,
@@ -87,9 +115,10 @@ def _received_from_bakery_batched(
             Order.order_date >= date_from,
             Order.order_date <= date_to,
         )
-        .group_by(Order.product_id, Order.order_date)
-        .all()
     )
+    if inv_dates:
+        q = q.filter(Order.order_date.notin_(inv_dates))
+    rows = q.group_by(Order.product_id, Order.order_date).all()
     return {(r.product_id, r.order_date): float(r.total) for r in rows}
 
 
@@ -120,8 +149,7 @@ def _received_from_invoices(db: Session, shop_client_id: int, date_from: str, da
             Invoice.status == "accepted",
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,
-            InvoiceLine.is_exchange == 0,
-            InvoiceLine.is_stale == 0,
+            InvoiceLine.line_kind.notin_(["exchange", "stale"]),  # normal + surplus = надходження
         )
         .group_by(InvoiceLine.product_id)
         .all()
@@ -145,8 +173,7 @@ def _received_from_invoices_batched(
             Invoice.status == "accepted",
             Invoice.invoice_date >= date_from,
             Invoice.invoice_date <= date_to,
-            InvoiceLine.is_exchange == 0,
-            InvoiceLine.is_stale == 0,
+            InvoiceLine.line_kind.notin_(["exchange", "stale"]),  # normal + surplus = надходження
         )
         .group_by(InvoiceLine.product_id, Invoice.invoice_date)
         .all()
@@ -689,6 +716,7 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
 
     bakery_b    = _received_from_bakery_batched(db, data.shop_client_id, eff_from, data.period_to)
     ext_b       = _received_from_receipts_batched(db, data.shop_client_id, eff_from, data.period_to)
+    inv_b       = _received_from_invoices_batched(db, data.shop_client_id, eff_from, data.period_to)
     carry_overs = _carry_over_lines(db, data.shop_client_id, data.period_from)
 
     # Збираємо всі (product_id, batch_date) → {opening, received}
@@ -705,6 +733,9 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
     for (pid, d), qty in bakery_b.items():
         _ensure(pid, d)['received'] += qty
     for (pid, d), qty in ext_b.items():
+        _ensure(pid, d)['received'] += qty
+    # Прийняті накладні магазину (надлишки після «Закрити накладну магазину» + переміщення)
+    for (pid, d), qty in inv_b.items():
         _ensure(pid, d)['received'] += qty
 
     # Початковий залишок — якщо немає закритих звірок АБО остання закрита порожня
@@ -1089,8 +1120,14 @@ def refresh_received(rec_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Звірку вже підтверджено")
 
     eff_from = _effective_date_from(db, rec.shop_client_id, rec.period_from)
-    bakery_b = _received_from_bakery_batched(db, rec.shop_client_id, eff_from, rec.period_to)
-    ext_b    = _received_from_receipts_batched(db, rec.shop_client_id, eff_from, rec.period_to)
+    bakery_raw = _received_from_bakery_batched(db, rec.shop_client_id, eff_from, rec.period_to)
+    ext_b      = _received_from_receipts_batched(db, rec.shop_client_id, eff_from, rec.period_to)
+    inv_b      = _received_from_invoices_batched(db, rec.shop_client_id, eff_from, rec.period_to)
+    # Об'єднуємо надходження з пекарні (звичайні) і прийнятих накладних магазину
+    # (надлишки після «Закрити» + переміщення) в одну мапу received-по-партіях.
+    bakery_b: dict[tuple[int, str], float] = dict(bakery_raw)
+    for k, v in inv_b.items():
+        bakery_b[k] = bakery_b.get(k, 0.0) + v
 
     # ── Крок 1: нормалізація NULL-рядків старого формату ──────────────────────
     # Старий формат зберігав received у NULL-рядку — скидаємо до 0.

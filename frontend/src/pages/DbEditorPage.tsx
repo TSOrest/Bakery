@@ -124,8 +124,7 @@ const COLUMN_HINTS: Record<string, Record<string, string>> = {
   invoice_lines: {
     price:          'Базова ціна рядка на момент формування накладної.',
     price_override: 'Ціна-override для цього рядка. NULL = використовується price.',
-    is_exchange:    '1 = рядок обміну (несвіжий товар замінюється свіжим).',
-    is_stale:       '1 = несвіжий товар.',
+    line_kind:      "Тип рядка: 'normal' (звичайний), 'exchange' (обмін), 'stale' (несвіжий), 'surplus' (надлишок випічки в магазин).",
     sum:            'Підсумок рядка = qty × COALESCE(price_override, price).',
   },
   prices: {

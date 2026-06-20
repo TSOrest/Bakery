@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, memo } from 'react'
+import { useEffect, useMemo, useRef, useState, memo } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import HelpTip from '../components/HelpTip'
 import { useConfirm } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
 import type {
-  BakingTask, Category, Client, Order, Product, ShortageClientInfo,
+  BakingTask, Category, Client, Invoice, Order, Product,
 } from '../types'
 import styles from './BakingPage.module.css'
 
@@ -16,83 +16,96 @@ const KIND_ICON: Record<string, string> = {
   customer: '',
 }
 
-// ─── Єдина панель розбіжності (надлишок / нестача / конфлікт) ─────────────────
+// Рядок деталізації недопеченого по клієнту/магазину
+interface ClientRow {
+  client_id:   number
+  name:        string
+  is_shop:     boolean
+  order_qty:   number       // Заказ
+  invoice_qty: number       // В накладних (фактична к-сть у рядку)
+  invoice_adj: number       // В накладних без перерозподілів (для «Замовлено»/«Корекцій»)
+  invoice_id:  number | null
+  line_id:     number | null
+}
+
+// Переміщення товару за дату (GET /invoices/transfers-by-date)
+interface TransferByDate {
+  product_id:       number
+  qty:              number
+  source_client_id: number | null
+  source_kind:      string | null
+  target_client_id: number | null
+  target_kind:      string | null
+}
+
+// Розподілений надлишок — з двох джерел: рядок накладної магазину (line_kind='surplus')
+// або Order origin_id=0 (пайок/списання).
+interface SurplusLine {
+  key:        string                // унікальний (inv-<lineId> / ord-<orderId>)
+  client_id:  number
+  product_id: number
+  qty:        number
+  notes:      string | null
+  kind:       'invoice' | 'order'
+  order_id?:  number                // kind='order'
+  invoice_id?: number               // kind='invoice'
+  line_id?:   number                // kind='invoice'
+}
+
+// ─── Єдина панель розбіжності (надлишок / недопечене) ─────────────────────────
 
 interface DiscrepancyPanelProps {
-  task:         BakingTask
+  task:         BakingTask     // ordered_qty = «Замовлено» (із замовлень)
   productName:  string
   clients:      Client[]
-  surplusLines: Order[]     // origin_id=0 для цього продукту (зі стану батька)
+  surplusLines: SurplusLine[]  // розподіл надлишку (накладна магазину + пайок/списання)
+  clientRows:   ClientRow[]    // деталізація Заказ / В накладних по клієнтах і магазинах
+  shopRemovedDone: number      // фактично знято на «Недопечено» (з переміщень)
+  underbakedClientId: number | null
   workDate:     string
   routeReserve: boolean
-  onSurplusLineAdded:   (o: Order)   => void
-  onSurplusLineDeleted: (id: number) => void
-  onSurplusLineUpdated: (o: Order)   => void
-  onShortageChanged:    () => void   // перезавантажити underbakedOrders у батьку
+  onReload:     () => void | Promise<void>   // перечитати дані після зміни
 }
 
 const DiscrepancyPanel = memo(function DiscrepancyPanel({
-  task, productName, clients, surplusLines, workDate, routeReserve,
-  onSurplusLineAdded, onSurplusLineDeleted, onSurplusLineUpdated, onShortageChanged,
+  task, productName, clients, surplusLines, clientRows, shopRemovedDone, underbakedClientId,
+  workDate, routeReserve, onReload,
 }: DiscrepancyPanelProps) {
   const toast = useToast()
+  const [editQty,     setEditQty]     = useState<Record<string, string>>({})
+  const [addClientId, setAddClientId] = useState<number | ''>('')
+  const [addQty,      setAddQty]      = useState('')
+  const [addNotes,    setAddNotes]    = useState('')
+  const [addSaving,   setAddSaving]   = useState(false)
+  const [reduceQty,   setReduceQty]   = useState<Record<number, string>>({})  // line_id → к-сть зняття
+  const [reducing,    setReducing]    = useState(false)
 
-  const [clientRows,     setClientRows]     = useState<ShortageClientInfo[]>([])
-  const [childOrders,    setChildOrders]    = useState<Order[]>([])
-  const [reductions,     setReductions]     = useState<Record<number, number>>({})
-  const [editReductions, setEditReductions] = useState<Record<number, string>>({})
-  const [editQty,        setEditQty]        = useState<Record<number, string>>({})
-  const [loading,        setLoading]        = useState(true)
-  const [applying,       setApplying]       = useState(false)
-  const [addClientId,    setAddClientId]    = useState<number | ''>('')
-  const [addQty,         setAddQty]         = useState('')
-  const [addNotes,       setAddNotes]       = useState('')
-  const [addSaving,      setAddSaving]      = useState(false)
+  // ── Обчислення стану: Відхилення = Спечено − Замовлено ──────────────────────
+  // Корекції накладних (зменшення клієнта, перенесення, списання, пайок) перерозподіляють
+  // уже спечене і НЕ впливають на потребу. Тому база — «Замовлено», а не «В накладних».
+  const baked  = task.baked_qty ?? 0
+  // «Замовлено» (потреба) = Σ max(замовлено, в_накладних_без_перерозподілу)
+  const demand = clientRows.reduce((s, r) => s + Math.max(r.order_qty, r.invoice_adj), 0)
+  // shopRemovedDone — фактично знято на «Недопечено» (приходить з parent: сума переміщень)
+  const rawDiff       = baked - demand              // + перепечено, − недопечено
+  const surplus       = Math.max(0,  rawDiff)
+  const shortageTotal = Math.max(0, -rawDiff)
+  const shortage      = Math.max(0, shortageTotal - shopRemovedDone)  // ще зняти з магазину
 
-  const underbakedClient = clients.find(c => c.client_kind === 'underbaked')
-
-  const loadRows = async () => {
-    setLoading(true)
-    const data = await api.get<ShortageClientInfo[]>(
-      `/baking/shortage-clients?task_date=${task.task_date}&product_id=${task.product_id}`
-    )
-    setClientRows(data)
-    if (underbakedClient) {
-      const parentIds = new Set(data.map(c => c.order_id))
-      const all = await api.get<Order[]>(
-        `/orders/?order_date=${task.task_date}&client_id=${underbakedClient.id}`
-      )
-      setChildOrders(all.filter(o => o.parent_order_id && parentIds.has(o.parent_order_id)))
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { loadRows() }, [task.task_date, task.product_id])
-
-  // ── Обчислення стану ──────────────────────────────────────────────────────
-  const rawDiff  = (task.baked_qty ?? 0) - task.ordered_qty  // + надлишок, - нестача
-  const surplus  = Math.max(0,  rawDiff)
-  const shortage = Math.max(0, -rawDiff)
-
-  const surplusAlloc       = surplusLines.reduce((s, l) => s + l.qty, 0)
-  const totalExistingReduc = clientRows.reduce((s, c) => s + c.existing_reduction, 0)
-  const totalNewReduc      = Object.values(reductions).reduce((s, v) => s + v, 0)
-
+  const surplusAlloc     = surplusLines.reduce((s, l) => s + l.qty, 0)
   const surplusRemaining = surplus - surplusAlloc
-  const overAllocation   = surplusAlloc > surplus        // розподілено більше ніж є
-  const overReduction    = Math.max(0, totalExistingReduc - shortage)
-  const hasConflict      = rawDiff <= 0 && surplusAlloc > 0  // нестача/рівність але є записи розподілу
-  const effectiveDiff    = rawDiff - surplusAlloc + totalExistingReduc
+  const overAllocation   = surplusAlloc > surplus
+  const hasConflict      = rawDiff <= 0 && surplusAlloc > 0
+  const effectiveDiff    = rawDiff + shopRemovedDone - surplusAlloc
 
-  const showSurplusSection  = surplusAlloc > 0 || rawDiff > 0
-  const showShortageSection = shortage > 0 || totalExistingReduc > 0
-
-  // Коли показувати edit/delete
+  const showSurplusSection  = surplusAlloc > 0 || surplus > 0
+  // Деталізацію по клієнтах показуємо при недопеченому або якщо вже знято з магазину
+  // (не зникає після вирівнювання). Перепечене вирішується через розподіл надлишку вище.
+  const showShortageSection = !hasConflict && (shortageTotal > 0 || shopRemovedDone > 0)
   const surplusRowsEditable  = overAllocation || hasConflict
-  const shortageRowsEditable = overReduction > 0
 
   // ── Стиль панелі ──────────────────────────────────────────────────────────
-  const isPerfect  = effectiveDiff === 0 && !hasConflict && totalNewReduc === 0
+  const isPerfect  = effectiveDiff === 0 && !hasConflict
   const panelClass = isPerfect
     ? styles.surplusPanel
     : hasConflict || effectiveDiff < 0
@@ -104,111 +117,115 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
     ? styles.shortagePanelHeader
     : styles.surplusPanelHeaderPartial
 
-  // ── Клієнти для select (додавання надлишку) ───────────────────────────────
-  const shopClients     = clients.filter(c => c.is_active && c.client_kind === 'shop')
+  // ── Отримувачі надлишку: магазин / пайок / списання ───────────────────────
+  const shopClients     = clients.filter(c => c.is_active && (c.client_kind === 'shop' || c.is_own_shop === 1))
   const rationClients   = clients.filter(c => c.is_active && c.client_kind === 'ration')
   const writeoffClients = clients.filter(c => c.is_active && c.client_kind === 'writeoff')
-  const customerClients = clients.filter(c => c.is_active && c.client_kind === 'customer')
-  const firstId = (shopClients[0] ?? rationClients[0] ?? writeoffClients[0] ?? customerClients[0])?.id
+  const firstId = (shopClients[0] ?? rationClients[0] ?? writeoffClients[0])?.id
   const effectiveAddClientId = addClientId !== '' ? addClientId : (firstId ?? '')
 
   const clientName = (id: number) => {
-    const c = clients.find(c => c.id === id)
+    const c = clients.find(x => x.id === id)
     return c ? (c.short_name ?? c.full_name) : `#${id}`
   }
-
   const renderClientOption = (c: Client) => (
     <option key={c.id} value={c.id}>
       {KIND_ICON[c.client_kind] ? `${KIND_ICON[c.client_kind]} ` : ''}{c.short_name ?? c.full_name}
     </option>
   )
 
-  // ── Surplus actions ───────────────────────────────────────────────────────
+  // ── Розподіл надлишку: магазин → рядок накладної (set-surplus); пайок/списання → Order ──
+  const isShopTarget = (clientId: number) => {
+    const c = clients.find(x => x.id === clientId)
+    return !!c && (c.client_kind === 'shop' || c.is_own_shop === 1)
+  }
+
   const handleAddSurplus = async () => {
     const qtyNum = Number(addQty)
-    if (!qtyNum || qtyNum <= 0 || !effectiveAddClientId) return
+    const targetId = Number(effectiveAddClientId)   // 'route'/'' → NaN, відсіюється нижче
+    if (!qtyNum || qtyNum <= 0 || !targetId || Number.isNaN(targetId)) return
     if (qtyNum > surplusRemaining) return
     setAddSaving(true)
-    const order = await api.post<Order>('/orders/', {
-      client_id:  effectiveAddClientId,
-      product_id: task.product_id,
-      qty:        qtyNum,
-      order_date: workDate,
-      origin_id:  0,
-      notes:      addNotes.trim() || null,
-    })
-    onSurplusLineAdded(order)
-    setAddQty('')
-    setAddNotes('')
-    setAddSaving(false)
+    try {
+      if (isShopTarget(targetId)) {
+        // абсолютна к-сть = наявний надлишок магазину для виробу + додане
+        const existing = surplusLines
+          .filter(l => l.kind === 'invoice' && l.client_id === targetId)
+          .reduce((s, l) => s + l.qty, 0)
+        await api.post('/invoices/set-surplus', {
+          shop_client_id: targetId, product_id: task.product_id,
+          qty: existing + qtyNum, date: workDate, notes: addNotes.trim() || null,
+        })
+      } else {
+        await api.post('/orders/', {
+          client_id: targetId, product_id: task.product_id, qty: qtyNum,
+          order_date: workDate, origin_id: 0, notes: addNotes.trim() || null,
+        })
+      }
+      setAddQty('')
+      setAddNotes('')
+      await onReload()
+    } finally {
+      setAddSaving(false)
+    }
   }
 
-  const handleDeleteSurplus = async (id: number) => {
-    await api.delete(`/orders/${id}`)
-    onSurplusLineDeleted(id)
+  const handleDeleteSurplus = async (line: SurplusLine) => {
+    if (line.kind === 'invoice') {
+      await api.post('/invoices/set-surplus', {
+        shop_client_id: line.client_id, product_id: line.product_id,
+        qty: 0, date: workDate,
+      })
+    } else {
+      await api.delete(`/orders/${line.order_id}`)
+    }
+    await onReload()
   }
 
-  const handleSaveSurplusEdit = async (line: Order) => {
-    const raw = editQty[line.id]
+  const handleSaveSurplusEdit = async (line: SurplusLine) => {
+    const raw = editQty[line.key]
     if (raw === undefined) return
     const newQty = Number(raw)
-    setEditQty(prev => { const n = { ...prev }; delete n[line.id]; return n })
-    if (!newQty || newQty <= 0 || newQty === line.qty) return
-    const updated = await api.put<Order>(`/orders/${line.id}`, { qty: newQty })
-    onSurplusLineUpdated(updated)
-  }
-
-  // ── Shortage actions ──────────────────────────────────────────────────────
-  const handleApplyReductions = async () => {
-    if (!underbakedClient) {
-      toast.error('Системний клієнт "Недопечено" не знайдений')
-      return
-    }
-    setApplying(true)
-    for (const [orderId, reduceBy] of Object.entries(reductions)) {
-      if (!reduceBy) continue
-      await api.post('/orders/', {
-        client_id:       underbakedClient.id,
-        product_id:      task.product_id,
-        qty:             reduceBy,
-        order_date:      task.task_date,
-        parent_order_id: Number(orderId),
+    setEditQty(prev => { const n = { ...prev }; delete n[line.key]; return n })
+    if (newQty < 0 || newQty === line.qty) return
+    if (line.kind === 'invoice') {
+      await api.post('/invoices/set-surplus', {
+        shop_client_id: line.client_id, product_id: line.product_id,
+        qty: newQty, date: workDate,
       })
+    } else {
+      if (newQty <= 0) { await api.delete(`/orders/${line.order_id}`) }
+      else { await api.put(`/orders/${line.order_id}`, { qty: newQty }) }
     }
-    setReductions({})
-    await loadRows()
-    onShortageChanged()
-    setApplying(false)
+    await onReload()
   }
 
-  const handleSaveEditReduction = async (c: ShortageClientInfo) => {
-    const raw = editReductions[c.order_id]
-    if (raw === undefined) return
-    setEditReductions(prev => { const n = { ...prev }; delete n[c.order_id]; return n })
-    const newQty = Number(raw)
-    const toDelete = childOrders.filter(o => o.parent_order_id === c.order_id)
-    await Promise.all(toDelete.map(o => api.delete(`/orders/${o.id}`)))
-    if (newQty > 0 && underbakedClient) {
-      await api.post('/orders/', {
-        client_id:       underbakedClient.id,
-        product_id:      task.product_id,
-        qty:             newQty,
-        order_date:      task.task_date,
-        parent_order_id: c.order_id,
+  // ── Зняти недопечене з магазину = переміщення на «Недопечено» ──────────────
+  const shopRows = clientRows.filter(r => r.is_shop && r.invoice_qty > 0 && r.invoice_id != null && r.line_id != null)
+  const totalShopInv = shopRows.reduce((s, r) => s + r.invoice_qty, 0)
+  const remainingAfterShop = Math.max(0, shortage - totalShopInv)
+
+  const handleReduceShop = async (row: ClientRow) => {
+    if (!underbakedClientId) { toast.error('Системний клієнт «Недопечено» не знайдений'); return }
+    if (row.invoice_id == null || row.line_id == null) return
+    const raw = reduceQty[row.line_id]
+    const want = raw !== undefined ? Number(raw) : Math.min(shortage, row.invoice_qty)
+    const qty = Math.min(Math.max(0, want), row.invoice_qty)
+    if (qty <= 0) return
+    setReducing(true)
+    try {
+      await api.post(`/invoices/${row.invoice_id}/transfer`, {
+        product_id: task.product_id, qty, to_client_id: underbakedClientId,
       })
+      setReduceQty(prev => { const n = { ...prev }; delete n[row.line_id!]; return n })
+      await onReload()
+    } finally {
+      setReducing(false)
     }
-    await loadRows()
-    onShortageChanged()
   }
 
-  const handleDeleteReduction = async (c: ShortageClientInfo) => {
-    const toDelete = childOrders.filter(o => o.parent_order_id === c.order_id)
-    await Promise.all(toDelete.map(o => api.delete(`/orders/${o.id}`)))
-    await loadRows()
-    onShortageChanged()
-  }
-
-  if (loading) return <div className={panelClass} style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#888' }}>Завантаження...</div>
+  const sumOrder   = clientRows.reduce((s, r) => s + Math.max(r.order_qty, r.invoice_adj), 0)
+  const sumInvoice = clientRows.reduce((s, r) => s + r.invoice_qty, 0)
 
   return (
     <div className={panelClass}>
@@ -220,12 +237,8 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
           {rawDiff > 0 ? `+${rawDiff}` : rawDiff < 0 ? `${rawDiff}` : '='}
         </span>
         <span className={styles.headerSep}>·</span>
-        {showShortageSection ? (
-          hasConflict
-            ? <span className={styles.headerWarn}>⚠ Конфлікт</span>
-            : totalExistingReduc >= shortage && totalNewReduc === 0
-            ? <span className={styles.headerOk}>{totalExistingReduc}/{shortage} ✓ Нестачу узгоджено</span>
-            : <span className={styles.headerMuted}>Погоджено: {totalExistingReduc + totalNewReduc}/{shortage}</span>
+        {hasConflict ? (
+          <span className={styles.headerWarn}>⚠ Конфлікт</span>
         ) : showSurplusSection ? (
           overAllocation
             ? <span className={styles.headerWarn}>⚠ Перерозподіл: +{surplusAlloc - surplus}</span>
@@ -234,7 +247,11 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
             : surplusRemaining > 0
             ? <span className={styles.headerMuted}>Розподілено: {surplusAlloc}/{surplus}</span>
             : null
-        ) : null}
+        ) : shortage > 0 ? (
+          <span className={styles.headerMuted}>Недопечено: {shortage}</span>
+        ) : (
+          <span className={styles.headerOk}>✓ Вирівняно</span>
+        )}
       </div>
 
       {/* ── Попередження про конфлікт ───────────────────────────────────── */}
@@ -248,10 +265,6 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
       {/* ── Секція розподілу надлишків ──────────────────────────────────── */}
       {showSurplusSection && (
         <>
-          {showShortageSection && (
-            <div className={styles.sectionDivider}>Розподіл надлишків</div>
-          )}
-
           {surplusLines.length > 0 && (
             <>
               {overAllocation && !hasConflict && (
@@ -271,15 +284,15 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
                 </thead>
                 <tbody>
                   {surplusLines.map(line => (
-                    <tr key={line.id}>
+                    <tr key={line.key}>
                       <td>{clientName(line.client_id)}</td>
                       <td className={styles.lineQty}>
                         {surplusRowsEditable ? (
                           <input
                             type="number" min={1} step={1}
-                            value={editQty[line.id] ?? String(line.qty)}
+                            value={editQty[line.key] ?? String(line.qty)}
                             className={styles.addQtyInput}
-                            onChange={e => setEditQty(prev => ({ ...prev, [line.id]: e.target.value }))}
+                            onChange={e => setEditQty(prev => ({ ...prev, [line.key]: e.target.value }))}
                             onBlur={() => handleSaveSurplusEdit(line)}
                           />
                         ) : line.qty}
@@ -288,7 +301,7 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
                       <td>
                         <button
                           className={styles.btnDelete}
-                          onClick={() => handleDeleteSurplus(line.id)}
+                          onClick={() => handleDeleteSurplus(line)}
                           title="Видалити рядок"
                         >🗑</button>
                       </td>
@@ -311,11 +324,6 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
                 {rationClients.map(renderClientOption)}
                 {writeoffClients.map(renderClientOption)}
                 {routeReserve && <option value="route">🚚 Маршрут (резерв)</option>}
-                {customerClients.length > 0 && (
-                  <optgroup label="Клієнти">
-                    {customerClients.map(renderClientOption)}
-                  </optgroup>
-                )}
               </select>
               <input
                 type="number" min={1} max={surplusRemaining} step={1}
@@ -340,137 +348,83 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
               </button>
             </div>
           )}
-
-          {/* Попередження перерозподілу — статус вже у заголовку */}
-          {overAllocation && (
-            <div className={styles.surplusSummary}>
-              <span className={styles.unallocated}>⚠ Розподілено на <strong>{surplusAlloc - surplus}</strong> більше ніж надлишок. Відредагуйте або видаліть зайві рядки.</span>
-            </div>
-          )}
         </>
       )}
 
-      {/* ── Секція узгодження нестачі ───────────────────────────────────── */}
+      {/* ── Недопечене: деталізація по клієнтах, зняття з магазину ───────── */}
       {showShortageSection && (
         <>
-          {showSurplusSection && (
-            <div className={styles.sectionDivider}>Узгодження нестачі</div>
-          )}
-
-          {overReduction > 0 && (
-            <div className={styles.overWarning}>
-              ⚠ Спечено більше ніж очікувалось. Знято на <strong>{overReduction}</strong> більше
-              ніж поточна нестача. Відредагуйте або видаліть зайве нижче.
-            </div>
-          )}
-
-          <table className={`${styles.linesTable} ${hasConflict ? styles.dimmed : ''}`}>
+          <div className={styles.sectionDivider}>
+            {shortage > 0 ? `Недопечено ${shortage} — зняти з магазину` : 'Деталізація по клієнтах'}
+          </div>
+          <table className={styles.linesTable}>
             <thead>
               <tr>
                 <th>Клієнт</th>
-                <th>Маршрут</th>
-                <th>Тип</th>
-                <th>Ціна</th>
-                <th>Замовлено</th>
-                <th>Вже знято</th>
-                {!hasConflict && <th>Зняти ще</th>}
+                <th>Заказ</th>
+                <th>В накладних</th>
+                <th>Відхилення</th>
+                <th />
               </tr>
             </thead>
             <tbody>
-              {clientRows.map(c => {
-                const maxReduce = c.ordered_qty - c.existing_reduction
-                const showEditDel = shortageRowsEditable && c.existing_reduction > 0
-                const isExchange  = c.exchange_type === 'pre_order'
-                const isCustom    = !isExchange && c.price_override != null
+              {clientRows.map(r => {
+                // «Заказ» = max(замовлено, в_накладних_без_перерозподілу): обмінні/додаткові
+                // вироби рахуються як замовлені, а перенесене між клієнтами/магазином — ні.
+                // Відхилення рядка = Заказ − фактично в накладній (показує куди пішов перерозподіл).
+                const rowDemand = Math.max(r.order_qty, r.invoice_adj)
+                const dev = rowDemand - r.invoice_qty
+                const editable = r.is_shop && r.invoice_qty > 0 && r.invoice_id != null && r.line_id != null && shortage > 0
                 return (
-                  <tr key={c.order_id}>
-                    <td>{c.client_name}</td>
-                    <td className={styles.lineNotes}>{c.route_name}</td>
-                    <td className={styles.lineType}>
-                      {isExchange
-                        ? <span className={styles.typeExchange}>↔ обмін</span>
-                        : isCustom
-                        ? <span className={styles.typeCustom}>% своя</span>
-                        : null}
-                    </td>
-                    <td className={styles.linePrice}>
-                      {isExchange ? '0.00' : (c.effective_price ?? 0).toFixed(2)}
-                    </td>
-                    <td className={styles.lineQty}>{c.ordered_qty}</td>
-                    <td className={styles.lineQty}>
-                      {showEditDel ? (
+                  <tr key={r.client_id}>
+                    <td>{r.is_shop ? '🏪 ' : ''}{r.name}</td>
+                    <td className={styles.lineQty}>{rowDemand}</td>
+                    <td className={styles.lineQty}>{r.invoice_qty}</td>
+                    <td className={styles.lineQty}>{dev !== 0 ? dev : '—'}</td>
+                    <td>
+                      {editable && (
                         <div className={styles.inlineEditCell}>
                           <input
-                            type="number" min={0} max={c.ordered_qty} step={1}
-                            value={editReductions[c.order_id] ?? String(c.existing_reduction)}
+                            type="number" min={1} max={r.invoice_qty} step={1}
+                            value={reduceQty[r.line_id!] ?? String(Math.min(shortage, r.invoice_qty))}
                             className={styles.addQtyInput}
-                            onChange={e => setEditReductions(prev => ({ ...prev, [c.order_id]: e.target.value }))}
-                            onBlur={() => handleSaveEditReduction(c)}
+                            onChange={e => setReduceQty(prev => ({ ...prev, [r.line_id!]: e.target.value }))}
                           />
-                          <button
-                            className={styles.btnDelete}
-                            onClick={() => handleDeleteReduction(c)}
-                            title="Скасувати зняття"
-                          >🗑</button>
+                          <button className={styles.btnApply} onClick={() => handleReduceShop(r)} disabled={reducing}>
+                            Зняти
+                          </button>
                         </div>
-                      ) : c.existing_reduction > 0 ? (
-                        <span className={styles.shortageReduced}>-{c.existing_reduction}</span>
-                      ) : '—'}
+                      )}
                     </td>
-                    {!hasConflict && (
-                      <td>
-                        <input
-                          type="number" min={0} max={maxReduce} step={1}
-                          value={reductions[c.order_id] ?? ''}
-                          placeholder="0"
-                          className={styles.addQtyInput}
-                          disabled={maxReduce <= 0}
-                          onChange={e => setReductions(prev => ({
-                            ...prev,
-                            [c.order_id]: Math.min(Number(e.target.value), maxReduce),
-                          }))}
-                        />
-                      </td>
-                    )}
                   </tr>
                 )
               })}
             </tbody>
+            <tfoot>
+              <tr className={styles.footerRow}>
+                <td><strong>Сума</strong></td>
+                <td className={styles.lineQty}><strong>{sumOrder}</strong></td>
+                <td className={styles.lineQty}><strong>{sumInvoice}</strong></td>
+                <td className={styles.lineQty}><strong>{sumOrder - sumInvoice !== 0 ? sumOrder - sumInvoice : '—'}</strong></td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
-
-          {/* Статус узгодження нестачі — кнопка або попередження; підсумок у заголовку */}
-          {(overReduction > 0 || hasConflict || !(totalExistingReduc >= shortage && totalNewReduc === 0)) && (
-            <div className={styles.surplusSummary}>
-              {overReduction > 0 ? (
-                <span className={styles.unallocated}>⚠ Зайве зняття: +{overReduction}</span>
-              ) : hasConflict ? (
-                <span className={styles.unallocated}>⚠ Спочатку вирішіть конфлікт вище</span>
-              ) : (
-                <button
-                  className={styles.btnApply}
-                  onClick={handleApplyReductions}
-                  disabled={applying || totalNewReduc === 0}
-                >
-                  {applying ? 'Застосовую...' : 'Застосувати'}
-                </button>
-              )}
+          {remainingAfterShop > 0 && (
+            <div className={styles.overWarning}>
+              ⚠ Бракує ще <strong>{remainingAfterShop}</strong> після зняття з магазину. Імовірно по
+              накладній відправлено більше ніж спечено — перевірте і зменшіть накладні клієнтів у
+              Маршрутах:
+              <div style={{ marginTop: '0.3rem' }}>
+                {clientRows.filter(r => !r.is_shop && r.invoice_qty > 0).map(r => (
+                  <span key={r.client_id} style={{ display: 'inline-block', marginRight: '0.7rem' }}>
+                    {r.name}: <strong>{r.invoice_qty}</strong>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </>
-      )}
-
-      {/* ── Нетто відхилення (тільки коли обидві секції) ───────────────── */}
-      {showSurplusSection && showShortageSection && (
-        <div className={styles.netSummary}>
-          Нетто відхилення:{' '}
-          <strong className={
-            effectiveDiff === 0 ? styles.ok :
-            effectiveDiff > 0  ? styles.surplusCell :
-            styles.shortageCell
-          }>
-            {effectiveDiff > 0 ? `+${effectiveDiff}` : effectiveDiff === 0 ? '✓ 0' : `${effectiveDiff}`}
-          </strong>
-        </div>
       )}
     </div>
   )
@@ -481,19 +435,23 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
 export default function BakingPage() {
   const { workDate } = useWorkDate()
   const confirmDialog = useConfirm()
+  const toast = useToast()
 
   const [tasks,        setTasks]        = useState<BakingTask[]>([])
   const [products,     setProducts]     = useState<Product[]>([])
   const [categories,   setCategories]   = useState<Category[]>([])
   const [clients,      setClients]      = useState<Client[]>([])
-  const [surplusOrders,    setSurplusOrders]    = useState<Order[]>([])
-  const [underbakedOrders, setUnderbakedOrders] = useState<Order[]>([])
+  const [surplusOrders,    setSurplusOrders]    = useState<Order[]>([])   // origin_id=0
+  const [parentOrders,     setParentOrders]     = useState<Order[]>([])   // origin_id NULL (для «Заказ» по клієнтах)
+  const [allInvoices,      setAllInvoices]      = useState<Invoice[]>([]) // клієнти+магазини (для «В накладних»)
+  const [transfers,        setTransfers]        = useState<TransferByDate[]>([]) // переміщення дати (для нейтралізації перерозподілів)
   const [loading,          setLoading]          = useState(true)
   const [generating,   setGenerating]   = useState(false)
   const [showRec,      setShowRec]      = useState(false)
   const [showEmpty,    setShowEmpty]    = useState(false)   // показати вироби без замовлень
   const [printNotice,  setPrintNotice]  = useState<string | null>(null)
   const [routeReserve, setRouteReserve] = useState(false)
+  const [closingShops, setClosingShops] = useState(false)
 
   // Всі мапи і сети ключовані за product_id (не task.id) — підтримує "віртуальні" рядки
   // null = значення не надано (порожнє поле), number = явно введене (в т.ч. 0)
@@ -506,25 +464,30 @@ export default function BakingPage() {
 
   const load = async (date: string) => {
     setLoading(true)
-    const [t, p, cats, c, so, sett] = await Promise.all([
+    const [t, p, cats, c, ord, inv, trf, sett] = await Promise.all([
       api.get<BakingTask[]>(`/baking/tasks?task_date=${date}`),
       api.get<Product[]>('/products/?active_only=false'),
       api.get<Category[]>('/categories?active_only=false'),
       api.get<Client[]>('/clients/?active_only=false'),
-      api.get<Order[]>(`/orders/?order_date=${date}&origin_id=0`),
+      api.get<Order[]>(`/orders/?order_date=${date}`),               // усі замовлення дати
+      api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
+      api.get<TransferByDate[]>(`/invoices/transfers-by-date?date=${date}`),
       api.get<Record<string, { value: string }>>('/settings/'),
     ])
+    setTransfers(trf)
     setRouteReserve(sett['baking_route_reserve']?.value === '1')
     setTasks(t)
     setProducts(p)
     setCategories(cats)
     setClients(c)
-    setSurplusOrders(so)
-    const underbakedClient = c.find(cl => cl.client_kind === 'underbaked')
-    if (underbakedClient) {
-      api.get<Order[]>(`/orders/?order_date=${date}&client_id=${underbakedClient.id}`)
-        .then(setUnderbakedOrders).catch(() => setUnderbakedOrders([]))
-    }
+    setSurplusOrders(ord.filter(o => o.origin_id === 0))
+    // «Заказ» по клієнтах = origin_id NULL, не pending-бот (узгоджено з aggregate_for_baking)
+    setParentOrders(ord.filter(o => o.origin_id == null && !(o.source === 'bot' && o.bot_status === 'pending')))
+    // Накладні клієнтів і магазинів — для «В накладних» / деталізації / зняття з магазину
+    const custShopIds = new Set(
+      c.filter(cl => cl.client_kind === 'customer' || cl.client_kind === 'shop' || cl.is_own_shop === 1).map(cl => cl.id)
+    )
+    setAllInvoices(inv.filter(i => custShopIds.has(i.client_id) && i.status !== 'cancelled' && i.corrective_for_id === null))
     // null = не введено (baked_qty IS NULL у БД), 0/число = явно введено
     const map: Record<number, number | null> = {}
     t.forEach((tk) => { map[tk.product_id] = tk.baked_qty ?? null })
@@ -559,6 +522,26 @@ export default function BakingPage() {
     await api.post(`/baking/tasks/generate?task_date=${workDate}`, {})
     await load(workDate)
     setGenerating(false)
+  }
+
+  // ─── Закрити накладну магазину (надлишки → POS) ───────────────────────────
+  const handleCloseShops = async () => {
+    const ok = await confirmDialog({
+      title: 'Закрити накладну магазину',
+      message: 'Сформувати накладні власних магазинів з розподілених надлишків і перевести їх у «Прийнято»?\n\nПісля цього товар стане доступним у касі (POS) і у звірці магазину.',
+      confirmText: 'Сформувати і прийняти',
+    })
+    if (!ok) return
+    setClosingShops(true)
+    try {
+      const res = await api.post<{ closed: number }>(`/invoices/close-shops?date=${workDate}`, {})
+      toast.success(res.closed > 0 ? `Закрито накладних магазину: ${res.closed}` : 'Немає накладних магазину для закриття')
+    } catch {
+      toast.error('Не вдалось закрити накладні магазину. Спробуйте ще раз.')
+    } finally {
+      setClosingShops(false)
+      await load(workDate)
+    }
   }
 
   // ─── Зміна "Спечено" з дебаунсом ─────────────────────────────────────────
@@ -610,20 +593,159 @@ export default function BakingPage() {
 
   // ─── Surplus callbacks ────────────────────────────────────────────────────
 
-  const linesFor = (productId: number) =>
-    surplusOrders.filter((o) => o.product_id === productId)
-
-  const handleSurplusLineAdded   = (order: Order) => setSurplusOrders(prev => [...prev, order])
-  const handleSurplusLineDeleted = (id: number)   => setSurplusOrders(prev => prev.filter(o => o.id !== id))
-  const handleSurplusLineUpdated = (order: Order) => setSurplusOrders(prev => prev.map(o => o.id === order.id ? order : o))
-
-  const handleShortageChanged = async () => {
-    const underbakedClient = clients.find(c => c.client_kind === 'underbaked')
-    if (underbakedClient) {
-      const updated = await api.get<Order[]>(`/orders/?order_date=${workDate}&client_id=${underbakedClient.id}`)
-      setUnderbakedOrders(updated)
+  // Розподілені надлишки виробу: рядки накладних магазину (line_kind='surplus') + Order origin_id=0
+  // (пайок/списання). Спільна форма для панелі.
+  const linesFor = (productId: number): SurplusLine[] => {
+    const out: SurplusLine[] = []
+    for (const inv of allInvoices) {
+      for (const ln of inv.lines) {
+        if (ln.product_id === productId && ln.line_kind === 'surplus') {
+          out.push({
+            key: `inv-${ln.id}`, client_id: inv.client_id, product_id: productId,
+            qty: ln.qty, notes: null, kind: 'invoice', invoice_id: inv.id, line_id: ln.id,
+          })
+        }
+      }
     }
+    for (const o of surplusOrders) {
+      if (o.product_id === productId) {
+        out.push({
+          key: `ord-${o.id}`, client_id: o.client_id, product_id: productId,
+          qty: o.qty, notes: o.notes, kind: 'order', order_id: o.id,
+        })
+      }
+    }
+    return out
   }
+
+  const reloadAll = () => load(workDate)
+
+  // ─── Деталізація недопеченого: «Заказ» / «В накладних» по клієнтах ──────────
+  const underbakedClientId = clients.find(c => c.client_kind === 'underbaked')?.id ?? null
+
+  // product → client → Σ замовлено (origin_id NULL)
+  const ordersByPC = useMemo(() => {
+    const m: Record<number, Record<number, number>> = {}
+    for (const o of parentOrders) {
+      const slot = (m[o.product_id] ??= {})
+      slot[o.client_id] = (slot[o.client_id] ?? 0) + o.qty
+    }
+    return m
+  }, [parentOrders])
+
+  // product → client → { qty (звичайні рядки, БЕЗ надлишку), invoice_id, line_id (звичайного рядка) }
+  // Рядки line_kind='surplus' у попит НЕ входять — це розподілений надлишок (показується окремо).
+  const invByPC = useMemo(() => {
+    const m: Record<number, Record<number, { qty: number; invoice_id: number | null; line_id: number | null }>> = {}
+    for (const inv of allInvoices) {
+      for (const ln of inv.lines) {
+        if (ln.line_kind === 'surplus') continue   // надлишок — не попит
+        const slot = (m[ln.product_id] ??= {})
+        const ex = slot[inv.client_id] ?? (slot[inv.client_id] = { qty: 0, invoice_id: inv.id, line_id: ln.id })
+        ex.qty += ln.qty
+        ex.invoice_id = inv.id
+        ex.line_id = ln.id
+      }
+    }
+    return m
+  }, [allInvoices])
+
+  // Нейтралізація перерозподілів: переміщення МІЖ обліковими клієнтами (customer/shop) —
+  // це перерозподіл уже спеченого (товар «слідує» за початковим замовленням джерела), а не
+  // нова потреба на випічку. Будуємо product → client → (Σ переміщено_З − Σ переміщено_В),
+  // щоб відновити накладну «до перерозподілу»: invoice_adj = invoice_qty + цей коефіцієнт.
+  // Переміщення на системних клієнтів (underbaked/writeoff/ration) НЕ нейтралізуємо — їх
+  // обробляє механізм «зняти недопечене».
+  const COUNTED_KINDS = new Set(['customer', 'shop'])
+  const redistribByPC = useMemo(() => {
+    const m: Record<number, Record<number, number>> = {}
+    for (const t of transfers) {
+      if (!t.source_kind || !t.target_kind) continue
+      if (!COUNTED_KINDS.has(t.source_kind) || !COUNTED_KINDS.has(t.target_kind)) continue
+      const slot = (m[t.product_id] ??= {})
+      if (t.source_client_id != null) slot[t.source_client_id] = (slot[t.source_client_id] ?? 0) + t.qty  // переміщено З → +
+      if (t.target_client_id != null) slot[t.target_client_id] = (slot[t.target_client_id] ?? 0) - t.qty  // переміщено В → −
+    }
+    return m
+  }, [transfers])
+
+  // Розподілений надлишок по виробу (для бейджа «↗ розподілено» / гейтингу): рядки
+  // line_kind='surplus' накладних магазину + Order origin_id=0 (пайок/списання).
+  const surplusAllocByProduct = useMemo(() => {
+    const m: Record<number, number> = {}
+    for (const o of surplusOrders) m[o.product_id] = (m[o.product_id] ?? 0) + o.qty
+    for (const inv of allInvoices)
+      for (const ln of inv.lines)
+        if (ln.line_kind === 'surplus') m[ln.product_id] = (m[ln.product_id] ?? 0) + ln.qty
+    return m
+  }, [surplusOrders, allInvoices])
+  const surplusAllocFor = (pid: number) => surplusAllocByProduct[pid] ?? 0
+
+  // «Зняте недопечене» по виробу = ФАКТИЧНА сума переміщень на системного клієнта «Недопечено»
+  // (target_kind='underbaked'). Рахуємо з переміщень, а НЕ як max(0, замовлено−в_накладних):
+  // інакше для товару, що потрапив у магазин переказом (магазин його не замовляв, o=0), зняття
+  // не зменшувало б недостачу.
+  const removedUnderbakedByProduct = useMemo(() => {
+    const m: Record<number, number> = {}
+    for (const t of transfers) {
+      if (t.target_kind === 'underbaked') m[t.product_id] = (m[t.product_id] ?? 0) + t.qty
+    }
+    return m
+  }, [transfers])
+
+  // Розрахунок по виробу: Замовлено / зняте з магазину / накладні + рядки клієнтів.
+  // Правило: «Заказ» клієнта = max(замовлено, в_накладних_без_перерозподілу) — обмінні/додаткові
+  // вироби, що є у накладній але не в замовленнях, рахуються як замовлені (їх пекли), а
+  // перенесене між клієнтами/магазином не подвоюється. Корекції накладних (зменшення клієнта,
+  // перенесення, списання, пайок) перерозподіляють уже спечене і НЕ впливають на «Замовлено»
+  // чи «Відхилення» (Відхилення = Спечено − Замовлено, вирівнюється через магазин).
+  // shopRemoved = фактично знято на «Недопечено» (з переміщень).
+  interface ProductCalc {
+    demand: number       // Замовлено = Σ max(o, i_adj)
+    shopRemoved: number  // зняте з магазину (≥0)
+    invoiceAgg: number   // Σ в_накладних факт (для деталізації)
+    rows: ClientRow[]
+  }
+  const calcByProduct = useMemo(() => {
+    const pids = new Set<number>([
+      ...Object.keys(ordersByPC).map(Number),
+      ...Object.keys(invByPC).map(Number),
+    ])
+    const m = new Map<number, ProductCalc>()
+    for (const pid of pids) {
+      const oc = ordersByPC[pid] ?? {}
+      const ic = invByPC[pid] ?? {}
+      const rc = redistribByPC[pid] ?? {}
+      const ids = new Set<number>([...Object.keys(oc).map(Number), ...Object.keys(ic).map(Number)])
+      let demand = 0, invoiceAgg = 0
+      const rows: ClientRow[] = []
+      for (const id of ids) {
+        const c = clients.find(x => x.id === id)
+        if (!c) continue
+        const is_shop = c.client_kind === 'shop' || c.is_own_shop === 1
+        const inv = ic[id]
+        const o = oc[id] ?? 0
+        const i = inv?.qty ?? 0   // звичайні рядки накладної (надлишок виключено в invByPC)
+        // Накладна без перерозподілів (перенесене між обліковими клієнтами не множить попит)
+        const iAdj = Math.max(0, i + (rc[id] ?? 0))
+        demand     += Math.max(o, iAdj)
+        invoiceAgg += i
+        rows.push({
+          client_id: id, name: c.short_name ?? c.full_name, is_shop,
+          order_qty: o, invoice_qty: i, invoice_adj: iAdj,
+          invoice_id: inv?.invoice_id ?? null, line_id: inv?.line_id ?? null,
+        })
+      }
+      rows.sort((a, b) => (a.is_shop ? 1 : 0) - (b.is_shop ? 1 : 0) || a.name.localeCompare(b.name, 'uk'))
+      // Зняте недопечене = фактичні переміщення на «Недопечено» (працює і для переказаного в магазин товару)
+      m.set(pid, { demand, shopRemoved: removedUnderbakedByProduct[pid] ?? 0, invoiceAgg, rows })
+    }
+    return m
+  }, [ordersByPC, invByPC, redistribByPC, removedUnderbakedByProduct, clients])
+
+  const EMPTY_CALC: ProductCalc = { demand: 0, shopRemoved: 0, invoiceAgg: 0, rows: [] }
+  const calcFor = (pid: number): ProductCalc => calcByProduct.get(pid) ?? EMPTY_CALC
+  const demandFor = (pid: number): number => calcFor(pid).demand
 
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
@@ -635,12 +757,9 @@ export default function BakingPage() {
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
 
   // ── Фільтр: завдання з реальною розбіжністю ─────────────────────────────
-  // baked > ordered → надлишок (потрібен розподіл)
-  // baked < ordered → нестача (включно з 0) — записи зняття показуються всередині
+  // baked > ordered → надлишок (розподіл на магазин/пайок/списання)
+  // baked < ordered → недопечене (коригується в Маршрутах або знімається з магазину)
   // surplusOrders    → є записи розподілу надлишку (потрібен перегляд)
-  // underbakedOrders → НЕ показуємо окремого блоку коли baked=ordered:
-  //   якщо спечено рівно замовленому — записи зняття застарілі й не впливають на доставку;
-  //   вони з'являться в блоці нестачі якщо оператор знову зменшить Спечено
 
   // Продукти без замовлень де оператор вже ввів "Спечено", але БД-задача ще не збережена
   // (дебаунс 600мс — до завершення вони не потрапляють у tasks).
@@ -662,18 +781,20 @@ export default function BakingPage() {
     if (!bakedEntered) return false
 
     const baked = bakedMap[t.product_id] ?? 0
-    if (baked > t.ordered_qty) return true
-    if (baked < t.ordered_qty) return true
-    if (surplusOrders.some(o => o.product_id === t.product_id)) return true
+    const calc  = calcFor(t.product_id)
+    if (baked !== calc.demand) return true           // перепечено / недопечено (vs Замовлено)
+    if (surplusAllocFor(t.product_id) > 0) return true
+    if (calc.shopRemoved > 0) return true            // зняте з магазину (вирівняне недопечене)
     return false
   }).sort((a, b) => {
-    // Пріоритет: конфлікт > нестача > надлишок
+    // Пріоритет: конфлікт > недопечене > надлишок
     const score = (t: BakingTask) => {
       const baked = bakedMap[t.product_id] ?? t.baked_qty ?? 0
-      const alloc = surplusOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
-      if (baked <= t.ordered_qty && alloc > 0) return 0  // конфлікт
-      if (baked < t.ordered_qty) return 1                // нестача
-      return 2                                            // надлишок
+      const need  = demandFor(t.product_id)
+      const alloc = surplusAllocFor(t.product_id)
+      if (baked <= need && alloc > 0) return 0  // конфлікт
+      if (baked < need) return 1                // недопечене
+      return 2                                   // надлишок
     }
     return score(a) - score(b)
   })
@@ -711,6 +832,25 @@ export default function BakingPage() {
     products.some(p => p.category_id === cat.id && p.is_active)
   )
 
+  // ── Чи можна «Закрити накладну магазину» ──────────────────────────────────
+  // Дозволено коли по всіх завданнях введено «Спечено» і немає нерозподілених
+  // надлишків / конфліктів (недопечене сюди не входить — воно вирішується в Маршрутах).
+  const allBakedEntered = tasks.length > 0 && tasks.every(t => t.baked_qty != null)
+  const unresolvedSurplus = withDiscrepancy.filter(t => {
+    const baked     = bakedMap[t.product_id] ?? 0
+    const rawDiff   = baked - demandFor(t.product_id)
+    const surplus   = Math.max(0, rawDiff)
+    const allocated = surplusAllocFor(t.product_id)
+    const conflict  = rawDiff <= 0 && allocated > 0
+    return conflict || (surplus > 0 && allocated < surplus)
+  }).length
+  const canCloseShops = allBakedEntered && unresolvedSurplus === 0
+  const closeShopsHint = !allBakedEntered
+    ? 'Спочатку введіть «Спечено» по всіх виробах'
+    : unresolvedSurplus > 0
+    ? 'Спочатку розподіліть усі надлишки'
+    : 'Сформувати накладні магазину і перевести у «Прийнято»'
+
   return (
     <div className={styles.page}>
 
@@ -747,13 +887,12 @@ export default function BakingPage() {
               onClick={async () => {
                 const unresolved = withDiscrepancy.filter(t => {
                   const baked      = bakedMap[t.product_id] ?? 0
-                  const rawDiff    = baked - t.ordered_qty
+                  const rawDiff    = baked - demandFor(t.product_id)
                   const surplus    = Math.max(0,  rawDiff)
-                  const shortage   = Math.max(0, -rawDiff)
-                  const allocated  = surplusOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
-                  const reduced    = underbakedOrders.filter(o => o.product_id === t.product_id).reduce((s, o) => s + o.qty, 0)
+                  const allocated  = surplusAllocFor(t.product_id)
                   const hasConflict = rawDiff <= 0 && allocated > 0
-                  return hasConflict || (surplus > 0 && allocated < surplus) || (shortage > 0 && reduced < shortage)
+                  // Недопечене тут не блокує друк — коригується в Маршрутах/магазині
+                  return hasConflict || (surplus > 0 && allocated < surplus)
                 })
                 if (unresolved.length > 0) {
                   const ok = await confirmDialog({
@@ -781,6 +920,15 @@ export default function BakingPage() {
               }}
             >
               🖨 Звіт випічки
+            </button>
+            <button
+              className={styles.btnGenerate}
+              style={{ marginLeft: 'auto' }}
+              onClick={handleCloseShops}
+              disabled={!canCloseShops || closingShops}
+              title={closeShopsHint}
+            >
+              {closingShops ? 'Закриваю...' : '🏪 Закрити накладну магазину'}
             </button>
           </>
         )}
@@ -831,41 +979,34 @@ export default function BakingPage() {
                         const bakedIsEntered = loadedBakedQty[task.product_id] != null
                           || enteredIds.has(task.product_id)
                         const baked = bakedMap[task.product_id] ?? 0
-                        const isEmpty = task.ordered_qty === 0 && !bakedIsEntered
-                        const diff  = baked - task.ordered_qty
-                        const surplusAlloc  = surplusOrders.filter(o => o.product_id === task.product_id).reduce((s, o) => s + o.qty, 0)
-                        const shortageReduc = underbakedOrders.filter(o => o.product_id === task.product_id).reduce((s, o) => s + o.qty, 0)
-                        // Бейдж актуальний лише коли відповідає напрямку відхилення:
-                        // розподіл надлишку — тільки при diff>0, зняття — тільки при diff<0
-                        const hasSurplusCorr  = surplusAlloc > 0 && diff > 0
-                        const hasShortageCorr = shortageReduc > 0 && diff < 0
-                        const hasCorrection   = hasSurplusCorr || hasShortageCorr
-                        const correction    = (hasShortageCorr ? shortageReduc : 0) - (hasSurplusCorr ? surplusAlloc : 0)
-                        const effectiveDiff = diff + correction
-                        const isOverAlloc   = diff > 0 && surplusAlloc > diff
-                        const isOverReduc   = diff < 0 && shortageReduc > Math.abs(diff)
+                        const calc   = calcFor(task.product_id)
+                        const demand = calc.demand            // Замовлено = Σ max(замовлено, в_накладних_adj)
+                        const shopRemoved = calc.shopRemoved  // зняте з магазину (≥0)
+                        const surplusAlloc  = surplusAllocFor(task.product_id)
+                        const isEmpty = demand === 0 && !bakedIsEntered
+                        const rawDev  = baked - demand                              // Спечено − Замовлено
+                        const effectiveDiff = rawDev + shopRemoved - surplusAlloc   // після зняття/розподілу
+                        const hasShopCorr    = shopRemoved > 0
+                        const hasSurplusCorr = surplusAlloc > 0
+                        const hasCorrection  = hasShopCorr || hasSurplusCorr
+                        const isOverAlloc    = surplusAlloc > Math.max(0, rawDev)
+                        const isOverRemoved  = shopRemoved  > Math.max(0, -rawDev)
 
                         const effectiveClass =
                           !bakedIsEntered ? '' :
-                          diff === 0 ? styles.diffEffectiveOk :
-                          isOverAlloc || isOverReduc ? styles.diffEffectiveWarn :
+                          effectiveDiff === 0 ? styles.diffEffectiveOk :
+                          isOverAlloc || isOverRemoved ? styles.diffEffectiveWarn :
                           effectiveDiff > 0 ? styles.diffEffectiveSurplus :
-                          effectiveDiff < 0 ? styles.diffEffectiveShortage :
-                          styles.diffEffectiveOk
+                          styles.diffEffectiveShortage
 
-                        // При diff=0 завжди "✓" — стале записи не змінюють реального відхилення в колонці
                         const effectiveLabel =
                           !bakedIsEntered ? '' :
-                          diff === 0 ? '✓' :
-                          effectiveDiff > 0 ? `+${effectiveDiff}` :
-                          effectiveDiff < 0 ? `${effectiveDiff}` : '✓'
+                          effectiveDiff === 0 ? '✓' :
+                          effectiveDiff > 0 ? `+${effectiveDiff}` : `${effectiveDiff}`
 
                         const badgeLabel =
-                          hasSurplusCorr && hasShortageCorr
-                            ? `↗${surplusAlloc} ✂${shortageReduc}`
-                            : hasSurplusCorr ? `↗ ${surplusAlloc} розподілено`
-                            : hasShortageCorr ? `✂ ${shortageReduc} знято`
-                            : ''
+                          hasShopCorr ? `✂ ${shopRemoved} знято` :
+                          hasSurplusCorr ? `↗ ${surplusAlloc} розподілено` : ''
 
                         return (
                           <tr
@@ -873,7 +1014,7 @@ export default function BakingPage() {
                             className={`${styles.row} ${isEmpty ? styles.emptyRow : ''}`}
                           >
                             <td className={styles.tdName}>{productName(task.product_id)}</td>
-                            <td className={styles.tdNum}>{task.ordered_qty}</td>
+                            <td className={styles.tdNum}>{demand}</td>
                             {showRec && (
                               <td className={`${styles.tdNum} ${styles.recommended}`}>
                                 {task.recommended_qty}
@@ -902,16 +1043,16 @@ export default function BakingPage() {
                                       {effectiveLabel}
                                     </span>
                                     <span className={styles.diffRaw}>
-                                      {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '='}
+                                      {rawDev > 0 ? `+${rawDev}` : rawDev < 0 ? `${rawDev}` : '='}
                                     </span>
                                     <span className={styles.diffBadge}>{badgeLabel}</span>
                                   </div>
                                 ) : (
                                   <span className={
-                                    diff > 0 ? styles.surplusCell :
-                                    diff < 0 ? styles.shortageCell : styles.exactCell
+                                    rawDev > 0 ? styles.surplusCell :
+                                    rawDev < 0 ? styles.shortageCell : styles.exactCell
                                   }>
-                                    {diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : '✓'}
+                                    {rawDev > 0 ? `+${rawDev}` : rawDev < 0 ? `${rawDev}` : '✓'}
                                   </span>
                                 )
                               )}
@@ -924,7 +1065,7 @@ export default function BakingPage() {
                       <tr className={styles.footerRow}>
                         <td className={styles.tdName}><strong>Разом</strong></td>
                         <td className={styles.tdNum}>
-                          <strong>{visibleList.reduce((s, t) => s + t.ordered_qty, 0)}</strong>
+                          <strong>{visibleList.reduce((s, t) => s + calcFor(t.product_id).demand, 0)}</strong>
                         </td>
                         {showRec && (
                           <td className={styles.tdNum}>
@@ -977,12 +1118,12 @@ export default function BakingPage() {
                     productName={productName(task.product_id)}
                     clients={clients}
                     surplusLines={linesFor(task.product_id)}
+                    clientRows={calcFor(task.product_id).rows}
+                    shopRemovedDone={calcFor(task.product_id).shopRemoved}
+                    underbakedClientId={underbakedClientId}
                     workDate={workDate}
                     routeReserve={routeReserve}
-                    onSurplusLineAdded={handleSurplusLineAdded}
-                    onSurplusLineDeleted={handleSurplusLineDeleted}
-                    onSurplusLineUpdated={handleSurplusLineUpdated}
-                    onShortageChanged={handleShortageChanged}
+                    onReload={reloadAll}
                   />
                 ))}
               </section>

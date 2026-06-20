@@ -53,8 +53,8 @@ export default function Layout() {
   // Усі вкладки з ключем що відповідає role_permissions
   const ALL_TABS = [
     { path: '/orders',   label: 'Замовлення', key: 'orders'   },
-    { path: '/baking',   label: 'Випічка',    key: 'baking'   },
     { path: '/routes',   label: 'Маршрути',   key: 'routes'   },
+    { path: '/baking',   label: 'Випічка',    key: 'baking'   },
     { path: '/shop',     label: 'Магазин',    key: 'shop'     },
     { path: '/finances', label: 'Фінанси',    key: 'finances' },
     { path: '/admin',     label: 'Налаштування', key: 'admin'   },

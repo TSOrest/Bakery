@@ -39,8 +39,7 @@ class InvoiceLine(Base):
     qty            = Column(Float, nullable=False)
     price          = Column(Float, nullable=False)
     price_override = Column(Float)
-    is_exchange    = Column(Integer, default=0)
-    is_stale       = Column(Integer, default=0)
+    line_kind      = Column(Text, default="normal")  # normal | exchange | stale | surplus
     sum            = Column(Float, nullable=False)
 
     invoice = relationship("Invoice", back_populates="lines")

@@ -88,8 +88,13 @@ TASK_NAME  = "BakeryApp"
 TRAY_TASK  = "BakeryTray"
 HEALTH_URL = "http://localhost:8000/api/health"
 APP_URL    = "http://localhost:8000"
-LOG_FILE   = DATA_DIR / "logs" / "bakery.log"
+LOG_FILE   = DATA_DIR / "logs" / "bakery.log"  # legacy єдиний файл (читається переглядачем)
 DB_FILE    = DATA_DIR / "bakery.db"
+
+
+def _today_log() -> Path:
+    """Шлях до лог-файла поточної дати (один файл на добу)."""
+    return DATA_DIR / "logs" / f"bakery-{time.strftime('%Y-%m-%d')}.log"
 PYTHON     = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 PYTHONW    = ROOT / "backend" / "venv" / "Scripts" / "pythonw.exe"
 GITHUB_REPO     = "https://api.github.com/repos/TSOrest/Bakery"
@@ -400,8 +405,10 @@ def _confirm(title: str, text: str) -> bool:
 def _notify(_icon, title: str, message: str) -> None:
     """Log to bakery.log and show a PowerShell WinRT toast notification."""
     try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[NOTIFY] {time.strftime('%H:%M:%S')} {title}: {message}\n")
+        log = _today_log()
+        log.parent.mkdir(exist_ok=True)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]  [NOTIFY] {title}: {message}\n")
     except Exception:
         pass
     _notify_ps(title, message)
@@ -531,15 +538,25 @@ def action_open(icon, _item=None) -> None:
 
 
 def action_logs(icon, _item=None) -> None:
-    LOG_FILE.parent.mkdir(exist_ok=True)
-    LOG_FILE.touch(exist_ok=True)
-    size_mb = LOG_FILE.stat().st_size / 1_048_576
-    if size_mb >= 10 and _confirm(
-        "Bakery — логи",
-        f"Файл логів: {size_mb:.1f} MB\n\nОчистити перед відкриттям?",
-    ):
-        LOG_FILE.write_text("", encoding="utf-8")
-    subprocess.Popen(["notepad.exe", str(LOG_FILE)])
+    """Відкриває переглядач логів (окреме Python-вікно). Працює без сервера/БД."""
+    logs_dir = DATA_DIR / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    viewer = ROOT / "log_viewer.py"
+    try:
+        if viewer.exists():
+            subprocess.Popen([sys.executable, str(viewer), str(logs_dir)])
+            return
+    except Exception:
+        pass
+    # Fallback: відкрити папку логів у Провіднику, якщо переглядач недоступний.
+    os.startfile(str(logs_dir))
+
+
+def action_open_logs_folder(icon, _item=None) -> None:
+    """Сирий доступ: відкрити папку логів у Провіднику."""
+    logs_dir = DATA_DIR / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    os.startfile(str(logs_dir))
 
 
 def action_exit(icon, _item=None) -> None:
@@ -789,8 +806,8 @@ def _build_menu(up: bool) -> pystray.Menu:
 
     open_submenu = pystray.Menu(
         pystray.MenuItem("Замовлення", lambda i, _: webbrowser.open(APP_URL + "/orders")),
-        pystray.MenuItem("Випічка",    lambda i, _: webbrowser.open(APP_URL + "/baking")),
         pystray.MenuItem("Маршрути",   lambda i, _: webbrowser.open(APP_URL + "/routes")),
+        pystray.MenuItem("Випічка",    lambda i, _: webbrowser.open(APP_URL + "/baking")),
         pystray.MenuItem("Магазин",    lambda i, _: webbrowser.open(APP_URL + "/shop")),
         pystray.MenuItem("Фінанси",    lambda i, _: webbrowser.open(APP_URL + "/finances")),
         pystray.MenuItem("Довідники",  lambda i, _: webbrowser.open(APP_URL + "/admin")),
@@ -828,6 +845,8 @@ def _build_menu(up: bool) -> pystray.Menu:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Переглянути логи",
                          lambda i, _: threading.Thread(target=action_logs, args=(i,), daemon=True).start()),
+        pystray.MenuItem("Папка логів",
+                         lambda i, _: threading.Thread(target=action_open_logs_folder, args=(i,), daemon=True).start()),
         pystray.MenuItem(f"Версія: {current}" if current
                          else "Версія: невідома", None, enabled=False),
         pystray.Menu.SEPARATOR,
@@ -900,9 +919,11 @@ def _poll_internet(icon) -> None:
     while True:
         up = _check_internet()
         try:
-            with open(LOG_FILE, "a", encoding="utf-8") as f:
+            log = _today_log()
+            log.parent.mkdir(exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
                 f.write(
-                    f"[INTERNET] {time.strftime('%H:%M:%S')} "
+                    f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]  [INTERNET] "
                     f"{'up' if up else 'DOWN'} "
                     f"(prev={'up' if _internet_up else 'DOWN'})\n"
                 )

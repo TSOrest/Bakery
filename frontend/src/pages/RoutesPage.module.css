@@ -79,11 +79,12 @@
   height: 100%;
   transition: width 0.3s;
 }
-.kpiBarSegment[data-state="no_activity"]  { background: #9aa5b4; }
-.kpiBarSegment[data-state="virtual_draft"]{ background: #e6a817; }
-.kpiBarSegment[data-state="sent"]         { background: #2980b9; }
-.kpiBarSegment[data-state="processing"]   { background: #c8a800; }
-.kpiBarSegment[data-state="accepted"]     { background: #28a745; }
+.kpiBarSegment[data-state="no_activity"]   { background: #9aa5b4; }
+.kpiBarSegment[data-state="needs_invoice"] { background: #d98c00; }
+.kpiBarSegment[data-state="draft"]         { background: #e6a817; }
+.kpiBarSegment[data-state="sent"]          { background: #2980b9; }
+.kpiBarSegment[data-state="processing"]    { background: #c8a800; }
+.kpiBarSegment[data-state="accepted"]      { background: #28a745; }
 
 /* ── Тіло картки ── */
 .kpiCardBody {

@@ -563,7 +563,7 @@ def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str
 
     order_sum = 0.0
     for ln in invoice.lines:
-        if ln.is_exchange:
+        if ln.line_kind == "exchange":
             continue  # обмін не показуємо клієнту окремо
         name = ln.product.name if ln.product else f"#{ln.product_id}"
         s = ln.sum

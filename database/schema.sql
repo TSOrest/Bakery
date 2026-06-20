@@ -231,8 +231,7 @@ CREATE TABLE IF NOT EXISTS invoice_lines (
     qty            REAL    NOT NULL,
     price          REAL    NOT NULL,
     price_override REAL,
-    is_exchange    INTEGER DEFAULT 0,
-    is_stale       INTEGER DEFAULT 0,
+    line_kind      TEXT    DEFAULT 'normal',  -- normal | exchange | stale | surplus
     sum            REAL    NOT NULL
 );
 

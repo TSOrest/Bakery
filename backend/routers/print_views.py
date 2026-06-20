@@ -74,9 +74,10 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     # Завантажуємо категорії для відображення назв і сортування
     all_cats: dict[int, Category] = {c.id: c for c in db.query(Category).all()}
 
-    # Розділяємо рядки: основні і обмін
-    main_lines = [line for line in inv.lines if not line.is_exchange]
-    exch_lines = [line for line in inv.lines if line.is_exchange]
+    # Розділяємо рядки: основні і обмін. Рядки з кількістю 0 (повністю перенесені/
+    # зняті при корекції) у друкованій накладній не показуємо.
+    main_lines = [line for line in inv.lines if line.line_kind != "exchange" and line.qty > 0]
+    exch_lines = [line for line in inv.lines if line.line_kind == "exchange" and line.qty > 0]
 
     # Групуємо основні рядки по категорії виробу (відділу)
     # cat_id → [(line, product)]
@@ -487,8 +488,9 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     # ── Таблиця товарів ───────────────────────────────────────────────────────
     from backend.models.references import Category as CatModel
     all_cats = {c.id: c for c in db.query(CatModel).all()}
-    main_lines = [l for l in inv.lines if not l.is_exchange]
-    exch_lines = [l for l in inv.lines if l.is_exchange]
+    # Рядки з кількістю 0 у друкованій накладній не показуємо
+    main_lines = [l for l in inv.lines if l.line_kind != "exchange" and l.qty > 0]
+    exch_lines = [l for l in inv.lines if l.line_kind == "exchange" and l.qty > 0]
 
     groups: dict = {}
     cat_order: list = []
@@ -879,11 +881,36 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
         .all()
     }
 
-    surplus_orders = (
+    # Надлишок: пайок/списання — Order origin_id=0; магазин — рядки line_kind='surplus' накладних
+    # магазину (нова модель). Об'єднуємо обидва джерела (на чисту дату не перетинаються).
+    from types import SimpleNamespace
+    surplus_orders: list = list(
         db.query(Order)
         .filter(Order.order_date == task_date, Order.origin_id == 0)
         .all()
     )
+    shop_surplus_rows = (
+        db.query(
+            InvoiceLine.product_id,
+            Invoice.client_id,
+            func.sum(InvoiceLine.qty).label("qty"),
+        )
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .filter(
+            Invoice.invoice_date == task_date,
+            Invoice.status != "cancelled",
+            Invoice.corrective_for_id.is_(None),
+            InvoiceLine.line_kind == "surplus",
+        )
+        .group_by(InvoiceLine.product_id, Invoice.client_id)
+        .all()
+    )
+    for r in shop_surplus_rows:
+        if r.qty and r.qty > 0:
+            surplus_orders.append(SimpleNamespace(
+                product_id=r.product_id, client_id=r.client_id,
+                qty=float(r.qty), notes=None,
+            ))
     underbaked_client = db.query(Client).filter(Client.client_kind == "underbaked").first()
     shortage_children: list = []
     if underbaked_client:
@@ -1146,7 +1173,7 @@ def _dr_section1(db: Session, date: str) -> str:
     )
     exchanges: dict[int, float] = {r.product_id: (r.exc or 0.0) for r in exchange_rows}
 
-    # Магазин: qty orders де client_kind='shop'
+    # Магазин: qty orders де client_kind='shop' (замовлення магазину + legacy origin_id=0)
     shop_rows = (
         db.query(Order.product_id, func.sum(Order.qty).label("sq"))
         .join(Client, Order.client_id == Client.id)
@@ -1155,6 +1182,23 @@ def _dr_section1(db: Session, date: str) -> str:
         .all()
     )
     to_shop: dict[int, float] = {r.product_id: (r.sq or 0.0) for r in shop_rows}
+    # + надлишок випічки, долитий у накладну магазину (line_kind='surplus', нова модель v1.3.0)
+    shop_surplus_rows = (
+        db.query(InvoiceLine.product_id, func.sum(InvoiceLine.qty).label("sq"))
+        .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+        .join(Client, Client.id == Invoice.client_id)
+        .filter(
+            Invoice.invoice_date == date,
+            Invoice.status != "cancelled",
+            Invoice.corrective_for_id.is_(None),
+            InvoiceLine.line_kind == "surplus",
+            Client.client_kind == "shop",
+        )
+        .group_by(InvoiceLine.product_id)
+        .all()
+    )
+    for r in shop_surplus_rows:
+        to_shop[r.product_id] = to_shop.get(r.product_id, 0.0) + float(r.sq or 0)
 
     all_pids = set(ordered) | set(tasks) | set(exchanges) | set(to_shop)
     if not all_pids:
@@ -1239,12 +1283,15 @@ def _dr_section2(db: Session, date: str) -> str:
         if rid not in agg:
             agg[rid] = {"sum": 0.0, "cats": {}}
         for ln in inv.lines:
+            # Надлишок випічки на магазин (line_kind='surplus') — не частина маршрутної погрузки,
+            # показується у Секції 1 («Магазин»); тут не рахуємо, щоб не завищувати маршрут.
+            if ln.line_kind == "surplus":
+                continue
             prod   = products_map.get(ln.product_id)
             cat_id = prod.category_id if prod else None
             if cat_id and cat_id not in all_cats:
                 cat_id = None
             agg[rid]["cats"].setdefault(cat_id, {"qty": 0.0, "exch": 0.0})
-            # is_exchange=1 рядки — артефакт імпорту: в реальних даних не заповнені.
             # Обміни читаємо окремо з orders нижче.
             agg[rid]["cats"][cat_id]["qty"] += ln.qty
             agg[rid]["sum"] += ln.sum
@@ -1734,7 +1781,7 @@ def monthly_sales_report(year: int, month: int, db: Session = Depends(get_db)):
 
     lines = (
         db.query(InvoiceLine)
-        .filter(InvoiceLine.invoice_id.in_(inv_ids), InvoiceLine.is_exchange == 0)
+        .filter(InvoiceLine.invoice_id.in_(inv_ids), InvoiceLine.line_kind != "exchange")
         .all()
     )
 
@@ -2280,7 +2327,7 @@ def print_route_sheet(date: str, db: Session = Depends(get_db)):
             InvoiceLine.price,
             InvoiceLine.price_override,
             InvoiceLine.sum,
-            InvoiceLine.is_exchange,
+            InvoiceLine.line_kind,
             Client.id.label("client_id"),
             Client.route_id,
             Client.client_group_id,
@@ -2311,7 +2358,7 @@ def print_route_sheet(date: str, db: Session = Depends(get_db)):
     )
     for r in rows:
         # Пропускаємо рядки обміну — на маршрутному листі не показуємо
-        if r.is_exchange:
+        if r.line_kind == "exchange":
             continue
         rid = r.route_id
         gid = r.client_group_id

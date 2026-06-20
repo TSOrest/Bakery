@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type {
-  Category, Client, Finance, Invoice, InvoiceLine, Order, OrderWithChildren,
+  Category, Client, Finance, Invoice, InvoiceLine, Order,
   Product, Route, RouteKpi, ClientState,
 } from '../types'
 import styles from './RoutesPage.module.css'
@@ -18,7 +18,6 @@ const STATUS_LABELS: Record<string, string> = {
   processing:    'Опрацювання',
   accepted:      'Прийнято',
   cancelled:     'Скасовано',
-  virtual_draft: 'Чернетка',
 }
 
 // Префікс-позначка типу клієнта у дропдауні переміщення
@@ -36,299 +35,6 @@ function formatDate(d: string) {
   const months = ['','січня','лютого','березня','квітня','травня','червня',
                   'липня','серпня','вересня','жовтня','листопада','грудня']
   return `${parseInt(day)} ${months[parseInt(m)]} ${y}`
-}
-
-// ─── VirtualDraftPanel ─────────────────────────────────────────────────────────
-
-interface VirtualDraftProps {
-  client: Client
-  clientOrders: Order[]
-  allOrders: Order[]
-  products: Product[]
-  allClients: Client[]
-  routes: Route[]
-  lockedClientIds: Set<number>
-  workDate: string
-  onSent: (inv: Invoice) => void
-  onOrdersChanged: () => void
-}
-
-function VirtualDraftPanel({
-  client, clientOrders, allOrders, products, allClients, routes,
-  lockedClientIds, workDate, onSent, onOrdersChanged,
-}: VirtualDraftProps) {
-  const productName = (id: number) => {
-    const p = products.find((p) => p.id === id)
-    return p?.short_name ?? p?.name ?? `#${id}`
-  }
-
-  // Обчислення переміщеної кількості для ордера
-  const transferredOut = (orderId: number) =>
-    allOrders
-      .filter((o) => o.parent_order_id === orderId && o.client_id !== client.id)
-      .reduce((s, o) => s + o.qty, 0)
-
-  const clientLabel = (id: number) => {
-    const c = allClients.find((c) => c.id === id)
-    return c?.short_name ?? c?.full_name ?? `#${id}`
-  }
-
-  // Стан форми переміщення
-  const [transferOpen, setTransferOpen] = useState<number | null>(null)
-  const [transferQty, setTransferQty] = useState(0)
-  const [transferToClientId, setTransferToClientId] = useState<number | null>(null)
-  const [transferNotes, setTransferNotes] = useState('')
-  const [transferring, setTransferring] = useState(false)
-
-  const openTransfer = (orderId: number, maxQty: number) => {
-    setTransferOpen(orderId)
-    setTransferQty(Math.max(1, Math.floor(maxQty)))
-    setTransferToClientId(null)
-    setTransferNotes('')
-  }
-
-  const handleTransfer = async (orderId: number) => {
-    if (!transferToClientId || transferQty <= 0) return
-    setTransferring(true)
-    try {
-      await api.post<OrderWithChildren>(`/orders/${orderId}/transfer`, {
-        to_client_id: transferToClientId,
-        qty: transferQty,
-        notes: transferNotes || undefined,
-      })
-      setTransferOpen(null)
-      onOrdersChanged()
-    } finally {
-      setTransferring(false)
-    }
-  }
-
-  // Відправити → створити накладну зі статусом sent
-  const [sending, setSending] = useState(false)
-
-  const handleSend = async () => {
-    setSending(true)
-    try {
-      const res = await api.post<{ invoice_ids: number[] }>(
-        `/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${client.id}`,
-        {}
-      )
-      if (res.invoice_ids.length > 0) {
-        const inv = await api.get<Invoice>(`/invoices/${res.invoice_ids[0]}`)
-        window.open(`/api/v1/print/invoice/${res.invoice_ids[0]}`, '_blank')
-        onSent(inv)
-      }
-    } finally {
-      setSending(false)
-    }
-  }
-
-  // Список клієнтів для переміщення: без джерела, без "Недопечено", тільки доступні (не відправлені)
-  const KIND_ORDER: Record<string, number> = { shop: 0, writeoff: 1, ration: 2, customer: 3 }
-  const destinationClients = allClients
-    .filter((c) => c.id !== client.id && c.client_kind !== 'underbaked' && !lockedClientIds.has(c.id))
-    .sort((a, b) => {
-      const ka = KIND_ORDER[a.client_kind] ?? 99
-      const kb = KIND_ORDER[b.client_kind] ?? 99
-      if (ka !== kb) return ka - kb
-      if (a.route_id !== b.route_id) return (a.route_id ?? 0) - (b.route_id ?? 0)
-      return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
-    })
-
-  const activeRoutes = routes.filter((r) => r.is_active)
-
-  return (
-    <div className={styles.paper}>
-      {/* Шапка */}
-      <div className={styles.paperHeader}>
-        <div>
-          <div className={styles.paperClientName}>
-            {client.short_name ?? client.full_name}
-          </div>
-          {client.address && (
-            <div className={styles.paperClientAddr}>{client.address}</div>
-          )}
-          <div className={styles.paperDate}>{formatDate(workDate)}</div>
-        </div>
-        <span className={`${styles.statusBadge} ${styles.status_virtual_draft}`}>
-          Чернетка (замовлення)
-        </span>
-      </div>
-
-      {/* Таблиця ордерів */}
-      <table className={styles.draftTable}>
-        <thead>
-          <tr>
-            <th>Виріб</th>
-            <th className={styles.numTh}>Замовлено</th>
-            <th className={styles.numTh}>Передано</th>
-            <th className={styles.numTh}>Ефективно</th>
-            <th style={{ width: 36 }} />
-          </tr>
-        </thead>
-        <tbody>
-          {clientOrders.map((order) => {
-            const isTransferIn = order.origin_id !== null && order.origin_id !== 0
-            const transferred  = isTransferIn ? 0 : transferredOut(order.id)
-            const effective    = order.qty - transferred
-
-            // Вихідні переміщення (гілки від цього ордера)
-            const outgoing = isTransferIn ? [] : allOrders.filter(
-              (o) => o.parent_order_id === order.id
-            )
-
-            // Джерело вхідного переміщення
-            const parentOrder = isTransferIn
-              ? allOrders.find((o) => o.id === order.parent_order_id)
-              : null
-            const sourceLabel = parentOrder ? clientLabel(parentOrder.client_id) : null
-
-            return (
-              <React.Fragment key={order.id}>
-                {/* ── Головний рядок виробу ── */}
-                <tr>
-                  <td>
-                    <span>{productName(order.product_id)}</span>
-                    {isTransferIn && (
-                      <span className={styles.transferInTag}>переміщення</span>
-                    )}
-                  </td>
-                  <td className={styles.numTd}>
-                    {isTransferIn ? <span className={styles.dimDash}>—</span> : order.qty}
-                  </td>
-                  <td className={`${styles.numTd} ${transferred > 0 ? styles.transferredQty : ''}`}>
-                    {transferred > 0 ? transferred : '—'}
-                  </td>
-                  <td className={`${styles.numTd} ${styles.effectiveQty}`}>{effective}</td>
-                  <td>
-                    {effective > 0 && (
-                      <button
-                        className={styles.transferBtn}
-                        onClick={() => openTransfer(order.id, effective)}
-                        title="Перемістити товар"
-                      >
-                        ⇄
-                      </button>
-                    )}
-                  </td>
-                </tr>
-
-                {/* ── Вхідна гілка: звідки прийшло ── */}
-                {isTransferIn && sourceLabel && (
-                  <tr className={styles.flowRow}>
-                    <td colSpan={2} className={styles.flowCell}>
-                      <span className={styles.flowTreeIn}>└</span>
-                      <span className={styles.flowArrowIn}>↑</span>
-                      <span className={styles.flowLabel}>від {sourceLabel}</span>
-                    </td>
-                    <td />
-                    <td className={`${styles.numTd} ${styles.flowQtyIn}`}>+{order.qty}</td>
-                    <td />
-                  </tr>
-                )}
-
-                {/* ── Вихідні гілки: куди пішло ── */}
-                {outgoing.map((child) => (
-                  <tr key={`out-${child.id}`} className={styles.flowRow}>
-                    <td colSpan={2} className={styles.flowCell}>
-                      <span className={styles.flowTreeOut}>└</span>
-                      <span className={styles.flowArrowOut}>↓</span>
-                      <span className={styles.flowLabel}>→ {clientLabel(child.client_id)}</span>
-                    </td>
-                    <td className={`${styles.numTd} ${styles.flowQtyOut}`}>-{child.qty}</td>
-                    <td />
-                    <td />
-                  </tr>
-                ))}
-
-                {/* ── Inline форма переміщення ── */}
-                {transferOpen === order.id && (
-                  <tr className={styles.transferFormRow}>
-                    <td colSpan={5}>
-                      <div className={styles.transferForm}>
-                        <span className={styles.transferLabel}>Кількість:</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={Math.floor(effective)}
-                          step={1}
-                          value={transferQty}
-                          onChange={(e) => setTransferQty(Math.min(Math.floor(effective), Math.max(1, Math.floor(Number(e.target.value)))))}
-                          className={styles.transferInput}
-                        />
-                        <span className={styles.transferLabel}>Кому:</span>
-                        <select
-                          value={transferToClientId ?? ''}
-                          onChange={(e) => setTransferToClientId(Number(e.target.value) || null)}
-                          className={styles.transferSelect}
-                        >
-                          <option value="">— оберіть клієнта —</option>
-                          {destinationClients
-                            .filter((c) => c.client_kind !== 'customer')
-                            .map((c) => (
-                              <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
-                            ))}
-                          {activeRoutes.map((r) => {
-                            const group = destinationClients.filter(
-                              (c) => c.client_kind === 'customer' && c.route_id === r.id
-                            )
-                            if (!group.length) return null
-                            return (
-                              <optgroup key={r.id} label={r.name}>
-                                {group.map((c) => (
-                                  <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
-                                ))}
-                              </optgroup>
-                            )
-                          })}
-                          {(() => {
-                            const noRoute = destinationClients.filter(
-                              (c) => c.client_kind === 'customer' && c.route_id === null
-                            )
-                            if (!noRoute.length) return null
-                            return (
-                              <optgroup label="Без маршруту">
-                                {noRoute.map((c) => (
-                                  <option key={c.id} value={c.id}>{c.short_name ?? c.full_name}</option>
-                                ))}
-                              </optgroup>
-                            )
-                          })()}
-                        </select>
-                        <button
-                          className={styles.btnTransfer}
-                          onClick={() => handleTransfer(order.id)}
-                          disabled={transferring || !transferToClientId || transferQty <= 0}
-                        >
-                          {transferring ? '...' : 'Передати'}
-                        </button>
-                        <button
-                          className={styles.btnCancel}
-                          onClick={() => setTransferOpen(null)}
-                        >
-                          Скасувати
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
-            )
-          })}
-        </tbody>
-      </table>
-
-      <div className={styles.paperActions}>
-        <button
-          className={styles.btnSend}
-          onClick={handleSend}
-          disabled={sending || transferOpen !== null || clientOrders.every((o) => o.qty - transferredOut(o.id) <= 0)}
-        >
-          {sending ? 'Створюємо накладну...' : '▶ Відправити'}
-        </button>
-      </div>
-    </div>
-  )
 }
 
 // ─── InvoiceDetailPanel ────────────────────────────────────────────────────────
@@ -442,6 +148,9 @@ function InvoiceDetailPanel({
   }
 
   const { status } = invoice
+  // Магазин: накладна закривається у Випічці («Закрити накладну магазину»),
+  // тому кнопки зміни стану (Відправити/Прийнято) для нього не показуємо.
+  const isShop = isShopClient(client)
 
   // Анотації переміщень за продуктом
   const transfersFor = (productId: number) =>
@@ -451,8 +160,8 @@ function InvoiceDetailPanel({
   const catMap: Record<number, Category> = {}
   for (const cat of categories) catMap[cat.id] = cat
 
-  const mainLines = invoice.lines.filter((l) => !l.is_exchange)
-  const exchLines = invoice.lines.filter((l) => l.is_exchange === 1)
+  const mainLines = invoice.lines.filter((l) => l.line_kind !== 'exchange')
+  const exchLines = invoice.lines.filter((l) => l.line_kind === 'exchange')
 
   const groups: Record<string, InvoiceLine[]> = {}
   const catOrder: (number | null)[] = []
@@ -497,14 +206,14 @@ function InvoiceDetailPanel({
           >
             🖨 Друкувати
           </button>
-          {status === 'draft' && (
+          {status === 'draft' && !isShop && (
             <button className={styles.btnSend} onClick={handleSend} disabled={sending}>
               {sending ? 'Відправляємо...' : '▶ Відправити'}
             </button>
           )}
-          {/* Корекція доступна доки накладна не скасована (включно з accepted —
-              бухгалтер може виправити пізніше) */}
-          {status !== 'cancelled' && status !== 'draft' && (
+          {/* Корекція доступна доки накладна не скасована — включно з чернеткою
+              (зменшити недопечене перед відправкою) і accepted (правка пізніше) */}
+          {status !== 'cancelled' && (
             <button
               className={`${styles.btnProcess} ${showCorrect ? styles.btnProcessActive : ''}`}
               onClick={() => setShowCorrect((v) => !v)}
@@ -512,10 +221,15 @@ function InvoiceDetailPanel({
               {showCorrect ? '✕ Закрити корекцію' : '✏ Корекція / переміщення'}
             </button>
           )}
-          {(status === 'sent' || status === 'processing') && (
+          {(status === 'sent' || status === 'processing') && !isShop && (
             <button className={styles.btnAccept} onClick={handleAccept} disabled={accepting}>
               {accepting ? '...' : '✓ Прийнято'}
             </button>
+          )}
+          {isShop && status !== 'accepted' && (
+            <span style={{ fontSize: '0.78rem', color: '#888' }}>
+              Накладна магазину закривається у Випічці
+            </span>
           )}
         </div>
       </div>
@@ -654,7 +368,9 @@ function InvoiceDetailPanel({
                       <td colSpan={4} className={
                         t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
                       }>
-                        {t.direction === 'out'
+                        {t.counterparty_kind === 'underbaked'
+                          ? `└ ↓ Знято недопечене −${t.qty}`
+                          : t.direction === 'out'
                           ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
                           : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
                       </td>
@@ -727,7 +443,14 @@ function InvoiceDetailPanel({
 
 // ─── Головна сторінка ──────────────────────────────────────────────────────────
 
-const SYSTEM_KINDS = ['writeoff', 'ration', 'underbaked']
+// Власний магазин (показується у Маршрутах, але без масових операцій і кнопок
+// зміни стану — його накладна закривається у Випічці).
+const isShopClient = (c: Client) =>
+  c.client_kind === 'shop' || c.is_own_shop === 1
+// Клієнт, який показується у списку Маршрутів: активний customer АБО власний магазин.
+// Системні (writeoff/ration/underbaked) — ні.
+const isRouteClient = (c: Client) =>
+  !!c.is_active && (c.client_kind === 'customer' || isShopClient(c))
 
 export default function RoutesPage() {
   const { workDate } = useWorkDate()
@@ -748,7 +471,7 @@ export default function RoutesPage() {
   const [activeRouteId,    setActiveRouteId]    = useState<number | null>(null)
   const [selectedClient,   setSelectedClient]   = useState<Client | null>(null)
   const [checkedIds,       setCheckedIds]       = useState<Set<number>>(new Set())
-  const [checkedDraftIds,  setCheckedDraftIds]  = useState<Set<number>>(new Set())
+  const [generatingDrafts, setGeneratingDrafts] = useState(false)
   const [sendingDrafts,    setSendingDrafts]    = useState(false)
   const [paymentAmounts,   setPaymentAmounts]   = useState<Record<number, number>>({})
   const [acceptingBulk,    setAcceptingBulk]    = useState(false)
@@ -810,11 +533,12 @@ export default function RoutesPage() {
   // Засіяні total_sum — щоб відрізнити "ручну правку оплати" від "зміни суми накладної"
   const seededTotals = useRef<Record<number, number>>({})
 
-  // Автовибір галочок
+  // Автовибір галочок (магазини виключені — на них масові операції не діють)
   useEffect(() => {
+    const shopIds = new Set(clients.filter(isShopClient).map((c) => c.id))
     const ids = new Set(
       invoices
-        .filter((i) => i.corrective_for_id === null && i.status !== 'cancelled')
+        .filter((i) => i.corrective_for_id === null && i.status !== 'cancelled' && !shopIds.has(i.client_id))
         .map((i) => i.id)
     )
     setCheckedIds(ids)
@@ -833,7 +557,7 @@ export default function RoutesPage() {
       })
       return next
     })
-  }, [invoices])
+  }, [invoices, clients])
 
   // ── Допоміжні ─────────────────────────────────────────────────────────────────
 
@@ -857,18 +581,8 @@ export default function RoutesPage() {
   const clientState = (clientId: number): ClientState => {
     const inv = clientInvoice(clientId)
     if (inv) return inv.status as ClientState
-    return (ordersForClient[clientId]?.length ?? 0) > 0 ? 'virtual_draft' : 'no_activity'
+    return (ordersForClient[clientId]?.length ?? 0) > 0 ? 'needs_invoice' : 'no_activity'
   }
-
-  // Клієнти з відправленою (не чернетковою) накладною — недоступні для переміщення
-  const lockedClientIds = useMemo(() => {
-    const ids = new Set<number>()
-    for (const inv of invoices) {
-      if (inv.corrective_for_id !== null) continue
-      if (inv.status !== 'draft' && inv.status !== 'cancelled') ids.add(inv.client_id)
-    }
-    return ids
-  }, [invoices])
 
   // ── KPI картки ────────────────────────────────────────────────────────────────
 
@@ -888,7 +602,7 @@ export default function RoutesPage() {
         .filter((f) => f.client_id !== null && clientIdSet.has(f.client_id!) && f.sign === 1)
         .reduce((s, f) => s + f.amount, 0)
       const counts: RouteKpi['statusCounts'] = {
-        no_activity: 0, virtual_draft: 0, sent: 0, processing: 0, accepted: 0,
+        no_activity: 0, needs_invoice: 0, draft: 0, sent: 0, processing: 0, accepted: 0,
       }
       for (const c of filterClients) {
         const st = clientState(c.id)
@@ -906,16 +620,12 @@ export default function RoutesPage() {
       }
     }
 
-    // "Всі" включає всіх не-системних активних клієнтів (маршрутні + внутрішні)
-    const allNonSystemClients = clients.filter(
-      (c) => c.is_active && !SYSTEM_KINDS.includes(c.client_kind)
-    )
+    // "Всі" включає всіх активних клієнтів-customer (маршрутні + внутрішні); магазини виключені
+    const allNonSystemClients = clients.filter(isRouteClient)
     const internalClients = clients.filter(
-      (c) => c.is_active && c.route_id === null && !SYSTEM_KINDS.includes(c.client_kind)
+      (c) => isRouteClient(c) && c.route_id === null
     )
-    const customerClients = clients.filter(
-      (c) => c.is_active && c.client_kind === 'customer'
-    )
+    const customerClients = clients.filter(isRouteClient)
 
     return [
       makeCard(null, 'Всі', allNonSystemClients, invoices),
@@ -938,19 +648,21 @@ export default function RoutesPage() {
 
   const listClients: Client[] = useMemo(() => {
     if (activeRouteId === null) {
-      return clients.filter((c) => c.is_active && !SYSTEM_KINDS.includes(c.client_kind))
+      return clients.filter(isRouteClient)
     }
     if (activeRouteId === -1) {
-      return clients.filter(
-        (c) => c.is_active && c.route_id === null && !SYSTEM_KINDS.includes(c.client_kind)
-      )
+      return clients.filter((c) => isRouteClient(c) && c.route_id === null)
     }
-    return clients.filter((c) => c.route_id === activeRouteId && c.is_active)
+    return clients.filter((c) => c.route_id === activeRouteId && isRouteClient(c))
   }, [clients, activeRouteId])
 
-  // Сортування: virtual_draft першими, потім invoice-клієнти, потім no_activity
+  // Сортування: магазини завжди першими; потім без накладної (needs_invoice),
+  // далі накладні, потім no_activity
   const sortedClients = useMemo(() => [...listClients].sort((a, b) => {
-    const order = { virtual_draft: 0, sent: 1, processing: 1, accepted: 1, draft: 1, cancelled: 2, no_activity: 3 }
+    const aShop = isShopClient(a) ? 0 : 1
+    const bShop = isShopClient(b) ? 0 : 1
+    if (aShop !== bShop) return aShop - bShop
+    const order = { needs_invoice: 0, draft: 1, sent: 1, processing: 1, accepted: 1, cancelled: 2, no_activity: 3 }
     const sa = order[clientState(a.id)] ?? 2
     const sb = order[clientState(b.id)] ?? 2
     return sa - sb
@@ -958,26 +670,21 @@ export default function RoutesPage() {
 
   // ── Checkbox-логіка ───────────────────────────────────────────────────────────
 
+  // Накладні для масових операцій (друк/відправка/прийняття) — БЕЗ магазинів
   const allCheckable = sortedClients
+    .filter((c) => !isShopClient(c))
     .map((c) => clientInvoice(c.id))
     .filter((i): i is Invoice => !!i && i.status !== 'cancelled')
 
-  const allDraftCheckable = sortedClients.filter((c) => clientState(c.id) === 'virtual_draft')
+  // Клієнти з замовленнями, але без сформованої накладної (для кнопки «Сформувати накладні»)
+  // Включає магазини — їх накладні-чернетки створюються разом з усіма.
+  const needsInvoiceClients = sortedClients.filter((c) => clientState(c.id) === 'needs_invoice')
 
-  // Авто-вибір чернеток при завантаженні та зміні фільтру
-  useEffect(() => {
-    setCheckedDraftIds(new Set(allDraftCheckable.map((c) => c.id)))
-  }, [sortedClients, ordersForClient])
-
-  const hasAny      = allCheckable.length > 0 || allDraftCheckable.length > 0
-  const allChecked  = hasAny
-    && allCheckable.every((i) => checkedIds.has(i.id))
-    && allDraftCheckable.every((c) => checkedDraftIds.has(c.id))
+  const hasAny      = allCheckable.length > 0
+  const allChecked  = hasAny && allCheckable.every((i) => checkedIds.has(i.id))
   const someChecked = allCheckable.some((i) => checkedIds.has(i.id))
-    || allDraftCheckable.some((c) => checkedDraftIds.has(c.id))
   // Лічильники для масових операцій враховують ТІЛЬКИ клієнтів видимих у поточному фільтрі.
   // sortedClients вже відфільтрований за обраним маршрутом — використовуємо його client_id.
-  const visibleClientIds = useMemo(() => new Set(sortedClients.map(c => c.id)), [sortedClients])
   const visibleInvoiceIds = useMemo(() => {
     const ids = new Set<number>()
     for (const c of sortedClients) {
@@ -997,18 +704,12 @@ export default function RoutesPage() {
     return inv && (inv.status === 'sent' || inv.status === 'processing')
   })
 
-  // Реальні draft-накладні з відмічених (на відміну від virtual_draft які чекають генерації)
+  // Відмічені чернетки (draft) у поточному фільтрі — для «Відправити машини»
   const sendableDraftInvoiceIds = [...checkedIds].filter(id => {
     if (!visibleInvoiceIds.has(id)) return false
     const inv = invoices.find(i => i.id === id)
     return inv?.status === 'draft'
   })
-
-  // virtual_draft клієнти у поточному фільтрі
-  const visibleCheckedDraftIds = [...checkedDraftIds].filter(id => visibleClientIds.has(id))
-
-  // Загальна кількість для масової відправки = virtual_draft клієнти + реальні draft накладні
-  const totalSendable = visibleCheckedDraftIds.length + sendableDraftInvoiceIds.length
 
   const headerCheckRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -1024,20 +725,10 @@ export default function RoutesPage() {
         allCheckable.forEach((i) => next.delete(i.id))
         return next
       })
-      setCheckedDraftIds((prev) => {
-        const next = new Set(prev)
-        allDraftCheckable.forEach((c) => next.delete(c.id))
-        return next
-      })
     } else {
       setCheckedIds((prev) => {
         const next = new Set(prev)
         allCheckable.forEach((i) => next.add(i.id))
-        return next
-      })
-      setCheckedDraftIds((prev) => {
-        const next = new Set(prev)
-        allDraftCheckable.forEach((c) => next.add(c.id))
         return next
       })
     }
@@ -1052,54 +743,45 @@ export default function RoutesPage() {
     })
   }
 
-  // ── Масова відправка чернеток ─────────────────────────────────────────────────
+  // ── Сформувати накладні-чернетки із замовлень (завершити прийом) ────────────────
 
-  const toggleOneDraft = (clientId: number) => {
-    setCheckedDraftIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(clientId)) next.delete(clientId)
-      else next.add(clientId)
-      return next
-    })
+  const generateInvoices = async () => {
+    if (needsInvoiceClients.length === 0) return
+    setGeneratingDrafts(true)
+    try {
+      // route_id: конкретний маршрут якщо вибраний; інакше всі customer-клієнти
+      const qs = activeRouteId && activeRouteId > 0 ? `&route_id=${activeRouteId}` : ''
+      const res = await api.post<{ created: number }>(
+        `/invoices/generate-drafts?date=${workDate}${qs}`, {}
+      )
+      toast.success(`Сформовано накладних: ${res.created}`)
+    } catch {
+      toast.error('Не вдалось сформувати накладні. Спробуйте ще раз.')
+    } finally {
+      setGeneratingDrafts(false)
+      await load(workDate)
+    }
   }
 
-  const sendCheckedDrafts = async () => {
-    if (visibleCheckedDraftIds.length === 0 && sendableDraftInvoiceIds.length === 0) return
+  // ── Відправити машини: відмічені чернетки → відправлено ─────────────────────────
+
+  const sendMachines = async () => {
+    if (sendableDraftInvoiceIds.length === 0) return
     setSendingDrafts(true)
-    // Послідовно (не Promise.all): generate_invoice_number не atomic —
-    // паралельні запити отримують однаковий номер → 409 UNIQUE constraint.
-    // Per-item try/catch + загальний try/finally щоб UI завжди розблоковувався.
-    const failedClients: number[] = []
-    const failedInvoices: number[] = []
+    // Послідовно (не Promise.all): уникаємо гонок зі статусами.
+    const failed: number[] = []
     let okCount = 0
     try {
-      for (const clientId of visibleCheckedDraftIds) {
-        try {
-          await api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${clientId}`, {})
-          okCount++
-        } catch {
-          failedClients.push(clientId)
-        }
-      }
       for (const id of sendableDraftInvoiceIds) {
         try {
           await api.put(`/invoices/${id}/status?status=sent`, {})
           okCount++
         } catch {
-          failedInvoices.push(id)
+          failed.push(id)
         }
       }
-      // Знімаємо виділення тільки з УСПІШНО оброблених
-      setCheckedDraftIds(prev => {
-        const next = new Set(prev)
-        visibleCheckedDraftIds
-          .filter(id => !failedClients.includes(id))
-          .forEach(id => next.delete(id))
-        return next
-      })
-      const failedTotal = failedClients.length + failedInvoices.length
-      if (failedTotal > 0) {
-        toast.error(`Не вдалось відправити ${failedTotal} з ${failedTotal + okCount} накладних. Спробуйте ще раз.`)
+      if (failed.length > 0) {
+        toast.error(`Не вдалось відправити ${failed.length} з ${failed.length + okCount} накладних. Спробуйте ще раз.`)
       } else if (okCount > 0) {
         toast.success(`Відправлено накладних: ${okCount}`)
       }
@@ -1112,21 +794,12 @@ export default function RoutesPage() {
   // ── Друк вибраних ──────────────────────────────────────────────────────────────
 
   const printChecked = async () => {
-    // Тільки видимі (відфільтровані маршрутом) накладні
+    // Друк НЕ змінює статус: чернетки лишаються чернетками (розкладають по ящиках,
+    // коригують недопечене), відправка машин — окремою дією.
     const visibleChecked = [...checkedIds].filter(id => visibleInvoiceIds.has(id))
     if (visibleChecked.length === 0) return
     const ids = visibleChecked.join(',')
     window.open(`/api/v1/print/invoices?invoice_date=${workDate}&ids=${ids}`, '_blank')
-    // draft → sent тільки для видимих
-    await Promise.all(
-      visibleChecked.map(async (id) => {
-        const inv = invoices.find((i) => i.id === id)
-        if (inv?.status === 'draft') {
-          await api.put(`/invoices/${id}/status?status=sent`, {})
-        }
-      })
-    )
-    await load(workDate)
   }
 
   // ── Масове прийняття ─────────────────────────────────────────────────────────────
@@ -1147,11 +820,6 @@ export default function RoutesPage() {
 
   const handleStatusChange = (updated: Invoice) => {
     setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
-  }
-
-  const handleClientSent = (inv: Invoice) => {
-    setInvoices((prev) => [...prev, inv])
-    setSelectedClient((c) => c) // зберегти вибір → панель перемкнеться на InvoiceDetailPanel
   }
 
   if (loading) return <p style={{ padding: '1rem' }}>Завантаження...</p>
@@ -1185,7 +853,7 @@ export default function RoutesPage() {
                   {card.routeName} ({card.clientCount})
                 </div>
                 <div className={styles.kpiStatusBar}>
-                  {card.clientCount > 0 && (['no_activity','virtual_draft','sent','processing','accepted'] as const).map((st) => {
+                  {card.clientCount > 0 && (['no_activity','needs_invoice','draft','sent','processing','accepted'] as const).map((st) => {
                     const pct = (card.statusCounts[st] / card.clientCount) * 100
                     if (pct === 0) return null
                     return (
@@ -1239,9 +907,14 @@ export default function RoutesPage() {
                   : routes.find((r) => r.id === activeRouteId)?.name ?? 'Клієнти'}
             </span>
             <div className={styles.listActions}>
-              {totalSendable > 0 && (
-                <button className={styles.sendDraftsBtn} onClick={sendCheckedDrafts} disabled={sendingDrafts}>
-                  {sendingDrafts ? '...' : `▶ Відправити (${totalSendable})`}
+              {needsInvoiceClients.length > 0 && (
+                <button className={styles.sendDraftsBtn} onClick={generateInvoices} disabled={generatingDrafts}>
+                  {generatingDrafts ? '...' : `📄 Сформувати накладні (${needsInvoiceClients.length})`}
+                </button>
+              )}
+              {sendableDraftInvoiceIds.length > 0 && (
+                <button className={styles.sendDraftsBtn} onClick={sendMachines} disabled={sendingDrafts}>
+                  {sendingDrafts ? '...' : `▶ Відправити машини (${sendableDraftInvoiceIds.length})`}
                 </button>
               )}
               {acceptableChecked.length > 0 && (
@@ -1262,10 +935,11 @@ export default function RoutesPage() {
                 title="Виділити всі"
               />
               <HelpTip width={300}>
-                <strong>Поле «Оплата» (зелений інпут)</strong> — сума отримана від клієнта. За замовч. = сума накладної.<br />
-                Змініть якщо клієнт оплатив частково або не оплатив (введіть 0).<br /><br />
-                <strong>✓ Прийняти (N)</strong> — масово приймає відмічені накладні і записує оплату у баланс кожного клієнта.<br /><br />
-                <strong>✏ Внести корекції</strong> — відкриває форму де можна змінити фактично доставлену кількість. Система створить коригуючу накладну.
+                <strong>📄 Сформувати накладні</strong> — будує з замовлень накладні-чернетки (з номером). Після цього замовлення клієнтів блокуються.<br /><br />
+                <strong>🖨 Друкувати</strong> — друкує відмічені накладні. Статус не змінюється — чернетки лишаються чернетками.<br /><br />
+                <strong>▶ Відправити машини</strong> — переводить відмічені чернетки у «Відправлено» (рейси поїхали).<br /><br />
+                <strong>✓ Прийняти</strong> — масово приймає відмічені накладні і записує оплату (зелене поле) у баланс клієнта.<br /><br />
+                <strong>✏ Корекція</strong> — змінити фактично доставлену кількість прямо в накладній (зменшити недопечене).
               </HelpTip>
             </div>
           </div>
@@ -1281,7 +955,7 @@ export default function RoutesPage() {
                   <div key={client.id} className={styles.invoiceRowNoActivity}>
                     <span className={styles.rowCheck} style={{ width: 16 }} />
                     <span className={styles.rowClientName}>
-                      {client.short_name ?? client.full_name}
+                      {isShopClient(client) ? '🏪 ' : ''}{client.short_name ?? client.full_name}
                     </span>
                     <span style={{ fontSize: '0.72rem', color: '#bbb', marginLeft: 'auto' }}>
                       немає замовлень
@@ -1290,26 +964,21 @@ export default function RoutesPage() {
                 )
               }
 
-              if (state === 'virtual_draft') {
+              if (state === 'needs_invoice') {
                 return (
                   <div
                     key={client.id}
                     className={`${styles.invoiceRowVirtualDraft} ${isActive ? styles.invoiceRowVirtualDraftActive : ''}`}
                     onClick={() => setSelectedClient(client)}
                   >
-                    <input
-                      type="checkbox"
-                      className={styles.rowCheck}
-                      checked={checkedDraftIds.has(client.id)}
-                      onChange={(e) => { e.stopPropagation(); toggleOneDraft(client.id) }}
-                    />
+                    <span className={styles.rowCheck} style={{ width: 16 }} />
                     <span className={styles.rowClientName}>
-                      {client.short_name ?? client.full_name}
+                      {isShopClient(client) ? '🏪 ' : ''}{client.short_name ?? client.full_name}
                     </span>
                     <span className={styles.rowInvNum} />
                     <span className={styles.rowStatusCol}>
                       <span className={`${styles.statusBadge} ${styles.status_virtual_draft}`}>
-                        Чернетка
+                        Накладну не сформовано
                       </span>
                     </span>
                     <span className={styles.rowSum} />
@@ -1324,7 +993,7 @@ export default function RoutesPage() {
                   className={`${styles.invoiceRow} ${isActive ? styles.invoiceRowActive : ''}`}
                   onClick={() => setSelectedClient(client)}
                 >
-                  {inv ? (
+                  {inv && !isShopClient(client) ? (
                     <input
                       type="checkbox"
                       className={styles.rowCheck}
@@ -1335,7 +1004,7 @@ export default function RoutesPage() {
                     <span className={styles.rowCheck} style={{ width: 16 }} />
                   )}
                   <span className={styles.rowClientName}>
-                    {client.short_name ?? client.full_name}
+                    {isShopClient(client) ? '🏪 ' : ''}{client.short_name ?? client.full_name}
                   </span>
                   <span className={styles.rowInvNum}>{inv?.invoice_number}</span>
                   <span className={styles.rowStatusCol}>
@@ -1347,7 +1016,10 @@ export default function RoutesPage() {
                   </span>
                   <span className={styles.rowSum}>{inv ? `${inv.total_sum.toFixed(2)} ₴` : ''}</span>
                   {inv && (() => {
-                    const showPayment = inv.status === 'sent' || inv.status === 'processing' || inv.status === 'accepted'
+                    // Поле оплати: для магазину НЕ показуємо (приховане), але колонку
+                    // лишаємо щоб рядок магазину вирівнювався з рештою.
+                    const showPayment = !isShopClient(client)
+                      && (inv.status === 'sent' || inv.status === 'processing' || inv.status === 'accepted')
                     return (
                       <input
                         type="number"
@@ -1413,21 +1085,7 @@ export default function RoutesPage() {
 
         {/* ── Права панель ─────────────────────────────────────────────────────── */}
         <div className={styles.invoiceDetail}>
-          {selectedClient && selectedState === 'virtual_draft' ? (
-            <VirtualDraftPanel
-              key={selectedClient.id}
-              client={selectedClient}
-              clientOrders={ordersForClient[selectedClient.id] ?? []}
-              allOrders={orders}
-              products={products}
-              allClients={clients.filter((c) => c.is_active)}
-              routes={routes}
-              lockedClientIds={lockedClientIds}
-              workDate={workDate}
-              onSent={handleClientSent}
-              onOrdersChanged={() => load(workDate)}
-            />
-          ) : selectedClient && selectedInvoice ? (
+          {selectedClient && selectedInvoice ? (
             <InvoiceDetailPanel
               key={selectedInvoice.id}
               invoice={selectedInvoice}
@@ -1443,6 +1101,31 @@ export default function RoutesPage() {
               onStatusChange={handleStatusChange}
               onRefresh={() => load(workDate)}
             />
+          ) : selectedClient && selectedState === 'needs_invoice' ? (
+            <div className={styles.emptyDetail}>
+              <div style={{ textAlign: 'center', color: '#666', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
+                <div>
+                  Накладну для <strong>{selectedClient.short_name ?? selectedClient.full_name}</strong> ще не сформовано.
+                </div>
+                <button
+                  className={styles.sendDraftsBtn}
+                  disabled={generatingDrafts}
+                  onClick={async () => {
+                    setGeneratingDrafts(true)
+                    try {
+                      await api.post(`/invoices/generate-from-orders?invoice_date=${workDate}&client_id=${selectedClient.id}`, {})
+                    } catch {
+                      toast.error('Не вдалось сформувати накладну.')
+                    } finally {
+                      setGeneratingDrafts(false)
+                      await load(workDate)
+                    }
+                  }}
+                >
+                  📄 Сформувати накладну
+                </button>
+              </div>
+            </div>
           ) : selectedClient ? (
             <div className={styles.emptyDetail}>
               <div style={{ textAlign: 'center', color: '#888' }}>
