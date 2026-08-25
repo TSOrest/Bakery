@@ -1,5 +1,6 @@
 """Ендпоінти для друку: повертають готовий HTML для відкриття у браузері."""
 
+import html as _html
 from typing import Optional
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,12 +42,24 @@ def fmt(val: float) -> str:
     return f"{val:,.2f}".replace(",", " ").replace(".", ",")
 
 
+def esc(val) -> str:
+    """Екранує користувацький текст перед вставкою в HTML друкованих форм.
+
+    Форми повертаються як HTMLResponse і відкриваються у браузері оператора,
+    тож назва виробу/клієнта чи нотатка з `<script>` виконалася б як stored-XSS.
+    None → порожній рядок.
+    """
+    return _html.escape(str(val)) if val is not None else ""
+
+
 def get_settings(db: Session) -> dict[str, str]:
-    return {r.key: (r.value or "") for r in db.query(Setting).all()}
+    """Налаштування для шапки друку. Значення екрануються — вони підставляються
+    у HTML (bakery_name, director, address тощо)."""
+    return {r.key: esc(r.value or "") for r in db.query(Setting).all()}
 
 
 PRINT_BTN = """
-<div class="no-print" style="position:fixed;top:12px;right:16px;z-index:999;display:flex;gap:8px;">
+<div class="no-print" style="position:fixed;top:12px;left:16px;z-index:999;display:flex;gap:8px;">
   <button onclick="window.print()"
     style="padding:6px 18px;background:#1a3a5c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11pt;">
     🖨 Друкувати
@@ -67,7 +80,7 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     accountant  = cfg.get("accountant", "")
 
     client      = inv.client
-    client_name = (client.short_name or client.full_name) if client else "—"
+    client_name = esc(client.short_name or client.full_name) if client else "—"
     client_addr = (client.address or "") if client else ""
     route_name  = (client.route.name if client and client.route else "") if client else ""
 
@@ -101,11 +114,11 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
 
     for cid in cat_order:
         group = groups[cid]
-        cat_label = all_cats[cid].name if cid and cid in all_cats else "Інше"
+        cat_label = esc(all_cats[cid].name) if cid and cid in all_cats else "Інше"
         g_sum = 0.0
         for line, product in group:
-            p_name    = product.name if product else f"#{line.product_id}"
-            unit      = product.unit.name if product and product.unit else "шт"
+            p_name    = esc(product.name) if product else f"#{line.product_id}"
+            unit      = esc(product.unit.name) if product and product.unit else "шт"
             eff_price = line.price_override if line.price_override else line.price
             g_sum    += line.sum
             total_qty    += line.qty
@@ -132,8 +145,8 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
         exch_total = 0.0
         for line in exch_lines:
             product   = db.get(Product, line.product_id)
-            p_name    = product.name if product else f"#{line.product_id}"
-            unit      = product.unit.name if product and product.unit else "шт"
+            p_name    = esc(product.name) if product else f"#{line.product_id}"
+            unit      = esc(product.unit.name) if product and product.unit else "шт"
             eff_price = line.price_override if line.price_override else line.price
             exch_total += line.sum
             exch_rows += f"""
@@ -419,7 +432,7 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     accountant  = cfg.get("accountant", "")
 
     client     = inv.client
-    c_name     = (client.short_name or client.full_name) if client else "—"
+    c_name     = esc(client.short_name or client.full_name) if client else "—"
     c_addr     = (client.address or "") if client else ""
     route_name = (client.route.name if client and client.route else "") if client else ""
 
@@ -522,8 +535,8 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     total_names = 0
     for cid in cat_order:
         for line, product in groups[cid]:
-            p_name    = product.name if product else f"#{line.product_id}"
-            unit      = product.unit.name if product and product.unit else "шт"
+            p_name    = esc(product.name) if product else f"#{line.product_id}"
+            unit      = esc(product.unit.name) if product and product.unit else "шт"
             eff_price = line.price_override if line.price_override else line.price
             total_qty    += line.qty
             total_names  += 1
@@ -534,7 +547,7 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
                 S(fmt(eff_price), size=FS, align=TA_RIGHT),
                 S(fmt(line.sum), size=FS, align=TA_RIGHT),
             ])
-        cat_label = all_cats[cid].name if cid and cid in all_cats else "Інше"
+        cat_label = esc(all_cats[cid].name) if cid and cid in all_cats else "Інше"
         g_sum = sum(l.sum for l, _ in groups[cid])
         lines_data.append([
             S(f"Сума по  <b>{cat_label}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT),
@@ -578,8 +591,8 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
         exch_total = 0.0
         for line in exch_lines:
             product   = db.get(Product, line.product_id)
-            p_name    = product.name if product else f"#{line.product_id}"
-            unit      = product.unit.name if product and product.unit else "шт"
+            p_name    = esc(product.name) if product else f"#{line.product_id}"
+            unit      = esc(product.unit.name) if product and product.unit else "шт"
             eff_price = line.price_override if line.price_override else line.price
             exch_total += line.sum
             exch_data.append([S(p_name, size=FS), S(f"{line.qty:g}", size=FS, align=TA_CENTER),
@@ -790,7 +803,7 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
         total_ord = total_rec = 0.0
         for task in group:
             product = db.get(Product, task.product_id)
-            p_name  = product.name if product else f"#{task.product_id}"
+            p_name  = esc(product.name) if product else f"#{task.product_id}"
             total_ord += task.ordered_qty
             total_rec += task.recommended_qty
             rows_html += f"""
@@ -801,7 +814,7 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
               <td></td><td></td>
             </tr>"""
         groups_html += f"""
-        <div class="section-title">{cat.name}</div>
+        <div class="section-title">{esc(cat.name)}</div>
         <table class="baking-tbl">
           <thead>
             <tr>
@@ -993,7 +1006,7 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
             total_baked += baked
             rows_html += f"""
         <tr>
-          <td>{product.name}</td>
+          <td>{esc(product.name)}</td>
           <td class="r">{task.ordered_qty:g}</td>
           <td class="r"><b>{baked:g}</b></td>
           <td class="dv">{dev_html(task.product_id, diff)}</td>
@@ -1001,7 +1014,7 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
         total_diff = total_baked - total_ord
         cats_html += f"""
       <div class="section-title section-header">
-        <span>{cat.name.upper()}</span>
+        <span>{esc(cat.name.upper())}</span>
         <span class="section-sig">Пекар: ________________</span>
       </div>
       <table class="baking-tbl">
@@ -1050,11 +1063,11 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
         disc_rows += f"""
         <tr class="dh">
           <td class="icon-col"><span class="{state_cls}">{state_icon}</span></td>
-          <td colspan="2"><b>{product.name}</b>{"&nbsp; " + diff_label if diff_label else ""}</td>
+          <td colspan="2"><b>{esc(product.name)}</b>{"&nbsp; " + diff_label if diff_label else ""}</td>
         </tr>"""
 
         for o in surplus_lines:
-            note = f" &mdash; {o.notes}" if o.notes else ""
+            note = f" &mdash; {esc(o.notes)}" if o.notes else ""
             disc_rows += f"""
         <tr class="dd">
           <td class="icon-col"><span class="rp">↗</span></td>
@@ -1240,7 +1253,7 @@ def _dr_section1(db: Session, date: str) -> str:
         <td class="dr-num">{fmt(shop)    if shop    else "—"}</td>
       </tr>"""
         html += f"""
-  <div class="dr-cat-title">{cat.name.upper()}</div>
+  <div class="dr-cat-title">{esc(cat.name.upper())}</div>
   <table class="dr-table">
     <thead>
       <tr>
@@ -1334,7 +1347,7 @@ def _dr_section2(db: Session, date: str) -> str:
     )
 
     cat_headers = "".join(
-        f'<th class="dr-num">{all_cats[cid].name}</th><th class="dr-num">Обм.</th>'
+        f'<th class="dr-num">{esc(all_cats[cid].name)}</th><th class="dr-num">Обм.</th>'
         for cid in used_cats
     )
     thead = f'<tr><th>Маршрут</th>{cat_headers}<th class="dr-num">Сума</th></tr>'
@@ -1681,14 +1694,14 @@ def debts_report(date: str, db: Session = Depends(get_db)):
         )
         for c in rclients:
             bal  = balances.get(c.id, 0.0)
-            name = c.short_name or c.full_name
+            name = esc(c.short_name or c.full_name)
             if bal < -0.005:
                 dv, cv, dcls = fmt(abs(bal)), "", " red"
             else:
                 dv, cv, dcls = "", fmt(bal), ""
             rows_html += (
                 f'<tr><td class="indent">{name}</td>'
-                f'<td class="addr">{c.address or ""}</td>'
+                f'<td class="addr">{esc(c.address or "")}</td>'
                 f'<td class="r{dcls}">{dv}</td>'
                 f'<td class="r green">{cv}</td></tr>'
             )
@@ -1806,7 +1819,7 @@ def monthly_sales_report(year: int, month: int, db: Session = Depends(get_db)):
         cat_qty = cat_sum = 0.0
         for pid, agg, p in group:
             pname  = p.name if p else f"#{pid}"
-            unit   = p.unit.name if p and p.unit else "шт"
+            unit   = esc(p.unit.name) if p and p.unit else "шт"
             products_html += (
                 f'<tr><td class="indent">{pname}</td>'
                 f'<td class="c">{unit}</td>'
@@ -1964,7 +1977,7 @@ def client_statement(
     if not client:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
 
-    client_name = client.short_name or client.full_name
+    client_name = esc(client.short_name or client.full_name)
     art_map = {a.id: a for a in db.query(FinanceArticle).all()}
 
     # Відкриваючий залишок
@@ -2007,7 +2020,7 @@ def client_statement(
         bal_cls  = "red" if running < -0.005 else ("green" if running > 0.005 else "")
         bal_sign = "−" if running < -0.005 else ""
         notes_span = (
-            f'<br><span class="muted" style="font-size:8pt;">{f.notes}</span>'
+            f'<br><span class="muted" style="font-size:8pt;">{esc(f.notes)}</span>'
             if f.notes else ""
         )
         rows_html += (
@@ -2442,7 +2455,7 @@ def print_route_sheet(date: str, db: Session = Depends(get_db)):
                     eff_price = (t["sum"] / t["qty"]) if t["qty"] else 0.0
                     cat_rows_html += f"""
                 <tr>
-                  <td class="prod-name">{p.name}</td>
+                  <td class="prod-name">{esc(p.name)}</td>
                   <td class="r">{t['qty']:g}</td>
                   <td class="r">{fmt(eff_price)}</td>
                   <td></td>
@@ -2521,6 +2534,7 @@ body {
 }
 @page { size: A4; margin: 8mm 10mm; }
 @media print { .no-print { display: none !important; } }
+
 
 .route-page { padding: 0 0 3mm; }
 
@@ -2702,7 +2716,7 @@ def print_address_sheet(date: str, db: Session = Depends(get_db)):
 
             rows_html = ""
             for c, s in lst_sorted:
-                name = c.short_name or c.full_name
+                name = esc(c.short_name or c.full_name)
                 addr = c.address or "—"
                 phone = c.phone or "—"
                 rows_html += f"""
@@ -2765,6 +2779,7 @@ body {
 }
 @page { size: A4; margin: 8mm 10mm; }
 @media print { .no-print { display: none !important; } }
+
 
 .route-page { padding: 0 0 3mm; }
 

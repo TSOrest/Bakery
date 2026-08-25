@@ -870,19 +870,28 @@ export default function RoutesPage() {
 
               {/* Тіло: баланс + дві колонки */}
               <div className={styles.kpiCardBody}>
-                <div className={`${styles.kpiBalance} ${balance >= 0 ? styles.kpiBalancePos : styles.kpiBalanceNeg}`}>
+                <div
+                  className={`${styles.kpiBalance} ${balance >= 0 ? styles.kpiBalancePos : styles.kpiBalanceNeg}`}
+                  title={`${balance >= 0 ? '+' : ''}${balance.toFixed(2)} ₴`}
+                >
                   {balance >= 0 ? '+' : ''}{balance.toFixed(0)} ₴
                 </div>
                 <div className={styles.kpiColumns}>
                   <div className={styles.kpiCredit}>
                     <span className={styles.kpiColLabel}>Кредит</span>
-                    <span className={styles.kpiColValue}>
+                    <span
+                      className={styles.kpiColValue}
+                      title={card.invoiceSum > 0 ? `${card.invoiceSum.toFixed(2)} ₴` : undefined}
+                    >
                       {card.invoiceSum > 0 ? `${card.invoiceSum.toFixed(0)} ₴` : '—'}
                     </span>
                   </div>
                   <div className={styles.kpiDebit}>
                     <span className={styles.kpiColLabel}>Дебет</span>
-                    <span className={styles.kpiColValue}>
+                    <span
+                      className={styles.kpiColValue}
+                      title={card.debitSum > 0 ? `${card.debitSum.toFixed(2)} ₴` : undefined}
+                    >
                       {card.debitSum > 0 ? `${card.debitSum.toFixed(0)} ₴` : '—'}
                     </span>
                   </div>

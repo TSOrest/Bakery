@@ -31,7 +31,7 @@
   background: #fff;
   cursor: pointer;
   flex: 1;
-  min-width: 130px;
+  min-width: 150px;
   overflow: hidden;
   transition: border-color 0.1s, box-shadow 0.1s;
 }
