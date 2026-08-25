@@ -12,7 +12,7 @@ from backend.schemas.invoices import (
     InvoiceCreate, InvoiceOut, InvoiceTransferCreate, InvoiceTransferOut,
     InvoiceLinesUpdate, ProcessingUpdate, AcceptBody, SetSurplusBody,
 )
-from backend.services.invoices import generate_invoice_number, generate_corrective_number
+from backend.services.invoices import generate_invoice_number, generate_corrective_number, create_invoice_row
 from backend.services.prices import get_price
 from backend.services.finance import recompute_invoice_finance
 from backend.routers.auth import require_user
@@ -164,17 +164,14 @@ def _build_invoice_for_client(
     if existing:
         return ("skipped", existing.id)
 
-    number = generate_invoice_number(db, invoice_date)
-    inv = Invoice(
-        invoice_number=number,
+    inv = create_invoice_row(
+        db,
         invoice_date=invoice_date,
         client_id=client.id,
         route_id=eff_route_id,
         status=initial_status,
         created_at=datetime.now().isoformat(),
     )
-    db.add(inv)
-    db.flush()
 
     total = 0.0
     for order, eff_qty in effective_orders:
@@ -365,18 +362,14 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=InvoiceOut, status_code=201)
 def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db), _=Depends(require_user)):
-    number = generate_invoice_number(db, data.invoice_date)
-
-    inv = Invoice(
-        invoice_number=number,
+    inv = create_invoice_row(
+        db,
         invoice_date=data.invoice_date,
         client_id=data.client_id,
         route_id=data.route_id,
         notes=data.notes,
         created_at=datetime.now().isoformat(),
     )
-    db.add(inv)
-    db.flush()
 
     total = 0.0
     for line_data in data.lines:
@@ -458,8 +451,8 @@ def _resolve_or_create_invoice(db: Session, client_id: int, date: str, route_id:
     if inv:
         return inv
     client = db.get(Client, client_id)
-    inv = Invoice(
-        invoice_number=generate_invoice_number(db, date),
+    return create_invoice_row(
+        db,
         invoice_date=date,
         client_id=client_id,
         route_id=route_id if route_id is not None else (client.route_id if client else None),
@@ -467,9 +460,6 @@ def _resolve_or_create_invoice(db: Session, client_id: int, date: str, route_id:
         total_sum=0.0,
         created_at=datetime.now().isoformat(),
     )
-    db.add(inv)
-    db.flush()
-    return inv
 
 
 @router.post("/{invoice_id}/transfer", response_model=InvoiceOut)
@@ -677,8 +667,8 @@ def close_shops(date: str, db: Session = Depends(get_db), _=Depends(require_user
         if not inv:
             if not surplus_map:
                 continue
-            inv = Invoice(
-                invoice_number=generate_invoice_number(db, date),
+            inv = create_invoice_row(
+                db,
                 invoice_date=date,
                 client_id=shop.id,
                 route_id=shop.route_id,
@@ -686,8 +676,6 @@ def close_shops(date: str, db: Session = Depends(get_db), _=Depends(require_user
                 total_sum=0.0,
                 created_at=datetime.now().isoformat(),
             )
-            db.add(inv)
-            db.flush()
 
         # Доливаємо надлишки у рядки накладної (по продукту)
         for pid, qty in surplus_map.items():

@@ -1264,20 +1264,20 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
         `/shop/reconciliations?shop_client_id=${shopId}&include_lines=false`
       )
       const open = list.find((r) => !r.closed && r.rec_type !== 'opening')
-      if (open) {
-        const full = await api.get<Reconciliation>(`/shop/reconciliations/${open.id}`)
-        setActiveRec(full)
-      } else {
-        // Обчислити period_from як день після останньої закритої
-        const lastClosed = list.filter((r) => r.closed).sort((a, b) => b.period_to.localeCompare(a.period_to))[0]
-        const periodFrom = lastClosed
-          ? (() => { const d = new Date(lastClosed.period_to); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
-          : workDate
-        const rec = await api.post<Reconciliation>('/shop/reconciliations', {
-          shop_client_id: shopId, period_from: periodFrom, period_to: workDate,
-        })
-        setActiveRec(rec)
-      }
+      // Обчислити period_from: наявна відкрита звірка — її ж; інакше день після останньої закритої
+      const lastClosed = list.filter((r) => r.closed).sort((a, b) => b.period_to.localeCompare(a.period_to))[0]
+      const periodFrom = open
+        ? open.period_from
+        : lastClosed
+        ? (() => { const d = new Date(lastClosed.period_to); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
+        : workDate
+      // POST ідемпотентний: якщо є відкрита звірка — синхронізує її до workDate (розширює
+      // period_to + перечитує надходження), інакше створює нову. Так товар прийнятих накладних
+      // після старого period_to стає видимим у звірці та POS.
+      const rec = await api.post<Reconciliation>('/shop/reconciliations', {
+        shop_client_id: shopId, period_from: periodFrom, period_to: workDate,
+      })
+      setActiveRec(rec)
     } finally {
       setInitializing(false)
     }

@@ -147,9 +147,17 @@ _seed_initial_data()
 from backend.services.telegram_bot import init_bot_from_settings
 init_bot_from_settings()
 
+def _app_version() -> str:
+    """Читає версію з файлу VERSION (utf-8-sig прибирає BOM), fallback — 0.0.0."""
+    try:
+        return (Path(__file__).parent.parent / "VERSION").read_text(encoding="utf-8-sig").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
 app = FastAPI(
     title="Пекарня API",
-    version="1.0.0",
+    version=_app_version(),
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -218,12 +226,20 @@ if _INDEX.is_file():
     async def pos_app():
         return FileResponse(_POS_HTML if _POS_HTML.exists() else _INDEX)
 
-    # SPA fallback: будь-який невідомий шлях → index.html (React Router)
+    # SPA fallback: будь-який невідомий шлях → index.html (React Router).
+    # ЗАХИСТ ВІД PATH TRAVERSAL: резолвимо шлях і віддаємо файл лише якщо він
+    # реально лежить усередині dist. Без цього `GET /../../bakery.db` (чи
+    # URL-кодований `..%2f`) міг би прочитати БД, .fernet_key чи код.
+    _DIST_RESOLVED = _DIST.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        file = _DIST / full_path
-        if file.is_file():
-            return FileResponse(file)
+        try:
+            candidate = (_DIST / full_path).resolve()
+        except (OSError, ValueError):
+            return FileResponse(_INDEX)
+        if candidate.is_file() and candidate.is_relative_to(_DIST_RESOLVED):
+            return FileResponse(candidate)
         return FileResponse(_INDEX)
 else:
     logging.getLogger("backend.main").warning(

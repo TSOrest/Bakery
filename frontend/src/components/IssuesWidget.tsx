@@ -44,21 +44,39 @@ function getSystemInfo(): string {
 }
 
 // ─── Markdown renderer (мінімальний) ──────────────────────────────────────────
-// Рендеримо лише базові елементи які GitHub використовує в issues
+// Рендеримо лише базові елементи які GitHub використовує в issues.
+// БЕЗПЕКА: спершу екрануємо ВЕСЬ текст (issue-body приходить із GitHub і може
+// містити довільний HTML/скрипт), потім застосовуємо markdown-заміни, які
+// вставляють уже довірені теги. Блок <details>/<summary> (системна інформація,
+// яку додає сам віджет) відновлюємо за суворим whitelist — лише ці теги без
+// атрибутів, тож інʼєкція `<details onclick=...>` лишиться екранованою.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function renderMarkdown(text: string) {
-  // images: ![alt](url)
-  let html = text
-    .replace(/!\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g,
+  let html = escapeHtml(text)
+    // images: ![alt](url) — лише http(s), без пробілів/лапок у URL
+    .replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s"']+)\)/g,
       (_, alt, url) => `<img src="${url}" alt="${alt}" style="max-width:100%;border-radius:6px;margin-top:8px;" />`)
     // bold: **text**
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     // inline code: `code`
     .replace(/`([^`]+)`/g, '<code style="background:#f6f8fa;padding:2px 5px;border-radius:4px;font-size:0.85em;">$1</code>')
-    // details/summary block — pass through as HTML
     // horizontal rule
     .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #d0d7de;margin:12px 0;" />')
     // line breaks
     .replace(/\n/g, '<br />')
+    // whitelist: відновлюємо лише <details>/<summary> без атрибутів
+    .replace(/&lt;details&gt;/g, '<details>')
+    .replace(/&lt;\/details&gt;/g, '</details>')
+    .replace(/&lt;summary&gt;/g, '<summary>')
+    .replace(/&lt;\/summary&gt;/g, '</summary>')
 
   return <span dangerouslySetInnerHTML={{ __html: html }} />
 }

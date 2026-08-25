@@ -117,13 +117,26 @@ export default function BackupTab() {
     setBackups(prev => prev.filter(b => b.name !== name))
   }
 
-  const handleDownloadBackup = (name: string) => {
-    const a = document.createElement('a')
-    a.href = `/api/v1/backup/download/${encodeURIComponent(name)}`
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+  const handleDownloadBackup = async (name: string) => {
+    // Завантаження через fetch з токеном (навігація <a href> не додає Authorization).
+    try {
+      const token = localStorage.getItem('bakery_token')
+      const res = await fetch(`/api/v1/backup/download/${encodeURIComponent(name)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(`Помилка завантаження: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +146,16 @@ export default function BackupTab() {
     const fd = new FormData()
     fd.append('file', file)
     try {
-      await fetch('/api/v1/backup/upload', { method: 'POST', body: fd })
+      const token = localStorage.getItem('bakery_token')
+      const res = await fetch('/api/v1/backup/upload', {
+        method: 'POST',
+        body: fd,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(data.detail ?? res.statusText)
+      }
       await loadAll()
     } catch (err) {
       toast.error(`Помилка імпорту: ${err instanceof Error ? err.message : String(err)}`)

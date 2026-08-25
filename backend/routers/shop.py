@@ -216,10 +216,25 @@ def compute_current_stock(
     )
 
     if open_rec:
+        # База — перенесений залишок (opening_balance) рядків звірки; received рахуємо ЖИВЕ
+        # до as_of_date, щоб POS/стан завжди бачив прийняті накладні (в т.ч. надлишок),
+        # незалежно від period_to звірки (яка могла застаріти).
         for ln in open_rec.lines:
             key = (ln.product_id, ln.batch_date)
-            stock[key] = stock.get(key, 0.0) + float((ln.opening_balance or 0) + (ln.received or 0))
-        period_from = open_rec.period_from
+            stock[key] = stock.get(key, 0.0) + float(ln.opening_balance or 0)
+        period_from = _effective_date_from(db, shop_client_id, open_rec.period_from)
+        for (pid, bd), qty in _received_from_bakery_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            stock[(pid, bd)] = stock.get((pid, bd), 0.0) + qty
+        for (pid, bd), qty in _received_from_receipts_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            stock[(pid, bd)] = stock.get((pid, bd), 0.0) + qty
+        for (pid, bd), qty in _received_from_invoices_batched(
+            db, shop_client_id, period_from, as_of_date
+        ).items():
+            stock[(pid, bd)] = stock.get((pid, bd), 0.0) + qty
     else:
         last_closed = (
             db.query(ShopReconciliation)
@@ -684,13 +699,22 @@ def create_reconciliation(data: ShopReconciliationCreate, db: Session = Depends(
         .first()
     )
     if existing:
+        # Синхронізуємо наявну відкриту звірку до поточної дати: якщо оператор працює на
+        # пізнішу дату, розширюємо period_to і перечитуємо надходження (інакше товар
+        # прийнятих накладних після старого period_to був би прихований у POS/звірці).
+        new_to = max(data.period_to, existing.period_from)  # clamp ≥ period_from (без інверсії)
+        if new_to > (existing.period_to or ""):
+            existing.period_to = new_to
+            _recompute_received(db, existing)
+            safe_commit(db)
+            db.refresh(existing)
         _enrich_rec_in_memory(db, existing)
         return existing
 
     rec = ShopReconciliation(
         shop_client_id=data.shop_client_id,
         period_from=data.period_from,
-        period_to=data.period_to,
+        period_to=max(data.period_to, data.period_from),  # без інвертованого періоду
         created_at=datetime.now().isoformat(),
     )
     db.add(rec)
@@ -1107,18 +1131,11 @@ def update_reconciliation_line(
     return line
 
 
-@router.post("/reconciliations/{rec_id}/refresh-received", response_model=ShopReconciliationOut)
-def refresh_received(rec_id: int, db: Session = Depends(get_db)):
-    """
-    Оновлює received для кожного рядка і додає нові рядки для продуктів,
-    що з'явились у надходженнях після створення звірки.
-    """
-    rec = db.get(ShopReconciliation, rec_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Звірку не знайдено")
-    if rec.closed:
-        raise HTTPException(status_code=400, detail="Звірку вже підтверджено")
-
+def _recompute_received(db: Session, rec: ShopReconciliation) -> None:
+    """Перерахувати received рядків звірки + додати нові партії з надходжень
+    (пекарня + зовнішні + прийняті накладні магазину) у діапазоні eff_from → rec.period_to.
+    Спільне для refresh-received і синхронізації відкритої звірки у create_reconciliation.
+    НЕ комітить — виклик відповідає за safe_commit."""
     eff_from = _effective_date_from(db, rec.shop_client_id, rec.period_from)
     bakery_raw = _received_from_bakery_batched(db, rec.shop_client_id, eff_from, rec.period_to)
     ext_b      = _received_from_receipts_batched(db, rec.shop_client_id, eff_from, rec.period_to)
@@ -1199,6 +1216,21 @@ def refresh_received(rec_id: int, db: Session = Depends(get_db)):
         ))
 
     _recalc_reconciliation(rec)
+
+
+@router.post("/reconciliations/{rec_id}/refresh-received", response_model=ShopReconciliationOut)
+def refresh_received(rec_id: int, db: Session = Depends(get_db)):
+    """
+    Оновлює received для кожного рядка і додає нові рядки для продуктів,
+    що з'явились у надходженнях після створення звірки.
+    """
+    rec = db.get(ShopReconciliation, rec_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Звірку не знайдено")
+    if rec.closed:
+        raise HTTPException(status_code=400, detail="Звірку вже підтверджено")
+
+    _recompute_received(db, rec)
     safe_commit(db)
     db.refresh(rec)
     return rec

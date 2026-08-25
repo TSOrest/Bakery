@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react'
+import { api } from '../../api/client'
 
 export default function ResetDbSection() {
   const [modal,       setModal]       = useState(false)
@@ -20,11 +21,7 @@ export default function ResetDbSection() {
   const handleReset = async () => {
     setBusy(true); setErr('')
     try {
-      const res = await fetch('/api/v1/settings/reset-db', { method: 'POST' })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(data.detail ?? res.statusText)
-      }
+      await api.post('/settings/reset-db', null)
       setModal(false)
       window.location.reload()
     } catch (e: any) {

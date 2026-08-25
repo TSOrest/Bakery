@@ -16,8 +16,10 @@ from backend.models.pricing import Price
 from backend.models.shop import ShopSale, ShopReconciliation, ShopReconciliationLine
 from backend.services.finance import get_all_balances, get_summary
 from backend.schemas.api_responses import DashboardCalendar
+from backend.routers.auth import require_user
 
-router = APIRouter(prefix="/dashboard", tags=["Дашборд"])
+# Дашборд відкриває фінансову статистику — доступ лише авторизованим (на рівні роутера).
+router = APIRouter(prefix="/dashboard", tags=["Дашборд"], dependencies=[Depends(require_user)])
 
 
 @router.get("/")

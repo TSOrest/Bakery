@@ -23,8 +23,10 @@ from backend.models.orders import Order
 from backend.models.references import Client, ClientBotUser, Product
 from backend.models.settings import Setting
 from backend.services.prices import get_price
+from backend.routers.auth import require_user
 
-router = APIRouter(prefix="/bot", tags=["bot"])
+# Керування замовленнями бота — доступ лише авторизованим операторам (на рівні роутера).
+router = APIRouter(prefix="/bot", tags=["bot"], dependencies=[Depends(require_user)])
 
 
 # ── Схеми ────────────────────────────────────────────────────────────────────

@@ -456,11 +456,16 @@ CREATE INDEX IF NOT EXISTS idx_finances_article     ON finances(article_id, fina
 -- invoices
 CREATE INDEX IF NOT EXISTS idx_invoices_date_client ON invoices(invoice_date, client_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status      ON invoices(status, invoice_date);
+CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON invoice_lines(invoice_id);
 
 -- baking
 CREATE INDEX IF NOT EXISTS idx_baking_date          ON baking_tasks(task_date);
 
+-- balances
+CREATE INDEX IF NOT EXISTS idx_daily_balances_date  ON daily_balances(balance_date, product_id);
+
 -- shop
+CREATE INDEX IF NOT EXISTS idx_shop_counts_date     ON shop_counts(count_date);
 CREATE INDEX IF NOT EXISTS idx_shop_sales_shop_date ON shop_sales(shop_client_id, sale_date);
 CREATE INDEX IF NOT EXISTS idx_shop_sales_product   ON shop_sales(product_id, batch_date);
 CREATE INDEX IF NOT EXISTS idx_shop_recon_shop_period ON shop_reconciliations(shop_client_id, period_to DESC);

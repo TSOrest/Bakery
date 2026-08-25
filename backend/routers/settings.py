@@ -9,13 +9,20 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import get_db, safe_commit
+from backend.models.auth import User
 from backend.models.settings import Setting
+from backend.routers.auth import require_user, require_admin
 from backend.services import telegram_bot as tg
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["Налаштування"])
+
+# Секрети, які ніколи не віддаються у браузер (їх читає лише backend).
+_ALWAYS_STRIP = {"github_client_secret", "github_oauth_token"}
+# Секрети, доступні лише адміну (SettingsTab префілить поле токена бота).
+_ADMIN_ONLY = {"telegram_bot_token"}
 
 
 class SettingUpdate(BaseModel):
@@ -24,13 +31,23 @@ class SettingUpdate(BaseModel):
 
 
 @router.get("/")
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Повертає налаштування. Секрети виключаються: github-секрети — завжди,
+    токен бота — лише для адміна."""
+    is_admin = user.role == "admin"
     rows = db.query(Setting).order_by(Setting.key).all()
-    return {r.key: {"value": r.value or "", "description": r.description or ""} for r in rows}
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r.key in _ALWAYS_STRIP:
+            continue
+        if r.key in _ADMIN_ONLY and not is_admin:
+            continue
+        out[r.key] = {"value": r.value or "", "description": r.description or ""}
+    return out
 
 
 @router.put("/{key}")
-def update_setting(key: str, body: SettingUpdate, db: Session = Depends(get_db)):
+def update_setting(key: str, body: SettingUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     row = db.get(Setting, key)
     if row:
         row.value = body.value
@@ -40,12 +57,12 @@ def update_setting(key: str, body: SettingUpdate, db: Session = Depends(get_db))
     else:
         row = Setting(key=key, value=body.value, description=body.description or "", updated_at=datetime.now().isoformat())
         db.add(row)
-    db.commit()
+    safe_commit(db)
     return {"key": key, "value": body.value}
 
 
 @router.put("/")
-def update_many_settings(body: dict[str, str], db: Session = Depends(get_db)):
+def update_many_settings(body: dict[str, str], _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Оновлює кілька налаштувань одночасно."""
     for key, value in body.items():
         row = db.get(Setting, key)
@@ -54,20 +71,20 @@ def update_many_settings(body: dict[str, str], db: Session = Depends(get_db)):
             row.updated_at = datetime.now().isoformat()
         else:
             db.add(Setting(key=key, value=value, updated_at=datetime.now().isoformat()))
-    db.commit()
+    safe_commit(db)
     return {"updated": len(body)}
 
 
 # ── Telegram бот ──────────────────────────────────────────────────────────────
 
 @router.get("/telegram/status")
-def telegram_status():
+def telegram_status(_: User = Depends(require_user)):
     """Стан бота: запущений чи ні."""
     return {"running": tg.bot_is_running()}
 
 
 @router.post("/telegram/restart")
-def telegram_restart(db: Session = Depends(get_db)):
+def telegram_restart(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Перезапускає бота з поточним токеном з БД."""
     row = db.get(Setting, "telegram_bot_token")
     token = row.value if row and row.value else ""
@@ -76,14 +93,14 @@ def telegram_restart(db: Session = Depends(get_db)):
 
 
 @router.post("/telegram/stop")
-def telegram_stop():
+def telegram_stop(_: User = Depends(require_admin)):
     """Зупиняє бота."""
     tg.stop_bot()
     return {"running": False}
 
 
 @router.get("/telegram/authorized")
-def telegram_authorized(db: Session = Depends(get_db)):
+def telegram_authorized(_: User = Depends(require_user), db: Session = Depends(get_db)):
     """Список авторизованих чатів."""
     raw = db.get(Setting, "telegram_authorized_chats")
     chats: dict[str, str] = {}
@@ -97,7 +114,7 @@ def telegram_authorized(db: Session = Depends(get_db)):
 # ── Скидання бази даних ───────────────────────────────────────────────────────
 
 @router.post("/reset-db")
-def reset_database(db: Session = Depends(get_db)):
+def reset_database(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Очищає всі робочі дані.
     Залишає: системних клієнтів (client_kind != 'customer'), користувачів,
@@ -185,7 +202,7 @@ def reset_database(db: Session = Depends(get_db)):
 
 
 @router.get("/server-info")
-def server_info():
+def server_info(_: User = Depends(require_user)):
     """Повертає локальну IP-адресу сервера та порт для формування POS URL."""
     import socket
     import os
@@ -207,7 +224,7 @@ def server_info():
 
 
 @router.delete("/telegram/authorized/{chat_id}")
-def telegram_revoke(chat_id: str, db: Session = Depends(get_db)):
+def telegram_revoke(chat_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Відкликає доступ у конкретного чату."""
     row = db.get(Setting, "telegram_authorized_chats")
     chats: dict[str, str] = {}
