@@ -59,14 +59,10 @@ def get_settings(db: Session) -> dict[str, str]:
 
 
 PRINT_BTN = """
-<div class="no-print" style="position:fixed;top:12px;left:16px;z-index:999;display:flex;gap:8px;">
+<div class="no-print" style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999;">
   <button onclick="window.print()"
-    style="padding:6px 18px;background:#1a3a5c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11pt;">
+    style="padding:6px 22px;background:#1a3a5c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11pt;">
     🖨 Друкувати
-  </button>
-  <button onclick="window.close()"
-    style="padding:6px 12px;background:#eee;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:11pt;">
-    ✕
   </button>
 </div>"""
 
