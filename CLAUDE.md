@@ -59,6 +59,7 @@ bakery/
 | accountant | фінанси, баланси, перегляд всього |
 | admin | довідники, ціни, налаштування, повний доступ |
 | owner | read-only дашборд (мобільний через HTTPS) |
+| seller | POS-каса (`/pos`, `PosPage.tsx`) — продаж через касовий термінал магазину |
 
 ---
 
@@ -69,13 +70,20 @@ bakery/
 -- Одиниці виміру
 CREATE TABLE units (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE  -- кг, шт, буханка
+    name TEXT NOT NULL UNIQUE,  -- кг, шт, буханка
+    is_active INTEGER DEFAULT 1
 );
 
--- Категорії виробів
+-- Категорії виробів (динамічний довідник, НЕ фіксований enum — адмін додає
+-- свої категорії; класифікація хліб/булка/інше повністю на category_id,
+-- окремого поля products.type НЕ існує)
 CREATE TABLE categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE  -- Булки, Хліб, Магазин, Інше
+    name TEXT NOT NULL UNIQUE,       -- напр. Хліб, Булка, Магазин, Інше — довільні
+    is_active INTEGER DEFAULT 1,
+    is_baked INTEGER DEFAULT 1,      -- 1 = відділ випікає; 0 = лише магазин/інше (не в завданнях випічки)
+    reserve_pct REAL DEFAULT 5.0,    -- % резерву для рекомендованої кількості
+    sort_order INTEGER DEFAULT 0     -- порядок відображення і друку завдань
 );
 
 -- Вироби
@@ -83,13 +91,14 @@ CREATE TABLE products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     short_name TEXT,
-    type TEXT NOT NULL CHECK(type IN ('bread', 'bun', 'other')),
     weight REAL,
     unit_id INTEGER REFERENCES units(id),
     category_id INTEGER REFERENCES categories(id),
-    cost_per_unit REAL DEFAULT 0,  -- розрахункова собівартість
+    cost_per_unit REAL DEFAULT 0,    -- розрахункова собівартість
+    purchase_price REAL DEFAULT 0,   -- ціна закупівлі (товари ззовні)
     is_active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    initial_stock REAL DEFAULT 0     -- початковий залишок (лише перша звірка)
 );
 
 -- Компоненти / інгредієнти
@@ -226,9 +235,19 @@ CREATE TABLE orders (
     price_override REAL,        -- якщо NULL — береться автоматично
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    created_by TEXT
+    created_by TEXT,
+    -- Split-логіка (Фаза 3.5) і надлишок/переміщення (v1.2.0+)
+    parent_order_id INTEGER REFERENCES orders(id),  -- дочірній рядок (переміщення/повернення)
+    delivered_qty REAL,         -- фактично передана кількість (може відрізнятись від qty)
+    origin_id INTEGER           -- 0 = надлишок випічки (пайок/списання), N = id батьківського
+                                 -- замовлення при /orders/{id}/transfer; NULL = звичайний рядок
+    -- + bot-поля (source, bot_status, bot_rejection_reason, bot_original_qty,
+    --   placed_by_chat_id) — див. ALTER TABLE нижче в розділі Telegram Bot
 );
 ```
+`origin_id` — ключове поле для всієї логіки v1.3.0 "Замовлено/Спечено/Відхилення"
+(див. розділ "Реліз v1.3.0" нижче): `0` = пайок/списання (системний клієнт,
+без накладної), `N>0` = переміщено від замовлення N, `NULL` = звичайне.
 
 **Два типи обміну:**
 - `pre_order` — клієнт заздалегідь просить замінити черствий хліб. Свіжий іде безкоштовно, черствий забирається і виставляється на магазин за `exchange_price`.
@@ -247,19 +266,14 @@ CREATE TABLE baking_tasks (
     UNIQUE(task_date, product_id)
 );
 
-CREATE TABLE surplus_allocations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alloc_date TEXT NOT NULL,
-    product_id INTEGER NOT NULL REFERENCES products(id),
-    to_shop REAL DEFAULT 0,
-    to_route REAL DEFAULT 0,
-    ration_qty REAL DEFAULT 0,   -- пайок (вводиться вручну)
-    written_off REAL DEFAULT 0,
-    notes TEXT,
-    UNIQUE(alloc_date, product_id)
-);
--- Контроль: baked_qty = ordered + to_shop + to_route + ration + written_off
 ```
+`baked_qty` — `NULL` = ще не введено (не 0!), `0` = введено явний нуль; на цій
+відмінності будується UI-логіка "чи введена випічка" (`baked_entered`).
+
+Таблиця `surplus_allocations` (розподіл надлишку по alloc_date/product) —
+**видалена** (B1, синхронізація schema.sql з моделями). Замінена на
+`invoice_lines.line_kind='surplus'` (надлишок вноситься прямо рядком у
+накладну магазину, v1.3.0) + `Order origin_id=0` (пайок/списання).
 
 ### Накладні
 ```sql
@@ -272,7 +286,10 @@ CREATE TABLE invoices (
     status TEXT DEFAULT 'draft' CHECK(status IN ('draft','printed','delivered','cancelled')),
     total_sum REAL DEFAULT 0,
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT (datetime('now')),
+    corrective_for_id INTEGER REFERENCES invoices(id)  -- посилання на оригінал (legacy
+                                                        -- коригуючі накладні, новий UI
+                                                        -- create_corrective_invoice не викликає)
 );
 
 CREATE TABLE invoice_lines (
@@ -328,27 +345,6 @@ CREATE TABLE invoice_transfers (
 - Різниця з `/orders/{id}/transfer`: той — стадія чернеток (до накладної, дочірні
   orders); `/invoices/{id}/transfer` — стадія сформованих накладних.
 
-### Скасування рейсу
-```sql
-CREATE TABLE route_cancellations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    route_id INTEGER NOT NULL REFERENCES routes(id),
-    cancel_date TEXT NOT NULL,
-    reason TEXT,
-    cancelled_by TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE cancellation_lines (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cancellation_id INTEGER NOT NULL REFERENCES route_cancellations(id),
-    product_id INTEGER NOT NULL REFERENCES products(id),
-    qty REAL NOT NULL,
-    disposition TEXT NOT NULL CHECK(disposition IN ('to_shop','to_next_day','writeoff')),
-    next_day_price_override REAL  -- знижка при перенесенні
-);
-```
-
 ### Рухи та залишки
 ```sql
 CREATE TABLE movements (
@@ -391,8 +387,93 @@ CREATE TABLE daily_balances (
 );
 -- Каскадний перерахунок з дати зміни — тільки для змінених продуктів
 ```
+**Увага:** `movements`/`daily_balances` існують у схемі, але в коді НІЧОГО в
+них не пише (жоден `db.add(Movement(...))`/`DailyBalance(...)` не знайдено,
+роутера `movements.py` немає). Фактичний рух товару відстежується через
+`orders`/`invoice_lines`/`invoice_transfers`/`shop_disposal_lines` (див.
+розділ "Магазин" нижче та `/reports/product-balances`). Не покладатись на ці
+дві таблиці як на джерело даних.
 
 ### Магазин
+
+Активна модель (v1.0.0+) — гнучка POS/звірка-система, `backend/models/shop.py`:
+```sql
+-- Звірка магазину за гнучкий період (денна/тижнева/місячна)
+CREATE TABLE shop_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_client_id INTEGER NOT NULL REFERENCES clients(id),
+    period_from TEXT NOT NULL,
+    period_to TEXT NOT NULL,
+    cash_expected REAL DEFAULT 0,   -- авто: сума (sold * price)
+    cash_actual REAL,               -- введено оператором
+    cash_diff REAL,                 -- cash_actual - cash_expected
+    notes TEXT,
+    closed INTEGER DEFAULT 0,
+    closed_at TEXT,
+    closed_by TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Рядок звірки: один виріб / одна партія (batch_date=NULL = залишок з попередньої звірки)
+CREATE TABLE shop_reconciliation_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reconciliation_id INTEGER NOT NULL REFERENCES shop_reconciliations(id),
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    batch_date TEXT,
+    opening_balance REAL DEFAULT 0,  -- лише для batch_date=NULL
+    received REAL DEFAULT 0,         -- авто: надходження за batch_date
+    entered_balance REAL,            -- введено оператором
+    written_off REAL DEFAULT 0,      -- авто: SUM(disposal_lines.qty)
+    calculated_sold REAL,            -- авто: opening + received - entered - written_off
+    price REAL,
+    expected_cash REAL               -- авто: calculated_sold * price
+);
+
+-- Розподіл списань: списання / пайок / передача клієнту / продаж поза POS
+CREATE TABLE shop_disposal_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reconciliation_line_id INTEGER NOT NULL REFERENCES shop_reconciliation_lines(id),
+    disposal_type TEXT NOT NULL,  -- writeoff | ration | client | sale
+    client_id INTEGER REFERENCES clients(id),
+    qty REAL NOT NULL,
+    price REAL,    -- ціна продажу (лише disposal_type='sale')
+    notes TEXT,
+    created_at TEXT
+);
+
+-- Надходження товарів ЗЗОВНІ для магазину (куплені, не з власного виробництва)
+CREATE TABLE shop_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_client_id INTEGER NOT NULL REFERENCES clients(id),
+    receipt_date TEXT NOT NULL,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    qty REAL NOT NULL,
+    purchase_price REAL DEFAULT 0,
+    notes TEXT,
+    created_at TEXT
+);
+
+-- Продаж товару через POS-інтерфейс продавця (роль seller, сторінка /pos)
+CREATE TABLE shop_sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop_client_id INTEGER NOT NULL REFERENCES clients(id),
+    sale_date TEXT NOT NULL,     -- YYYY-MM-DD
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    qty REAL NOT NULL,
+    price REAL NOT NULL,
+    amount REAL NOT NULL,        -- qty * price
+    session_id TEXT,             -- UUID: обʼєднує позиції одного чека
+    batch_date TEXT,             -- дата партії товару (яку партію продано)
+    notes TEXT,
+    created_at TEXT,
+    created_by TEXT              -- username продавця
+);
+```
+`compute_current_stock()` (`backend/routers/shop.py`) рахує поточний залишок
+"на льоту" з цих таблиць — без потреби у відкритій звірці.
+
+Legacy-таблиці (лишені для сумісності зі старими даними, НЕ основний
+механізм):
 ```sql
 CREATE TABLE shop_counts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -456,6 +537,51 @@ CREATE TABLE finances (
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     created_by TEXT       -- 'system' для автоматичних записів (не редагуються)
+);
+```
+
+### Аудит-лог (v1.3.2)
+```sql
+-- Захищений журнал змін — тільки UPDATE існуючих записів користувачами.
+-- CREATE і системні автодії НЕ логуються. Немає write-ендпоінтів окрім
+-- write_audit() (backend/models/audit.py), що викликається з роутерів
+-- ПЕРЕД safe_commit. Читання: GET /audit?entity_table=X&entity_id=Y
+-- (require_user). Фронтенд: AuditBadge.tsx — іконка ⚠ на змінених рядках,
+-- з'являється лише якщо є записи (auto-fetch при монтуванні), lazy-popup
+-- з історією. Інструментовано: finances (amount, notes), invoice_lines
+-- (qty, price_override), orders (qty, price_override, delivered_qty),
+-- clients (discount_pct, is_active).
+CREATE TABLE audit_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_table  TEXT NOT NULL,   -- 'finances', 'invoice_lines', 'orders', 'clients'
+    entity_id     INTEGER NOT NULL,
+    changed_field TEXT NOT NULL,
+    old_value     TEXT,
+    new_value     TEXT,
+    changed_by    TEXT NOT NULL,   -- username
+    changed_at    TEXT             -- виставляється з Python (datetime.now().isoformat()),
+                                    -- НЕ DB DEFAULT — SQLAlchemy лишає NULL в пам'яті інакше
+);
+CREATE INDEX idx_audit_log_entity ON audit_log(entity_table, entity_id);
+```
+
+### Авторизація
+```sql
+CREATE TABLE users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    full_name     TEXT DEFAULT '',
+    role          TEXT DEFAULT 'operator',  -- operator|accountant|admin|owner|seller
+    is_active     INTEGER DEFAULT 1
+);
+
+CREATE TABLE user_sessions (
+    token        TEXT PRIMARY KEY,
+    user_id      INTEGER NOT NULL REFERENCES users(id),
+    created_at   TEXT,
+    last_used_at TEXT  -- оновлюється при кожному auth-запиті; NULL = legacy сесія
 );
 ```
 
@@ -525,8 +651,17 @@ INSERT INTO settings VALUES
 ## API структура (FastAPI)
 
 ### Роутери
+Повний список підключається в `backend/main.py` (`app.include_router(...)`).
+Нижче — по одному представнику на роутер з характерними ендпоінтами; де
+кількість велика (`shop`, `invoices`, `settings`) — лише найважливіші, решта
+в самому файлі роутера.
+
 ```
 /api/v1/
+    /auth
+        login, /me, /logout               POST/GET/POST
+        users, public-users               GET — список користувачів (для екрану входу)
+    /auth/github                          OAuth GitHub (issues-інтеграція)
     /products          GET, POST, PUT, DELETE
     /categories        GET, POST
     /ingredients       GET, POST, PUT
@@ -538,16 +673,32 @@ INSERT INTO settings VALUES
     /orders            GET, POST, PUT, DELETE — з копіюванням
         /grid          GET — матриця клієнти×вироби для Зведеного виду (v1.1.4)
         /bulk-upsert   POST — масове збереження з atomic locked-check (v1.1.4)
+        /{id}/transfer POST — переміщення на дочірній рядок (стадія чернеток)
     /baking            GET, POST — завдання + результат + розподіл
-    /invoices          GET, POST, PUT — з автонумерацією
-    /movements         GET — журнал
-    /balances          GET — daily_balances з перерахунком
-    /shop              GET, POST — shop_counts + other_stock
+    /invoices          GET, POST, PUT — з автонумерацією; ще 14 ендпоінтів у файлі,
+                       найважливіші: /generate-drafts, /generate-from-orders,
+                       /{id}/transfer, /set-surplus, /close-shops, /{id}/status,
+                       /{id}/lines (PUT — редагування рядків), /transfers-by-date,
+                       /locked-clients
+    /shop              27 ендпоінтів (POS + гнучка звірка, `shop_reconciliations`
+                       і похідні — див. схему БД "Магазин"); основні групи:
+                       /shops, /summary, /reconciliations*, /receipts*,
+                       /pos/products, /sales* (POS-продаж), /other-products
     /finances          GET, POST, PATCH /{id} (v1.1.7), DELETE
+        /balances      GET — баланси-борги клієнтів (ClientBalance, НЕ daily_balances)
         articles       GET, POST, PUT, DELETE (з прапором editable)
-    /cancellations     GET, POST — скасування рейсів
-    /reports           GET — різні звіти
-    /settings          GET, PUT
+    /reports
+        /product-balances  GET?date= — Баланси Виробів (v1.3.3), звірка з
+                           Денним звітом (спільна функція _compute_section1_data)
+    /audit             GET?entity_table=&entity_id= — read-only, історія змін (v1.3.2)
+    /settings          GET, PUT; ще /telegram/status, /telegram/restart,
+                       /telegram/stop, /reset-db, /server-info
+    /dashboard         /, /shop-summary/, /calendar/, /trends — дашборд власника
+    /db-editor         /tables, /tables/{t}/schema, /tables/{t}/data (GET/PUT/DELETE
+                       рядка) — прямий перегляд/редагування БД (адмін-інструмент,
+                       окремий маршрут /db-editor поза Layout)
+    /backup            14 ендпоінтів: /list, /now, /cloud/detect, /restore/{f},
+                       /demo/enter, /demo/exit, /archive
     /issues            GET / (список client-report) · POST / (нове звернення → GitHub)
     /bot/
         pending-orders              GET — замовлення зі статусом pending
@@ -559,11 +710,11 @@ INSERT INTO settings VALUES
         order-status/resume         POST — відновити негайно
         clients/{id}/bot-users      GET — список авторизованих Telegram-юзерів
         clients/{id}/bot-users/{uid} DELETE — відкликати авторизацію
-    /invoices/locked-clients        GET — client_ids з наявними накладними на дату
-    /print/                                            ← друковані форми
+    /print/                                            ← друковані форми (без auth, як усі /print/)
         invoice/{id}                GET — одна накладна
         invoices                    GET — пакет накладних (2 на A4)
         baking                      GET — завдання пекарям
+        baking-report                GET — звіт результату випічки
         daily-report                GET — денний звіт
         debts                       GET — боргова відомість
         monthly-sales               GET — місячний звіт продажів
@@ -572,6 +723,9 @@ INSERT INTO settings VALUES
         route-sheet                 GET — Маршрутний лист водія (v1.1.7)
         address-sheet               GET — Адресний лист клієнтів (v1.1.7)
 ```
+
+**Немає в API** (таблиці/функціонал видалені або ніколи не мали окремого
+роутера): `/movements`, `/cancellations` — див. примітки в схемі БД вище.
 
 ### Ключові бізнес-правила для сервісів
 - `get_price(product_id, client_id, date)` — повертає ціну по пріоритету
@@ -591,8 +745,15 @@ INSERT INTO settings VALUES
 | Маршрути | `/routes` | Накладні-чернетки з замовлень → друк → корекція → відправка |
 | Випічка | `/baking` | Внесення результату + вирівнювання розбіжностей (від накладних) |
 | Магазин | `/shop` | Щоденна звірка, несвіжий товар, група ІНШЕ |
-| Фінанси | `/finances` | Баланси клієнтів, рух коштів |
+| Фінанси | `/finances` | 5 під-вкладок: Дашборд (`OwnerDashboard`), Баланси клієнтів, Баланси Виробів (`ProductBalancesTab`, v1.3.3 — звірка руху продукції з Денним звітом), Журнал операцій, Звіти (друковані PDF) |
 | Довідники | `/admin` | Вироби, клієнти, ціни, маршрути, налаштування |
+
+Поза основним `Layout`-меню (не в списку вкладок вище, окремі маршрути):
+| Сторінка | URL | Опис |
+|---------|-----|------|
+| Довідка | `/help` | `HelpPage.tsx` — інструкції для операторів (див. правило оновлення при релізі) |
+| DB Editor | `/db-editor` | `DbEditorPage.tsx` — прямий перегляд/редагування таблиць БД (адмін), окремий від Layout маршрут |
+| POS-каса | `/pos` | `PosPage.tsx` — окремий інтерфейс для ролі `seller`, встановлюється як окремий "додаток" на планшеті магазину |
 
 **Поточна дата** завжди видима у хедері і доступна для зміни (для роботи "за вчора").
 
@@ -695,6 +856,8 @@ INSERT INTO settings VALUES
 - [x] Управління цінами (майбутні дати, % зміна)
 - [x] Собівартість і маржинальність
 - [x] Мобільний дашборд для власника
+- [x] Аудит-лог змін + обнулення фінансових операцій (v1.3.2, див. "Реліз v1.3.2")
+- [x] Баланси Виробів — звірка руху продукції з Денним звітом (v1.3.3, див. "Реліз v1.3.3")
 
 ### ✅ Telegram Bot
 - [x] Авторизація через номер телефону (`/start` → контакт → прив'язка до клієнта)
@@ -811,7 +974,7 @@ INSERT INTO settings VALUES
 - [x] Секція 2 — Маршрути: по кожному маршруту хліб/булки/обмін/сума; обмін з `orders`, не з `invoice_lines.is_exchange`
 - [x] Секція 3 — Фінанси: 3.1 Залишок на початок дня (накопичений з попередніх днів) → 3.2 Клієнтські операції (Накладна першою) → 3.3 Касові операції → 3.4 Залишок в касі
   - `_is_invoice_entry()`: перевіряє тільки назву статті "Накладна" (не `finance_type` — у імпортованих даних касові статті мають `finance_type='invoice'`)
-- [x] Вкладка "Звіти" (`/reports`, `ReportsPage.tsx`): датепікер + кнопка "Відкрити звіт PDF" → нова вкладка
+- [x] Вкладка "Звіти": підвкладка `tab==='reports'` всередині `FinancesPage.tsx` (НЕ окремий маршрут — `ReportsPage.tsx` існує у файловій системі, але ніде не імпортується, мертвий файл), датепікер + кнопки "Відкрити звіт PDF" → нова вкладка
 
 ### ✅ Міграція з .accdb
 - [x] `backend/routers/import_accdb.py` — ендпоінти: upload, preview, context, run, status, result
@@ -905,6 +1068,26 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 - Commit message формат: `feat: назва функції` / `fix: опис`  
 - Перед push — запустити pytest (backend) і npm run build (frontend)
 - Гілки: main (стабільний), dev (розробка), feature/* (фічі)
+
+### Оновлення документації при релізі
+
+**ПРАВИЛО: перед виставленням версії (тег + GitHub Release) — завжди:**
+1. Додати в `CLAUDE.md` зміни, внесені цим релізом: нові таблиці/поля БД,
+   нові роутери/ендпоінти, нові сторінки/вкладки фронтенду, зміни бізнес-логіки.
+   Короткий запис у відповідний розділ схеми/API/фаз розробки — не обов'язково
+   окремий release-notes блок для кожної дрібної версії (ті лишаються для
+   значущих релізів, як `## Реліз v1.3.0 — ...`).
+2. Перевірити чи потребує оновлення **довідка користувача**
+   (`frontend/src/pages/HelpPage.tsx`) — окремий документ від CLAUDE.md,
+   написаний для операторів простою мовою (не технічний). CLAUDE.md
+   документує код для AI-агента; HelpPage.tsx пояснює робочий процес людям.
+   Вони легко розходяться, бо зміни в програму вносяться, а обидва довідники
+   оновлюються вручну. Перевірка: чи згадана нова вкладка/кнопка/поле в
+   HelpPage.tsx, чи не описує застарілий воркфлоу (напр. кроки, яких вже
+   немає, або яких бракує після зміни бізнес-логіки).
+
+Обидва пункти — частина визначення "завершено" для будь-якої функції, що
+змінює структуру даних, API або UI, не окрема задача "колись потім".
 
 ## Відомі обмеження
 
@@ -1025,6 +1208,50 @@ Windows Task Scheduler → BakeryTray (AtLogon)
   новій звірці `period_to` клемпиться `≥ period_from` (без інвертованого періоду). Фронт `initRec`
   синхронізує відкриту звірку через POST. Виправляє «застряглу» стару відкриту звірку, що ховала
   новіший товар у POS і звірці.
+
+## Реліз v1.3.2 — аудит-лог змін + обнулення фінансових операцій
+
+- **Проблема**: оператор не міг виправити помилково внесену суму (дублікат
+  запису з імпорту Access) — видалення ламало б звʼязок з накладною, а
+  редагування без сліду приховувало б факт зміни.
+- **Обнулення замість видалення**: `PATCH /finances/{id}` дозволяє `amount=0`
+  (`FinanceUpdate` валідатор `v < 0` замість `v <= 0`; `FinanceCreate` для
+  нових записів лишає мінімум `0.01`).
+- **Захищений аудит-лог** (див. схему БД вище, `audit_log`): логуються лише
+  UPDATE існуючих записів користувачами — НЕ CREATE, НЕ системні автодії.
+  Інструментовано: `finances` (amount, notes), `invoice_lines` (qty,
+  price_override), `orders` (qty, price_override, delivered_qty), `clients`
+  (discount_pct, is_active). `baking_tasks` свідомо НЕ логується (низька
+  цінність, прибрано після фідбеку).
+- **Frontend**: `AuditBadge.tsx` — іконка ⚠ (жовтий трикутник) на рядку;
+  з'являється лише якщо для рядка є записи в audit_log (auto-fetch при
+  монтуванні, ре-fetch через `key` що включає відстежувані поля); клік →
+  popup з історією (дата, поле, було→стало, автор). Підключено у
+  `FinancesPage.tsx` (журнал + панель клієнта) і `OrderModal.tsx` (поруч з
+  полем кількості).
+
+## Реліз v1.3.3 — вкладка "Баланси Виробів"
+
+- **Проблема**: оператори звіряють друкований "Денний звіт пекарні" вручну і
+  не можуть швидко знайти де саме кількості не співпадають.
+- **Report-parity через спільну функцію**: `_compute_section1_data()`
+  (`backend/routers/print_views.py`) — витягнута з `_dr_section1` чиста
+  функція без HTML; викликається і друкованим звітом, і новим ендпоінтом.
+  Гарантує що Замовлено/Спечено/Обмін/Магазин на екрані завжди 1:1 з PDF
+  (структурно неможливо розійтись при майбутніх правках однієї сторони).
+- **`GET /reports/product-balances?date=`**: понад report-parity колонки
+  додає деталізацію по клієнтах (з `invoice_lines`, розбивка `line_kind`),
+  списання/пайок (фабрика — `Order origin_id=0`; магазин —
+  `shop_disposal_lines` за `batch_date`), за собівартістю (`cost_per_unit`).
+  `diff_qty` (розбіжність) рахується ТІЛЬКИ коли `baked_qty` реально введено
+  (`baked_entered=True`), не на report-parity заповнювачі (`else ord_qty`).
+- **`ProductBalancesTab.tsx`**: 3 рівні розгортання (категорія → виріб →
+  клієнти), усі згорнуті за замовчуванням (кнопка "Розгорнути розбіжності"
+  для швидкого пошуку), пошук по назві, чекбокс "Тільки розбіжності",
+  hint-підказки (`HelpTip`) на кожній колонці + формула-банер зверху.
+- **`movements`/`daily_balances` НЕ використовуються** — джерела:
+  `orders` + `invoice_lines` + `shop_disposal_lines` (див. примітку в схемі
+  БД, розділ "Рухи та залишки").
 
 ## Релізи v1.1.x
 
