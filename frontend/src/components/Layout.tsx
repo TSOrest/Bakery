@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
@@ -80,58 +80,93 @@ export default function Layout() {
     return allowed.includes(t.key)
   })
 
+  // ── Логотип+меню+права частина мають лишатись в одному рядку. Якщо меню
+  // (найгнучкіша частина) туди не влазить — переносимо ЛИШЕ його на другий
+  // рядок, вирівняне вліво. Точна ширина рахується виміром прихованої
+  // "пробної" копії меню (завжди в один рядок, поза потоком), бо лише вона
+  // дає справжню ширину без урахування власного внутрішнього переносу. ──
+  const headerRowRef = useRef<HTMLDivElement>(null)
+  const logoRef      = useRef<HTMLSpanElement>(null)
+  const navProbeRef  = useRef<HTMLElement>(null)
+  const rightRef     = useRef<HTMLDivElement>(null)
+  const [navWraps, setNavWraps] = useState(false)
+
+  useLayoutEffect(() => {
+    const row = headerRowRef.current
+    if (!row) return
+    const GAP = 16 // 1rem — по одному проміжку з кожного боку меню, коли воно в рядку
+    const measure = () => {
+      const available = row.clientWidth
+      const logoW  = logoRef.current?.offsetWidth ?? 0
+      const navW   = navProbeRef.current?.offsetWidth ?? 0
+      const rightW = rightRef.current?.offsetWidth ?? 0
+      setNavWraps(logoW + navW + rightW + GAP * 2 > available)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(row)
+    return () => ro.disconnect()
+  }, [visibleTabs.length, bakeryName, user, shopPriceAlert, workDate, effectiveDate])
+
+  const tabsContent = visibleTabs.map((t) => (
+    <NavLink
+      key={t.path}
+      to={t.path}
+      className={({ isActive }) =>
+        isActive ? `${styles.tab} ${styles.active}` : styles.tab
+      }
+      title={t.key === 'admin' ? 'Налаштування' : undefined}
+    >
+      {t.key === 'admin' ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      ) : t.key === 'shop' && shopPriceAlert ? (
+        <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+          {t.label}
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', display: 'inline-block', flexShrink: 0 }} title="Є зміна ціни — рекомендується провести звірку" />
+        </span>
+      ) : t.label}
+    </NavLink>
+  ))
+
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <span className={styles.logo}>🍞 {bakeryName}</span>
-        <nav className={styles.nav}>
-          {visibleTabs.map((t) => (
-            <NavLink
-              key={t.path}
-              to={t.path}
-              className={({ isActive }) =>
-                isActive ? `${styles.tab} ${styles.active}` : styles.tab
-              }
-              title={t.key === 'admin' ? 'Налаштування' : undefined}
-            >
-              {t.key === 'admin' ? (
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-              ) : t.key === 'shop' && shopPriceAlert ? (
-                <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-                  {t.label}
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b', display: 'inline-block', flexShrink: 0 }} title="Є зміна ціни — рекомендується провести звірку" />
-                </span>
-              ) : t.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className={styles.headerRight}>
-          <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
-          <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
-            <span>Дата роботи:</span>
-            <input
-              type="date"
-              value={workDate}
-              onChange={(e) => setWorkDate(e.target.value)}
-              className={workDate !== effectiveDate ? styles.dateInputWarn : ''}
-            />
-            {workDate !== effectiveDate && (
-              <span className={styles.dateWarnBadge} title={`Поточна дата: ${effectiveDate}`}>⚠</span>
-            )}
-          </label>
-          <div className={styles.userInfo}>
-            <span className={styles.userName}>
-              {user?.full_name || user?.username}
-            </span>
-            <span className={styles.userRole}>{user?.role_label}</span>
-            <button className={styles.logoutBtn} onClick={logout} title="Вийти">
-              ⏻
-            </button>
+        <div className={styles.headerRow} ref={headerRowRef}>
+          <span className={styles.logo} ref={logoRef}>🍞 {bakeryName}</span>
+          {!navWraps && <nav className={styles.nav}>{tabsContent}</nav>}
+          <div className={styles.headerRight} ref={rightRef}>
+            <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
+            <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
+              <span>Дата роботи:</span>
+              <input
+                type="date"
+                value={workDate}
+                onChange={(e) => setWorkDate(e.target.value)}
+                className={workDate !== effectiveDate ? styles.dateInputWarn : ''}
+              />
+              {workDate !== effectiveDate && (
+                <span className={styles.dateWarnBadge} title={`Поточна дата: ${effectiveDate}`}>⚠</span>
+              )}
+            </label>
+            <div className={styles.userInfo}>
+              <span className={styles.userName}>
+                {user?.full_name || user?.username}
+              </span>
+              <span className={styles.userRole}>{user?.role_label}</span>
+              <button className={styles.logoutBtn} onClick={logout} title="Вийти">
+                ⏻
+              </button>
+            </div>
           </div>
+          {/* Прихована проба — завжди в один рядок, лише для виміру природної ширини меню */}
+          <nav className={`${styles.nav} ${styles.navProbe}`} ref={navProbeRef} aria-hidden="true">
+            {tabsContent}
+          </nav>
         </div>
+        {navWraps && <nav className={`${styles.nav} ${styles.navWrapped}`}>{tabsContent}</nav>}
       </header>
 
       <main className={styles.main}>

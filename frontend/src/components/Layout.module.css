@@ -8,12 +8,22 @@
 
 .header {
   display: flex;
-  align-items: center;
-  gap: 1rem;
+  flex-direction: column;
   padding: 0.5rem 1.5rem;
   background: #1a3a5c;
   color: #fff;
-  flex-wrap: wrap;
+}
+
+/* Рядок 1: логотип + меню (якщо влазить) + права частина — завжди разом.
+   Чи влазить меню вирішує JS (Layout.tsx, ResizeObserver) через приховану
+   пробу .navProbe — лише вона дає справжню природну ширину меню незалежно
+   від його власного внутрішнього переносу. */
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  position: relative;
 }
 
 .logo {
@@ -21,6 +31,7 @@
   font-weight: 700;
   margin-right: 0.5rem;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav {
@@ -28,6 +39,28 @@
   gap: 0.25rem;
   flex: 1;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Прихована копія меню — завжди в один рядок (flex-wrap: nowrap), поза
+   потоком, лише для виміру природної ширини всіх пунктів разом. */
+.navProbe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  top: 0;
+  left: 0;
+}
+
+/* Рядок 2: меню, коли не влазить в перший рядок — вирівняне вліво,
+   пункти лишаються горизонтальними (переносяться по кілька в рядок
+   лише якщо й другого рядка не вистачає). */
+.navWrapped {
+  width: 100%;
+  margin-top: 0.35rem;
+  flex: none;
 }
 
 .tab {
