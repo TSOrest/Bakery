@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import OwnerDashboard from './OwnerDashboard'
+import ProductBalancesTab from './ProductBalancesTab'
 import type { ClientBalance, Finance, FinanceSummary, InternalKpi, FinanceArticle } from '../types'
 import {
   fetchBalances, fetchSummary, fetchClientHistory,
@@ -15,7 +16,7 @@ import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
 
-type TabId = 'dashboard' | 'balances' | 'journal' | 'reports'
+type TabId = 'dashboard' | 'balances' | 'products' | 'journal' | 'reports'
 
 function firstDayOfMonth(iso: string): string {
   return iso.slice(0, 7) + '-01'
@@ -671,6 +672,12 @@ export default function FinancesPage() {
           Баланси клієнтів
         </button>
         <button
+          className={tab === 'products' ? styles.tabActive : styles.tab}
+          onClick={() => setTab('products')}
+        >
+          Баланси Виробів
+        </button>
+        <button
           className={tab === 'journal' ? styles.tabActive : styles.tab}
           onClick={() => setTab('journal')}
         >
@@ -809,6 +816,9 @@ export default function FinancesPage() {
           </div>
         </div>
       )}
+
+      {/* ── Баланси Виробів ── */}
+      {tab === 'products' && <ProductBalancesTab />}
 
       {/* ── Журнал операцій ── */}
       {tab === 'journal' && (

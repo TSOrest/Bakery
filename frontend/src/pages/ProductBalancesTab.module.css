@@ -1,0 +1,143 @@
+.wrap { }
+
+.filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.filters label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+}
+.filters input[type="date"] {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.searchInput {
+  padding: 6px 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 220px;
+}
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+}
+.expandDiffsBtn {
+  padding: 5px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12.5px;
+  color: #444;
+  cursor: pointer;
+}
+.expandDiffsBtn:hover:not(:disabled) { background: #f0f4f8; border-color: #9ab; }
+.expandDiffsBtn:disabled { opacity: 0.5; cursor: default; }
+.loading { font-size: 12px; color: #888; }
+
+.formulaHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f5f8fc;
+  border: 1px solid #dde6f0;
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  color: #444;
+  margin-bottom: 10px;
+}
+.formulaLabel { font-weight: 600; color: #1a3a5c; margin-right: 2px; }
+.formulaOp { color: #1565c0; font-weight: 700; margin: 0 2px; }
+.formulaMuted { color: #999; margin-left: 4px; }
+
+.tableWrap { overflow-x: auto; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  background: #f0f4f8;
+  padding: 8px 10px;
+  font-weight: 600;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.thNum, .tdNum {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.thName, .tdName, .tdNameIndent, .tdClientName {
+  text-align: left;
+  white-space: normal;
+}
+.table td { padding: 6px 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
+
+/* ── Рівень 1: категорія ── */
+.catRow {
+  cursor: pointer;
+  background: #eaf1fb;
+}
+.catRow:hover { background: #dfeaf9; }
+.catRow td { font-size: 13.5px; padding-top: 8px; padding-bottom: 8px; }
+
+.countHint { color: #8a94a3; font-weight: 400; margin-left: 4px; font-size: 12px; }
+
+/* ── Рівень 2: виріб ── */
+.productRow td { color: #333; }
+.productRow.clickable { cursor: pointer; }
+.productRow.clickable:hover { background: #f5f8fc; }
+.tdNameIndent { padding-left: 30px !important; }
+
+/* ── Рівень 3: клієнт ── */
+.clientRow { background: #fbfcfe; }
+.clientRow:hover { background: #f3f6fb; }
+.clientRow td { color: #555; font-size: 12.5px; padding-top: 4px; padding-bottom: 4px; }
+.tdClientName { padding-left: 52px !important; }
+.systemClientRow td { color: #97a0ad; font-style: italic; }
+
+.clientTagIcon { display: inline-block; width: 16px; margin-right: 2px; cursor: help; }
+
+.expandIcon {
+  display: inline-block;
+  width: 14px;
+  color: #888;
+}
+
+.estimatedMark {
+  color: #e67e22;
+  font-weight: 700;
+  margin-left: 3px;
+  cursor: help;
+}
+
+.sumHint { color: #8a94a3; font-size: 11px; }
+
+.diffOk       { color: #27ae60; }
+.diffSurplus  { color: #27ae60; font-weight: 700; }
+.diffShortage { color: #e74c3c; font-weight: 700; }
+
+.totalsRow {
+  background: #e8edf3;
+  font-weight: 600;
+}
+.totalsRow td { border-top: 2px solid #9ab; }
+
+.empty { text-align: center; color: #888; padding: 20px !important; }

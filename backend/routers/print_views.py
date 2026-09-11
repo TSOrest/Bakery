@@ -1140,8 +1140,16 @@ def print_baking_report(task_date: str, db: Session = Depends(get_db)):
 
 # ─── Денний звіт пекарні ─────────────────────────────────────────────────────
 
-def _dr_section1(db: Session, date: str) -> str:
-    """Секція 1: продукція — замовлено/спечено/обмін/магазин по категоріях."""
+def _compute_section1_data(db: Session, date: str) -> dict:
+    """Продукція за день: замовлено/спечено/обмін/магазин, по категоріях→виробах.
+
+    Єдине джерело істини для Секції 1 денного звіту (_dr_section1, HTML) і для
+    JSON-ендпоінту /reports/product-balances — щоб цифри ніколи не розійшлись.
+
+    Повертає {cat_id: {"name", "sort_order", "products": [
+        {"product_id","name","ordered","baked","baked_entered","exchange","shop"}, ...
+    ]}}, впорядковане по Category.sort_order, продукти — по імені.
+    """
     # Замовлено: з orders напряму (всі клієнти крім магазину/системних)
     SYSTEM_KINDS = ("shop", "writeoff", "ration", "underbaked")
     ordered_rows = (
@@ -1211,7 +1219,7 @@ def _dr_section1(db: Session, date: str) -> str:
 
     all_pids = set(ordered) | set(tasks) | set(exchanges) | set(to_shop)
     if not all_pids:
-        return "<p style='color:#888;font-size:9pt;'>— Даних про продукцію немає —</p>"
+        return {}
 
     products_map = {p.id: p for p in db.query(Product).filter(Product.id.in_(all_pids)).all()}
     cats_map     = {c.id: c for c in db.query(Category).filter(Category.is_baked == 1).all()}
@@ -1223,33 +1231,58 @@ def _dr_section1(db: Session, date: str) -> str:
             continue
         by_cat.setdefault(p.category_id, []).append(pid)
 
-    if not by_cat:
+    result: dict[int, dict] = {}
+    for cat_id, pids in by_cat.items():
+        cat = cats_map[cat_id]
+        products = []
+        for pid in sorted(pids, key=lambda pid: products_map[pid].name):
+            bt      = tasks.get(pid)
+            ord_qty = ordered.get(pid, 0.0)
+            baked_entered = bt is not None and bt.baked_qty is not None
+            baked   = (bt.baked_qty if baked_entered else ord_qty)
+            products.append({
+                "product_id": pid,
+                "name": products_map[pid].name,
+                "short_name": products_map[pid].short_name,
+                "ordered": ord_qty,
+                "baked": baked,
+                "baked_entered": baked_entered,
+                "exchange": exchanges.get(pid, 0.0),
+                "shop": to_shop.get(pid, 0.0),
+            })
+        result[cat_id] = {
+            "name": cat.name,
+            "sort_order": cat.sort_order,
+            "products": products,
+        }
+    return result
+
+
+def _dr_section1(db: Session, date: str) -> str:
+    """Секція 1: продукція — замовлено/спечено/обмін/магазин по категоріях."""
+    data = _compute_section1_data(db, date)
+    if not data:
         return "<p style='color:#888;font-size:9pt;'>— Даних про продукцію немає —</p>"
 
     html = ""
-    for cat_id in sorted(by_cat, key=lambda cid: cats_map[cid].sort_order):
-        cat  = cats_map[cat_id]
-        pids = sorted(by_cat[cat_id], key=lambda pid: products_map[pid].name)
+    for cat_id in sorted(data, key=lambda cid: data[cid]["sort_order"]):
+        cat_name = data[cat_id]["name"]
+        products = data[cat_id]["products"]
         tot_ord = tot_bak = tot_exc = tot_shop = 0.0
         rows_html = ""
-        for pid in pids:
-            bt      = tasks.get(pid)
-            ord_qty = ordered.get(pid, 0.0)
-            baked   = (bt.baked_qty if bt and bt.baked_qty is not None else ord_qty)
-            exc     = exchanges.get(pid, 0.0)
-            shop    = to_shop.get(pid, 0.0)
+        for p in products:
+            ord_qty, baked, exc, shop = p["ordered"], p["baked"], p["exchange"], p["shop"]
             tot_ord += ord_qty; tot_bak += baked; tot_exc += exc; tot_shop += shop
-            pname   = products_map[pid].name
             rows_html += f"""
       <tr>
-        <td>{pname}</td>
+        <td>{p["name"]}</td>
         <td class="dr-num">{fmt(ord_qty) if ord_qty else "—"}</td>
         <td class="dr-num">{fmt(baked)   if baked   else "—"}</td>
         <td class="dr-num">{fmt(exc)     if exc     else "—"}</td>
         <td class="dr-num">{fmt(shop)    if shop    else "—"}</td>
       </tr>"""
         html += f"""
-  <div class="dr-cat-title">{esc(cat.name.upper())}</div>
+  <div class="dr-cat-title">{esc(cat_name.upper())}</div>
   <table class="dr-table">
     <thead>
       <tr>
