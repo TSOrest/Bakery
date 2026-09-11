@@ -10,6 +10,7 @@ import { api } from '../api/client'
 import { useWorkDate } from '../context/DateContext'
 import { useToast } from '../components/Toast'
 import { IconButton } from '../components/IconButton'
+import AuditBadge from '../components/AuditBadge'
 import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
@@ -253,7 +254,7 @@ function EditFinanceForm({ finance, onClose, onSaved }: EditFinanceFormProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const num = parseFloat(amount.replace(',', '.'))
-    if (!num || num <= 0) { setError('Введіть суму > 0'); return }
+    if (isNaN(num) || num < 0) { setError('Сума не може бути від\'ємною'); return }
     setSaving(true)
     setError('')
     try {
@@ -286,7 +287,7 @@ function EditFinanceForm({ finance, onClose, onSaved }: EditFinanceFormProps) {
           )}
           <label>Сума (грн)
             <input
-              type="number" min="0.01" step="0.01" autoFocus
+              type="number" min="0" step="0.01" autoFocus
               value={amount} onChange={e => setAmount(e.target.value)}
               required
             />
@@ -408,15 +409,18 @@ function ClientPanel({ balance, workDate, articles, onChanged, onClose }: Client
               <span className={`${styles.historyRowAmount} ${e.sign === 1 ? styles.creditColor : styles.debtColor}`}>
                 {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
               </span>
-              {canEditFinance(e) ? (
-                <button
-                  className={styles.editBtn}
-                  title="Редагувати суму"
-                  onClick={() => setEditingFinance(e)}
-                >
-                  ✎
-                </button>
-              ) : <span />}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                {canEditFinance(e) && (
+                  <button
+                    className={styles.editBtn}
+                    title="Редагувати суму"
+                    onClick={() => setEditingFinance(e)}
+                  >
+                    ✎
+                  </button>
+                )}
+                <AuditBadge key={`${e.id}-${e.amount}-${e.notes ?? ''}`} entityTable="finances" entityId={e.id} />
+              </span>
             </div>
             <div className={styles.historyRowMeta}>
               <span className={styles.historyDate}>{e.finance_date}</span>
@@ -854,7 +858,7 @@ export default function FinancesPage() {
                   <td className={`${styles.right} ${e.sign === 1 ? styles.creditColor : styles.debtColor}`}>
                     {e.sign === 1 ? '+' : '−'}{fmt(e.amount)}
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     {canEditFinance(e) && (
                       <button
                         className={styles.editBtn}
@@ -864,6 +868,7 @@ export default function FinancesPage() {
                         ✎
                       </button>
                     )}
+                    <AuditBadge key={`${e.id}-${e.amount}-${e.notes ?? ''}`} entityTable="finances" entityId={e.id} />
                   </td>
                 </tr>
               ))}

@@ -11,11 +11,13 @@ from backend.models.shop import ShopCount
 from backend.models.references import Client
 from backend.services.prices import get_price
 from backend.models.finances import FinanceArticle
+from backend.models.audit import write_audit
 from backend.schemas.finance import (
     FinanceCreate, FinanceUpdate, FinanceOut, ClientBalance, FinanceSummary, FINANCE_LABELS,
 )
 from backend.services.finance import get_all_balances, get_summary
 from backend.routers.auth import require_user
+from backend.models.auth import User
 
 router = APIRouter(prefix="/finances", tags=["Фінанси"])
 
@@ -241,7 +243,7 @@ def update_finance(
     finance_id: int,
     data: FinanceUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_user),
+    current_user: User = Depends(require_user),
 ):
     """Редагування суми і нотатки фінансового запису.
 
@@ -250,6 +252,8 @@ def update_finance(
     - запис створено вручну (created_by != 'system') — автоматичні від накладних не торкаємось.
 
     Перевірку дати робить frontend (показує кнопку лише для finance_date == workDate).
+    amount=0 дозволено для обнулення помилково внесеного запису.
+    Всі зміни фіксуються в audit_log.
     """
     entry = db.get(Finance, finance_id)
     if not entry:
@@ -267,6 +271,13 @@ def update_finance(
             status_code=400,
             detail="Для цієї статті редагування суми не дозволено",
         )
+
+    if data.amount != entry.amount:
+        write_audit(db, "finances", entry.id, "amount",
+                    entry.amount, data.amount, current_user.username)
+    if data.notes is not None and data.notes != entry.notes:
+        write_audit(db, "finances", entry.id, "notes",
+                    entry.notes, data.notes, current_user.username)
 
     entry.amount = data.amount
     if data.notes is not None:

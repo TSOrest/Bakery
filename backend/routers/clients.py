@@ -7,6 +7,8 @@ from backend.database import get_db, safe_commit
 from backend.models.references import Client
 from backend.schemas.references import ClientCreate, ClientUpdate, ClientOut
 from backend.routers.auth import require_admin
+from backend.models.audit import write_audit
+from backend.models.auth import User
 
 router = APIRouter(prefix="/clients", tags=["Клієнти"])
 
@@ -44,13 +46,19 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(r
 
 
 @router.put("/{client_id}", response_model=ClientOut)
-def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db),
+                  current_user: User = Depends(require_admin)):
     from backend.models.references import ClientGroup
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+    audit_fields = {"discount_pct", "is_active"}
     patch = data.model_dump(exclude_none=True)
     for field, value in patch.items():
+        if field in audit_fields:
+            old_val = getattr(c, field, None)
+            if old_val != value:
+                write_audit(db, "clients", c.id, field, old_val, value, current_user.username)
         setattr(c, field, value)
     # Cascade: якщо змінили маршрут — група старого маршруту вже не валідна.
     # Перевіряємо актуальну групу клієнта (після setattr) на відповідність route_id.

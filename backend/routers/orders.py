@@ -16,6 +16,8 @@ from backend.schemas.orders import (
 )
 from backend.services.orders import copy_orders
 from backend.routers.auth import require_user
+from backend.models.audit import write_audit
+from backend.models.auth import User
 
 router = APIRouter(prefix="/orders", tags=["Замовлення"])
 
@@ -258,11 +260,17 @@ def create_order(data: OrderCreate, db: Session = Depends(get_db), _=Depends(req
 
 
 @router.put("/{order_id}", response_model=OrderOut)
-def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db), _=Depends(require_user)):
+def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db),
+                 current_user: User = Depends(require_user)):
     o = db.get(Order, order_id)
     if not o:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
+    audit_fields = {"qty", "price_override", "delivered_qty"}
     for field, value in data.model_dump(exclude_none=True).items():
+        if field in audit_fields:
+            old_val = getattr(o, field, None)
+            if old_val != value:
+                write_audit(db, "orders", o.id, field, old_val, value, current_user.username)
         setattr(o, field, value)
     safe_commit(db)
     db.refresh(o)

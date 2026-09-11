@@ -67,15 +67,16 @@ class FinanceCreate(BaseModel):
 class FinanceUpdate(BaseModel):
     """PATCH /finances/{id} — редагування суми і нотатки.
     Дату, статтю, клієнта, sign — НЕ змінюємо.
+    amount=0 дозволено (обнулення помилково внесеного запису).
     """
     amount: float
     notes:  Optional[str] = None
 
     @field_validator("amount")
     @classmethod
-    def positive_amount(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("amount має бути > 0")
+    def non_negative_amount(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("amount не може бути від'ємним")
         return round(v, 2)
 
 

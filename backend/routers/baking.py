@@ -125,7 +125,8 @@ def ensure_task(task_date: str, product_id: int, db: Session = Depends(get_db), 
 
 
 @router.put("/tasks/{task_id}", response_model=BakingTaskOut)
-def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_db), _=Depends(require_user)):
+def update_task(task_id: int, data: BakingTaskUpdate, db: Session = Depends(get_db),
+                _=Depends(require_user)):
     task = db.get(BakingTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Завдання не знайдено")

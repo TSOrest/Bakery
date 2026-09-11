@@ -16,6 +16,8 @@ from backend.services.invoices import generate_invoice_number, generate_correcti
 from backend.services.prices import get_price
 from backend.services.finance import recompute_invoice_finance
 from backend.routers.auth import require_user
+from backend.models.audit import write_audit
+from backend.models.auth import User
 
 router = APIRouter(prefix="/invoices", tags=["Накладні"])
 
@@ -398,12 +400,13 @@ def update_invoice_lines(
     invoice_id: int,
     data: InvoiceLinesUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_user),
+    current_user: User = Depends(require_user),
 ):
     """Оновлює кількості (і опц. price_override) рядків накладної.
 
     Дозволено у draft/sent/processing/accepted. Перераховує total_sum.
     Для accepted — синхронізує фінансовий борг-запис (recompute_invoice_finance).
+    Зміни qty і price_override фіксуються в audit_log.
     """
     inv = db.get(Invoice, invoice_id)
     if not inv:
@@ -415,6 +418,12 @@ def update_invoice_lines(
         line = db.get(InvoiceLine, upd.id)
         if not line or line.invoice_id != invoice_id:
             continue
+        if upd.qty != line.qty:
+            write_audit(db, "invoice_lines", line.id, "qty",
+                        line.qty, upd.qty, current_user.username)
+        if upd.price_override is not None and upd.price_override != line.price_override:
+            write_audit(db, "invoice_lines", line.id, "price_override",
+                        line.price_override, upd.price_override, current_user.username)
         line.qty = upd.qty
         if upd.price_override is not None:
             line.price_override = upd.price_override

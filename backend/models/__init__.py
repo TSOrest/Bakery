@@ -13,6 +13,7 @@ from backend.models.shop import ShopCount, OtherStockIn
 from backend.models.finances import Finance, FinanceArticle
 from backend.models.settings import Setting
 from backend.models.auth import User, UserSession
+from backend.models.audit import AuditLog
 
 __all__ = [
     "Unit", "Category", "Product", "Ingredient", "ProductIngredient",
@@ -26,4 +27,5 @@ __all__ = [
     "Finance", "FinanceArticle",
     "Setting",
     "User", "UserSession",
+    "AuditLog",
 ]

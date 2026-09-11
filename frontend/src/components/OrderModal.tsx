@@ -4,6 +4,7 @@ import type { Category, Client, Order, Product } from '../types'
 import styles from './OrderModal.module.css'
 import PriceTypeBadge, { type PriceSource } from './PriceTypeBadge'
 import HelpTip from './HelpTip'
+import AuditBadge from './AuditBadge'
 
 type EffectivePriceInfo = { price: number; source: PriceSource }
 
@@ -129,7 +130,7 @@ export default function OrderModal({
 
   // ─── Допоміжні ────────────────────────────────────────────────────────────
 
-  const getQty = (productId: number): number =>
+  const getBaseOrder = (productId: number): Order | undefined =>
     effectiveOrders.find(o =>
       o.client_id === client.id &&
       o.product_id === productId &&
@@ -137,7 +138,10 @@ export default function OrderModal({
       o.origin_id == null &&
       o.exchange_type === 'none' &&
       o.price_override == null
-    )?.qty ?? 0
+    )
+
+  const getQty = (productId: number): number =>
+    getBaseOrder(productId)?.qty ?? 0
 
   const getExtraLines = (productId: number): Order[] =>
     effectiveOrders.filter(o =>
@@ -394,6 +398,7 @@ export default function OrderModal({
                     </HelpTip>
                   </th>
                   <th className={styles.thQtyH}>Кількість</th>
+                  <th style={{ width: 20 }}></th>
                   <th className={styles.thSum}>Сума</th>
                 </tr>
               </thead>
@@ -406,6 +411,7 @@ export default function OrderModal({
                   const freq       = freqs[product.id]
                   const priceInfo  = prices[product.id]
                   const price      = priceInfo?.price
+                  const baseOrder  = getBaseOrder(product.id)
                   const extraLines = getExtraLines(product.id)
                   const showAdd    = addLine?.productId === product.id
                   const hasExchange = extraLines.some(l => l.exchange_type === 'pre_order')
@@ -473,6 +479,15 @@ export default function OrderModal({
                             onKeyDown={e => handleKeyDown(e, product.id)}
                           />
                         </td>
+                        <td style={{ width: 20, padding: 0, textAlign: 'center' }}>
+                          {baseOrder && baseOrder.id > 0 && (
+                            <AuditBadge
+                              key={`${baseOrder.id}-${baseOrder.qty}`}
+                              entityTable="orders"
+                              entityId={baseOrder.id}
+                            />
+                          )}
+                        </td>
                         <td className={styles.tdSum}>
                           {price != null && qty > 0 ? fmt(qty * price) : '—'}
                         </td>
@@ -520,6 +535,7 @@ export default function OrderModal({
                               }}
                             />
                           </td>
+                          <td />
                           <td style={{ fontSize: '0.75rem', color: '#6b7280', paddingLeft: 4 }}>безкошт.</td>
                         </tr>
                       )}
@@ -545,6 +561,7 @@ export default function OrderModal({
                           <td className={styles.tdInput} style={{ textAlign: 'center', color: '#333' }}>
                             {line.qty}
                           </td>
+                          <td />
                           <td className={styles.tdSum}>
                             {line.price_override != null && line.price_override > 0
                               ? fmt(line.qty * line.price_override)
@@ -592,6 +609,7 @@ export default function OrderModal({
                               onChange={e => setAddLine(p => p ? { ...p, qty: e.target.value } : null)}
                             />
                           </td>
+                          <td />
                           <td />
                         </tr>
                       )}
