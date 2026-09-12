@@ -95,6 +95,13 @@ export default function GridOrderModal({
       .sort((a, b) => a.name.localeCompare(b.name, 'uk'))
   }, [products, activeCategoryId])
 
+  // ── Усі випічкові вироби (Хліб + Булка разом) — для загальних підсумків,
+  // які не мають залежати від того, яка вкладка категорії зараз відкрита ────
+  const allBakedProducts = useMemo(() => {
+    const catIds = new Set(bakedCats.map(c => c.id))
+    return products.filter(p => p.is_active === 1 && p.category_id !== null && catIds.has(p.category_id))
+  }, [products, bakedCats])
+
   // ── Клієнти по рейсах ─────────────────────────────────────────────────────
   // Тільки звичайні customer-и, не системні (writeoff/ration/underbaked)
   const activeRoutes = useMemo(
@@ -117,6 +124,12 @@ export default function GridOrderModal({
     return m
   }, [clients])
 
+  // ── Усі клієнти-замовники (усі рейси разом) — для загальних підсумків ─────
+  const allCustomerClients = useMemo(
+    () => clients.filter(c => c.client_kind === 'customer' && c.is_active === 1),
+    [clients],
+  )
+
   // ── Дефолтний активний рейс — перший з клієнтами ──────────────────────────
   useEffect(() => {
     if (open && activeRouteId === null && activeRoutes.length > 0) {
@@ -138,32 +151,53 @@ export default function GridOrderModal({
     [clientsByRoute, activeRouteId],
   )
 
+  // Загальна кількість у клітинці = базове замовлення + усі extra-рядки
+  // (обмін/знижка/переміщення/надлишок). Усі підсумки нижче мають
+  // враховувати обмін — раніше рахували лише .qty, ігноруючи бейджі "+N".
+  const cellTotal = (cid: number, pid: number): number => {
+    const cell = getCell(cid, pid)
+    return cell.qty + cell.extra_qty
+  }
+
+  // Σ по клієнту (права колонка): по ВСІХ випічкових виробах (Хліб + Булка
+  // разом), а не лише по продуктах активної вкладки категорії — інакше
+  // сума клієнта не включала б булки, коли відкрита вкладка "Хліб".
   const rowSums = useMemo(() => {
     const r: Record<number, number> = {}
     for (const c of visibleClients) {
       let s = 0
-      for (const p of activeProducts) s += getCell(c.id, p.id).qty
+      for (const p of allBakedProducts) s += cellTotal(c.id, p.id)
       r[c.id] = s
     }
     return r
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleClients, activeProducts, grid])
+  }, [visibleClients, allBakedProducts, grid])
 
+  // Σ по виробу (нижній рядок): по ВСІХ клієнтах-замовниках (усі рейси
+  // разом), а не лише по клієнтах активного рейсу — інакше замовлення
+  // з інших рейсів на той самий виріб губились би з підсумку.
   const colSums = useMemo(() => {
     const r: Record<number, number> = {}
     for (const p of activeProducts) {
       let s = 0
-      for (const c of visibleClients) s += getCell(c.id, p.id).qty
+      for (const c of allCustomerClients) s += cellTotal(c.id, p.id)
       r[p.id] = s
     }
     return r
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleClients, activeProducts, grid])
+  }, [allCustomerClients, activeProducts, grid])
 
-  const grandTotal = useMemo(
-    () => Object.values(colSums).reduce((a, b) => a + b, 0),
-    [colSums],
-  )
+  // Загальний підсумок за день: усі клієнти × усі випічкові вироби, включно
+  // з обміном/знижкою/переміщенням/надлишком — НЕ залежить від того, який
+  // рейс чи яка категорія зараз відкриті на екрані.
+  const grandTotal = useMemo(() => {
+    let s = 0
+    for (const c of allCustomerClients) {
+      for (const p of allBakedProducts) s += cellTotal(c.id, p.id)
+    }
+    return s
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allCustomerClients, allBakedProducts, grid])
 
   // ── Збереження клітинки ───────────────────────────────────────────────────
   const setCellLocal = (cid: number, pid: number, patch: Partial<GridCell>) => {
@@ -358,7 +392,7 @@ export default function GridOrderModal({
 
   const statsNode = (
     <span className={styles.stats}>
-      <span className={styles.statBig}>{grandTotal}</span> шт по {activeProducts.length} виробах × {visibleClients.length} клієнтах
+      <span className={styles.statBig}>{grandTotal}</span> шт по {allBakedProducts.length} виробах × {allCustomerClients.length} клієнтах
     </span>
   )
 
