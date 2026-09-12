@@ -3,6 +3,7 @@
 import html as _html
 from typing import Optional
 from pathlib import Path
+from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -69,6 +70,35 @@ PRINT_BTN = """
 
 # ─── Шаблон однієї накладної (повертає HTML-рядок) ───────────────────────────
 
+def _merge_lines_for_display(lines: list) -> list:
+    """Об'єднує рядки одного виробу за однаковою ефективною ціною в один —
+    ЛИШЕ для друкованого відображення. У базі (InvoiceLine) записи лишаються
+    окремими: той самий виріб міг потрапити в накладну кількома окремими
+    рядками orders (власне замовлення + переміщення від інших клієнтів,
+    надлишок тощо) — клієнту на друкованій формі показуємо один рядок з
+    підсумованою кількістю, якщо ціна співпадає; різні ціни лишаються
+    окремими рядками."""
+    merged: dict[tuple, SimpleNamespace] = {}
+    order: list[tuple] = []
+    for line in lines:
+        eff_price = line.price_override if line.price_override else line.price
+        key = (line.product_id, eff_price)
+        m = merged.get(key)
+        if m:
+            m.qty += line.qty
+            m.sum += line.sum
+        else:
+            merged[key] = SimpleNamespace(
+                product_id=line.product_id,
+                qty=line.qty,
+                price=line.price,
+                price_override=line.price_override,
+                sum=line.sum,
+            )
+            order.append(key)
+    return [merged[k] for k in order]
+
+
 def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = False) -> str:
     bakery_name = cfg.get("bakery_name", "Пекарня")
     city        = cfg.get("city", "")
@@ -87,6 +117,10 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     # зняті при корекції) у друкованій накладній не показуємо.
     main_lines = [line for line in inv.lines if line.line_kind != "exchange" and line.qty > 0]
     exch_lines = [line for line in inv.lines if line.line_kind == "exchange" and line.qty > 0]
+
+    # Об'єднуємо однаковий виріб за однаковою ціною лише для друку (БД не чіпаємо)
+    main_lines = _merge_lines_for_display(main_lines)
+    exch_lines = _merge_lines_for_display(exch_lines)
 
     # Групуємо основні рядки по категорії виробу (відділу)
     # cat_id → [(line, product)]
@@ -500,6 +534,10 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     # Рядки з кількістю 0 у друкованій накладній не показуємо
     main_lines = [l for l in inv.lines if l.line_kind != "exchange" and l.qty > 0]
     exch_lines = [l for l in inv.lines if l.line_kind == "exchange" and l.qty > 0]
+
+    # Об'єднуємо однаковий виріб за однаковою ціною лише для друку (БД не чіпаємо)
+    main_lines = _merge_lines_for_display(main_lines)
+    exch_lines = _merge_lines_for_display(exch_lines)
 
     groups: dict = {}
     cat_order: list = []
