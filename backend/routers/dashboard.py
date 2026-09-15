@@ -34,9 +34,12 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
     fin_summary = get_summary(db)
 
     # ── Топ-5 боржників ───────────────────────────────────────────────────────
+    # Лише client_kind='customer' — як і get_summary() вище. Системні клієнти
+    # (Списання/Пайок/Магазин/Недопечено) — внутрішні бухгалтерські рахунки,
+    # не реальні боржники (той самий фікс, що і в telegram_bot.py).
     all_balances = get_all_balances(db)
     top_debtors = sorted(
-        [b for b in all_balances if b.balance < 0],
+        [b for b in all_balances if b.balance < 0 and b.client_kind == "customer"],
         key=lambda b: b.balance
     )[:5]
 
@@ -184,6 +187,7 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
             "total_debt":         fin_summary.total_debt,
             "total_credit":       fin_summary.total_credit,
             "net_balance":        fin_summary.net_balance,
+            "cash_balance":       fin_summary.cash_balance,
             "clients_in_debt":    fin_summary.clients_in_debt,
             "clients_with_credit": fin_summary.clients_with_credit,
             "payments_week":      round(payments_week, 2),

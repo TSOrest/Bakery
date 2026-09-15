@@ -772,6 +772,59 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     return buf.getvalue()
 
 
+def _find_chromium() -> Optional[str]:
+    """Шукає встановлений Edge/Chrome для headless друку HTML → PDF."""
+    for p in (
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ):
+        if Path(p).exists():
+            return p
+    return None
+
+
+def render_html_to_pdf_bytes(html: str) -> bytes:
+    """Рендерить HTML у PDF через headless Edge/Chrome (--print-to-pdf).
+
+    Використовує справжній рендер браузера — та сама верстка (flexbox, @page,
+    кирилиця), що й при друку вручну через Ctrl+P. Сторонні HTML→PDF бібліотеки
+    без браузерного рушія (xhtml2pdf) не тягнуть на собі сучасний CSS цього
+    проєкту (падає на `@page :last`, кирилиця через @font-face не вантажиться,
+    внутрішній баг сортування CSS-каскаду) — тому для Денного звіту (складний
+    багатосекційний документ) обрано headless-браузер, а не xhtml2pdf.
+    """
+    import subprocess
+    import tempfile
+
+    chromium = _find_chromium()
+    if not chromium:
+        raise RuntimeError("Не знайдено Edge/Chrome для генерації PDF")
+
+    with tempfile.TemporaryDirectory(prefix="bakery_pdf_") as tmp:
+        html_path = Path(tmp) / "report.html"
+        pdf_path = Path(tmp) / "report.pdf"
+        html_path.write_text(html, encoding="utf-8")
+
+        subprocess.run(
+            [
+                chromium, "--headless", "--disable-gpu", "--no-pdf-header-footer",
+                f"--print-to-pdf={pdf_path}", html_path.as_uri(),
+            ],
+            timeout=30, check=True, capture_output=True,
+        )
+        return pdf_path.read_bytes()
+
+
+def render_daily_report_pdf_bytes(date: str, db: Session) -> bytes:
+    """PDF-версія Денного звіту пекарні (для Telegram) — рендерить ЛІТЕРАЛЬНО
+    ту саму HTML-відповідь, що й /print/daily-report (виклик daily_report()
+    напряму), тож PDF і сторінка в браузері завжди в 1:1 report-parity."""
+    html = daily_report(date, db).body.decode("utf-8")
+    return render_html_to_pdf_bytes(html)
+
+
 # ─── Одна накладна ───────────────────────────────────────────────────────────
 
 @router.get("/invoice/{invoice_id}", response_class=HTMLResponse)

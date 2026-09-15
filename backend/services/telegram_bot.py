@@ -9,12 +9,13 @@ Telegram-бот для моніторингу пекарні.
     2. Клієнт пекарні   — телефон у clients.phone → прив'язується bot_chat_id
 
 Команди (персонал):
-  /start   — авторизація через контакт
-  /звіт    — фінансовий підсумок
-  /борги   — топ боржники
+  /start      — авторизація через контакт
+  /звіт       — стан фінансів на сьогодні (каса, борги, виручка)
+  /борги      — повний список боржників
   /замовлення — замовлення сьогодні
-  /випічка — стан випічки сьогодні
-  /допомога — список команд
+  /випічка    — стан випічки сьогодні
+  /деньзвіт   — денний звіт пекарні (PDF) на сьогодні
+  /допомога   — список команд
 
 Клієнт (після авторизації):
   📋 Моє замовлення — замовлення на завтра
@@ -38,7 +39,7 @@ from backend.models.orders import Order
 from backend.models.baking import BakingTask
 from backend.models.invoices import Invoice
 from backend.models.references import Client, Product, ClientBotUser
-from backend.services.finance import get_summary, get_all_balances, get_client_balance
+from backend.services.finance import get_all_balances, get_client_balance
 from backend.services.prices import get_price, get_price_with_source
 
 _PRICE_SOURCE_LABEL = {'base': 'Б', 'discounted': '%', 'individual': 'І', 'manual': 'Р'}
@@ -251,15 +252,20 @@ def send_invoice_pdf_to_client(db: Session, invoice) -> None:
     filename = f"invoice_{invoice.invoice_number}.pdf"
     for u in users:
         try:
-            url = f"https://api.telegram.org/bot{token}/sendDocument"
-            rq.post(
-                url,
-                data={"chat_id": u.chat_id, "caption": text, "parse_mode": "HTML"},
-                files={"document": (filename, pdf_bytes, "application/pdf")},
-                timeout=30,
-            )
+            _send_document(token, u.chat_id, filename, pdf_bytes, caption=text)
         except Exception as exc:
             log.warning("Failed to send invoice PDF to chat %s: %s", u.chat_id, exc)
+
+
+def _send_document(token: str, chat_id, filename: str, data: bytes,
+                    mime: str = "application/pdf", caption: str = "") -> None:
+    """Надсилає файл (PDF тощо) у чат через Telegram sendDocument."""
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    params: dict = {"chat_id": chat_id}
+    if caption:
+        params["caption"] = caption
+        params["parse_mode"] = "HTML"
+    rq.post(url, data=params, files={"document": (filename, data, mime)}, timeout=30)
 
 
 # ── Клавіатури ────────────────────────────────────────────────────────────────
@@ -280,7 +286,7 @@ def _staff_keyboard() -> dict:
         "keyboard": [
             ["💰 Звіт",       "📉 Борги"],
             ["📋 Замовлення", "🍞 Випічка"],
-            ["❓ Допомога"],
+            ["📄 Денний звіт", "❓ Допомога"],
         ],
         "resize_keyboard": True,
         "persistent": True,
@@ -356,26 +362,30 @@ def _fmt(n: float) -> str:
 
 
 def _report_finance() -> str:
-    with SessionLocal() as db:
-        s = get_summary(db)
-        balances = get_all_balances(db)
+    """Зведена інформація на сьогодні про стан фінансів пекарні — ті самі
+    дані і термінологія, що й на дашборді власника (get_dashboard()), щоб
+    цифри в боті й на сайті завжди збігались. Без "Нетто-баланс" (плутав —
+    це просто аванси мінус борг, дублікат) і без "Топ боржники" (повний
+    список — окрема команда /debts, дублювати тут не потрібно)."""
+    from backend.routers.dashboard import get_dashboard
 
-    sign = "+" if s.net_balance >= 0 else ""
+    with SessionLocal() as db:
+        d = get_dashboard(date_param=None, db=db)
+
+    fin, t = d["finance"], d["today"]
+    cash_sign = "+" if fin["cash_balance"] >= 0 else ""
     lines = [
         "💰 <b>Фінансовий звіт</b>",
-        f"Нетто-баланс: <b>{sign}{_fmt(s.net_balance)} грн</b>",
-        f"Загальний борг: {_fmt(s.total_debt)} грн ({s.clients_in_debt} кл.)",
-        f"Аванси: {_fmt(s.total_credit)} грн ({s.clients_with_credit} кл.)",
+        f"Залишок у касі: <b>{cash_sign}{_fmt(fin['cash_balance'])} грн</b>",
         "",
-        "📉 <b>Топ боржники:</b>",
+        f"Борг клієнтів: {_fmt(fin['total_debt'])} грн ({fin['clients_in_debt']} кл.)",
+        f"Переплата клієнтів: {_fmt(fin['total_credit'])} грн ({fin['clients_with_credit']} кл.)",
+        "",
+        f"<b>Сьогодні ({d['date']}):</b>",
+        f"Виставлено: {_fmt(t['revenue'])} грн",
+        f"Надійшло: {_fmt(t['payments_sum'])} грн ({t['payments_count']} опл.)",
+        f"Виведено з каси: {_fmt(t['cash_out'])} грн",
     ]
-    debtors = sorted([b for b in balances if b.balance < 0], key=lambda b: b.balance)[:5]
-    if debtors:
-        for b in debtors:
-            name = b.short_name or b.client_name
-            lines.append(f"  • {name}: {_fmt(b.balance)} грн")
-    else:
-        lines.append("  Боргів немає ✅")
     return "\n".join(lines)
 
 
@@ -384,7 +394,7 @@ def _report_orders() -> str:
     with SessionLocal() as db:
         orders = (
             db.query(Order)
-            .filter(Order.order_date == today)
+            .filter(Order.order_date == today, Order.qty > 0)
             .all()
         )
 
@@ -427,11 +437,24 @@ def _report_baking() -> str:
     return "\n".join(lines)
 
 
+def _daily_report_pdf_bytes() -> bytes:
+    """PDF Денного звіту пекарні на поточну дату (те саме, що й друкована
+    форма /print/daily-report — report-parity через render_daily_report_pdf_bytes)."""
+    from backend.routers.print_views import render_daily_report_pdf_bytes
+    today = date.today().isoformat()
+    with SessionLocal() as db:
+        return render_daily_report_pdf_bytes(today, db)
+
+
 def _report_debts() -> str:
     with SessionLocal() as db:
         balances = get_all_balances(db)
 
-    debtors = sorted([b for b in balances if b.balance < 0], key=lambda b: b.balance)
+    # Лише client_kind='customer' — див. коментар у _report_finance().
+    debtors = sorted(
+        [b for b in balances if b.balance < 0 and b.client_kind == "customer"],
+        key=lambda b: b.balance,
+    )
     if not debtors:
         return "✅ Боргів немає!"
 
@@ -446,11 +469,12 @@ def _report_debts() -> str:
 STAFF_HELP = """\
 📌 <b>Команди бота Пекарня:</b>
 
-/report — 💰 Фінансовий підсумок + топ боржники
-/debts  — 📉 Повний список боржників
-/orders — 📋 Замовлення на сьогодні
-/baking — 🍞 Стан випічки сьогодні
-/help   — ❓ Ця підказка
+/report      — 💰 Стан фінансів на сьогодні (каса, борги, виручка)
+/debts       — 📉 Повний список боржників
+/orders      — 📋 Замовлення на сьогодні
+/baking      — 🍞 Стан випічки сьогодні
+/dailyreport — 📄 Денний звіт пекарні (PDF) на сьогодні
+/help        — ❓ Ця підказка
 """
 
 CLIENT_HELP = """\
@@ -464,11 +488,12 @@ CLIENT_HELP = """\
 """
 
 BOT_COMMANDS = [
-    {"command": "report",  "description": "💰 Фінансовий підсумок"},
-    {"command": "debts",   "description": "📉 Борги клієнтів"},
-    {"command": "orders",  "description": "📋 Замовлення сьогодні"},
-    {"command": "baking",  "description": "🍞 Стан випічки"},
-    {"command": "help",    "description": "❓ Список команд"},
+    {"command": "report",      "description": "💰 Стан фінансів на сьогодні"},
+    {"command": "debts",       "description": "📉 Борги клієнтів"},
+    {"command": "orders",      "description": "📋 Замовлення сьогодні"},
+    {"command": "baking",      "description": "🍞 Стан випічки"},
+    {"command": "dailyreport", "description": "📄 Денний звіт пекарні (PDF)"},
+    {"command": "help",        "description": "❓ Список команд"},
 ]
 
 
@@ -879,6 +904,16 @@ def _handle_update(token: str, update: dict) -> None:
             _send(token, chat_id, _report_orders(), kb)
         elif cmd_base in ("/baking", "/випічка") or text == "🍞 Випічка":
             _send(token, chat_id, _report_baking(), kb)
+        elif cmd_base in ("/dailyreport", "/деньзвіт") or text == "📄 Денний звіт":
+            today = date.today().isoformat()
+            _send(token, chat_id, "⏳ Генерую PDF звіту...")
+            try:
+                pdf_bytes = _daily_report_pdf_bytes()
+                _send_document(token, chat_id, f"daily_report_{today}.pdf", pdf_bytes,
+                                caption=f"📄 Денний звіт — {today}")
+            except Exception as exc:
+                log.warning("Daily report PDF generation failed: %s", exc)
+                _send(token, chat_id, "⚠ Не вдалося згенерувати PDF звіту.", kb)
         elif cmd_base in ("/help", "/допомога") or text == "❓ Допомога":
             _send(token, chat_id, STAFF_HELP, kb)
         elif text:
