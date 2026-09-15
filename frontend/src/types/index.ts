@@ -149,6 +149,7 @@ export interface InvoiceTransfer {
   target_invoice_id: number
   product_id: number
   qty: number
+  line_kind: LineKind                 // normal | exchange — рядок-джерело переміщення
   notes: string | null
   direction: 'out' | 'in' | null      // відносно запитаної накладної
   counterparty_name: string | null    // назва клієнта-контрагента

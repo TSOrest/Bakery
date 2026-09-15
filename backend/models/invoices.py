@@ -60,6 +60,7 @@ class InvoiceTransfer(Base):
     target_invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
     product_id        = Column(Integer, ForeignKey("products.id"), nullable=False)
     qty               = Column(Float, nullable=False)
+    line_kind         = Column(Text, default="normal")  # normal | exchange — рядок-джерело
     notes             = Column(Text)
     created_at        = Column(Text)
     created_by        = Column(Text)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -34,11 +34,20 @@ class InvoiceLinesUpdate(BaseModel):
 
 
 class InvoiceTransferCreate(BaseModel):
-    """Переміщення товару з цієї накладної на іншого клієнта/магазин/систему."""
+    """Переміщення товару з цієї накладної на іншого клієнта/магазин/систему.
+
+    source_line_kind='exchange' бере кількість з обмінного рядка (line_kind=
+    'exchange') замість звичайного — і дозволяє to_client_id == клієнту цієї
+    ж накладної (сценарій "обмінний хліб продано як звичайний": кількість
+    переходить з безкоштовного обмінного рядка в платний рядок того ж
+    клієнта). Ціль завжди отримує/поповнює звичайний рядок (line_kind='normal'),
+    незалежно від типу джерела.
+    """
     product_id: int
     qty: float = Field(..., gt=0)
     to_client_id: int
     notes: Optional[str] = None
+    source_line_kind: Literal["normal", "exchange"] = "normal"
 
 
 class SetSurplusBody(BaseModel):
@@ -61,6 +70,7 @@ class InvoiceTransferOut(BaseModel):
     target_invoice_id: int
     product_id: int
     qty: float
+    line_kind: str = "normal"  # normal | exchange — рядок-джерело переміщення
     notes: Optional[str] = None
     # Збагачені поля (заповнюються у роутері)
     direction: Optional[str] = None          # 'out' | 'in' відносно запитаної накладної

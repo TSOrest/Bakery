@@ -480,25 +480,39 @@ def transfer_invoice_line(
 ):
     """Перемістити товар з цієї накладної на іншого клієнта / магазин / систему.
 
-    Джерело: рядок product_id зменшується на qty (total_sum ↓).
-    Ціль: накладна клієнта на ту ж дату (створюється якщо нема) — рядок
-    product_id збільшується/додається (ціна через get_price, total_sum ↑).
+    Джерело: рядок product_id зменшується на qty (total_sum ↓). За замовчуванням
+    (source_line_kind='normal') джерело шукається серед НЕ-обмінних рядків —
+    сьогоднішня поведінка без змін. source_line_kind='exchange' бере кількість
+    з обмінного рядка (line_kind='exchange') і, як виняток, дозволяє
+    to_client_id == клієнту цієї ж накладної: обмінний хліб, який клієнт
+    фактично продав (а не обміняв), переходить у платний рядок того ж клієнта.
+
+    Ціль: накладна клієнта на ту ж дату (створюється якщо нема, або та ж сама
+    накладна — якщо ціль це сам клієнт) — рядок product_id збільшується/
+    додається, ЗАВЖДИ як звичайний (line_kind='normal', ціна через get_price),
+    незалежно від типу джерела (total_sum ↑).
     Власний магазин (shop) → ціль-накладна лишається чернеткою (товар у POS лише
     після «Закрити накладну магазину»), без боргу.
     Фінанси обох накладних синхронізуються (recompute_invoice_finance).
-    Записується InvoiceTransfer для анотацій.
+    Записується InvoiceTransfer (з line_kind джерела) для анотацій.
     """
     src = db.get(Invoice, invoice_id)
     if not src:
         raise HTTPException(status_code=404, detail="Накладну не знайдено")
     if src.status == "cancelled":
         raise HTTPException(status_code=400, detail="Скасовану накладну не можна коригувати")
-    if data.to_client_id == src.client_id:
+    is_self_target = data.to_client_id == src.client_id
+    if is_self_target and data.source_line_kind != "exchange":
         raise HTTPException(status_code=400, detail="Не можна переміщати самому собі")
 
-    src_line = next((l for l in src.lines if l.product_id == data.product_id and l.line_kind != "exchange"), None)
-    if not src_line:
-        raise HTTPException(status_code=400, detail="У накладній немає цього виробу")
+    if data.source_line_kind == "exchange":
+        src_line = next((l for l in src.lines if l.product_id == data.product_id and l.line_kind == "exchange"), None)
+        if not src_line:
+            raise HTTPException(status_code=400, detail="У накладній немає такого обмінного рядка")
+    else:
+        src_line = next((l for l in src.lines if l.product_id == data.product_id and l.line_kind != "exchange"), None)
+        if not src_line:
+            raise HTTPException(status_code=400, detail="У накладній немає цього виробу")
     if data.qty <= 0 or data.qty > src_line.qty + 1e-9:
         raise HTTPException(
             status_code=400,
@@ -516,8 +530,8 @@ def transfer_invoice_line(
     src_line.sum = round(src_line.qty * src_eff, 2)
     src.total_sum = _recalc_total(src)
 
-    # 2. Ціль: знайти/створити накладну + рядок
-    tgt = _resolve_or_create_invoice(db, data.to_client_id, src.invoice_date, src.route_id)
+    # 2. Ціль: знайти/створити накладну + рядок (self-target — та сама накладна)
+    tgt = src if is_self_target else _resolve_or_create_invoice(db, data.to_client_id, src.invoice_date, src.route_id)
     tgt_line = next((l for l in tgt.lines if l.product_id == data.product_id and l.line_kind != "exchange"), None)
     if tgt_line:
         tgt_line.qty = round(tgt_line.qty + data.qty, 4)
@@ -549,6 +563,7 @@ def transfer_invoice_line(
         target_invoice_id=tgt.id,
         product_id=data.product_id,
         qty=data.qty,
+        line_kind=data.source_line_kind,
         notes=data.notes,
         created_at=datetime.now().isoformat(),
         created_by="operator",

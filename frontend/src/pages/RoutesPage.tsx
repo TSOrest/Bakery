@@ -110,6 +110,7 @@ function InvoiceDetailPanel({
   const [moveProductId, setMoveProductId] = useState<number | null>(null)  // який рядок переміщуємо
   const [moveQty, setMoveQty]           = useState(0)
   const [moveToClientId, setMoveTo]     = useState<number | null>(null)
+  const [moveSourceKind, setMoveSourceKind] = useState<'normal' | 'exchange'>('normal')
   const [moving, setMoving]             = useState(false)
 
   // Дропдаун цілей: магазини + системні + клієнти (без самого себе, без "недопечено")
@@ -124,10 +125,11 @@ function InvoiceDetailPanel({
       return (a.short_name ?? a.full_name).localeCompare(b.short_name ?? b.full_name, 'uk')
     })
 
-  const openMove = (productId: number, maxQty: number) => {
+  const openMove = (productId: number, maxQty: number, sourceKind: 'normal' | 'exchange' = 'normal') => {
     setMoveProductId(productId)
     setMoveQty(Math.max(1, Math.floor(maxQty)))
     setMoveTo(null)
+    setMoveSourceKind(sourceKind)
   }
 
   const handleMove = async () => {
@@ -138,6 +140,7 @@ function InvoiceDetailPanel({
         product_id: moveProductId,
         qty: moveQty,
         to_client_id: moveToClientId,
+        source_line_kind: moveSourceKind,
       })
       setMoveProductId(null)
       await reloadInvoice()
@@ -152,9 +155,12 @@ function InvoiceDetailPanel({
   // тому кнопки зміни стану (Відправити/Прийнято) для нього не показуємо.
   const isShop = isShopClient(client)
 
-  // Анотації переміщень за продуктом
-  const transfersFor = (productId: number) =>
-    (invoice.transfers ?? []).filter((t) => t.product_id === productId)
+  // Анотації переміщень за продуктом і типом рядка-джерела — коли у виробу є
+  // і звичайний, і обмінний рядок, анотації не мають змішуватись між ними.
+  const transfersFor = (productId: number, kind: 'normal' | 'exchange' = 'normal') =>
+    (invoice.transfers ?? []).filter(
+      (t) => t.product_id === productId && (t.line_kind ?? 'normal') === kind,
+    )
 
   // ── Групування рядків по категорії ───────────────────────────────────────
   const catMap: Record<number, Category> = {}
@@ -258,7 +264,7 @@ function InvoiceDetailPanel({
                   <td>{productName(line.product_id)}</td>
                   <td className={styles.numTd}>{line.qty}</td>
                   <td>
-                    {moveProductId === line.product_id ? (
+                    {moveProductId === line.product_id && moveSourceKind === 'normal' ? (
                       <div className={styles.moveForm}>
                         <input
                           type="number" min={1} max={line.qty} step={1}
@@ -286,7 +292,7 @@ function InvoiceDetailPanel({
                       </div>
                     ) : (
                       <button className={styles.moveOpenBtn}
-                        onClick={() => openMove(line.product_id, line.qty)}
+                        onClick={() => openMove(line.product_id, line.qty, 'normal')}
                         disabled={line.qty <= 0}>
                         ⇄ перемістити
                       </button>
@@ -296,6 +302,73 @@ function InvoiceDetailPanel({
               ))}
             </tbody>
           </table>
+
+          {/* ── Корекція обміну: обмінний хліб продано / повернуто на магазин / списано ── */}
+          {exchLines.length > 0 && (
+            <>
+              <div className={styles.correctTitle} style={{ marginTop: '1rem' }}>
+                Корекція обміну
+              </div>
+              <div className={styles.correctHint}>
+                Якщо обмінний хліб фактично продано (а не обміняно на черствий) — оберіть
+                «Продано цьому ж клієнту»: кількість перейде з обмінного рядка в звичайний,
+                платний. Або перемістіть на магазин / списання, якщо хліб не забрали.
+              </div>
+              <table className={styles.correctTable}>
+                <thead>
+                  <tr>
+                    <th>Виріб</th>
+                    <th className={styles.numTh}>Обмін</th>
+                    <th>Перемістити</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exchLines.map((line) => (
+                    <tr key={line.id}>
+                      <td>{productName(line.product_id)}</td>
+                      <td className={styles.numTd}>{line.qty}</td>
+                      <td>
+                        {moveProductId === line.product_id && moveSourceKind === 'exchange' ? (
+                          <div className={styles.moveForm}>
+                            <input
+                              type="number" min={1} max={line.qty} step={1}
+                              value={moveQty}
+                              onChange={(e) => setMoveQty(Math.max(0, Math.min(line.qty, Number(e.target.value))))}
+                              className={styles.moveQtyInput}
+                            />
+                            <select
+                              value={moveToClientId ?? ''}
+                              onChange={(e) => setMoveTo(e.target.value ? Number(e.target.value) : null)}
+                              className={styles.moveSelect}
+                            >
+                              <option value="">— куди —</option>
+                              <option value={client.id}>✓ Продано цьому ж клієнту</option>
+                              {moveDestinations.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {CLIENT_KIND_PREFIX[c.client_kind] ?? ''}{c.short_name ?? c.full_name}
+                                </option>
+                              ))}
+                            </select>
+                            <button className={styles.moveConfirm} onClick={handleMove}
+                              disabled={moving || !moveToClientId || moveQty <= 0}>
+                              {moving ? '...' : 'Перемістити'}
+                            </button>
+                            <button className={styles.moveCancel} onClick={() => setMoveProductId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <button className={styles.moveOpenBtn}
+                            onClick={() => openMove(line.product_id, line.qty, 'exchange')}
+                            disabled={line.qty <= 0}>
+                            ⇄ скоригувати
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
 
@@ -363,7 +436,7 @@ function InvoiceDetailPanel({
                     </td>
                     <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
                   </tr>
-                  {transfersFor(line.product_id).map((t) => (
+                  {transfersFor(line.product_id, 'normal').map((t) => (
                     <tr key={`t${t.id}`} className={styles.transferAnnotRow}>
                       <td colSpan={4} className={
                         t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
@@ -405,14 +478,31 @@ function InvoiceDetailPanel({
               </thead>
               <tbody>
                 {exchLines.map((line: InvoiceLine) => (
-                  <tr key={line.id}>
-                    <td>{productName(line.product_id)}</td>
-                    <td className={styles.numTd}>{line.qty}</td>
-                    <td className={styles.numTd}>
-                      {(line.price_override ?? line.price).toFixed(2)} ₴
-                    </td>
-                    <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
-                  </tr>
+                  <React.Fragment key={line.id}>
+                    <tr>
+                      <td>{productName(line.product_id)}</td>
+                      <td className={styles.numTd}>{line.qty}</td>
+                      <td className={styles.numTd}>
+                        {(line.price_override ?? line.price).toFixed(2)} ₴
+                      </td>
+                      <td className={styles.numTd}>{line.sum.toFixed(2)} ₴</td>
+                    </tr>
+                    {transfersFor(line.product_id, 'exchange').map((t) => (
+                      <tr key={`t${t.id}`} className={styles.transferAnnotRow}>
+                        <td colSpan={4} className={
+                          t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
+                        }>
+                          {t.source_invoice_id === t.target_invoice_id
+                            ? `└ ↺ продано як звичайний +${t.qty}`
+                            : t.counterparty_kind === 'underbaked'
+                            ? `└ ↓ Знято недопечене −${t.qty}`
+                            : t.direction === 'out'
+                            ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
+                            : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
