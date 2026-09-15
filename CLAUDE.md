@@ -336,6 +336,7 @@ CREATE TABLE invoice_transfers (
     target_invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
     product_id        INTEGER NOT NULL REFERENCES products(id),
     qty               REAL NOT NULL,
+    line_kind         TEXT DEFAULT 'normal',  -- normal | exchange — тип рядка-джерела (міграція 039)
     notes             TEXT,
     created_at        TEXT DEFAULT (datetime('now')),
     created_by        TEXT
@@ -343,10 +344,12 @@ CREATE TABLE invoice_transfers (
 ```
 
 **Корекція накладної (v1.2.0) — уніфіковане переміщення замість коригуючих:**
-- `POST /invoices/{id}/transfer {product_id, qty, to_client_id}` — переносить товар
-  з рядка цієї накладної на іншого клієнта / магазин / системного клієнта.
+- `POST /invoices/{id}/transfer {product_id, qty, to_client_id, source_line_kind}` —
+  переносить товар з рядка цієї накладної на іншого клієнта / магазин / системного
+  клієнта. `source_line_kind` (default `'normal'`) — з якого рядка брати кількість.
 - Джерело: рядок `qty ↓`, `total_sum ↓`. Ціль: накладна на ту ж дату (створюється
-  якщо нема) — рядок `qty ↑/створюється`, ціна через `get_price`, `total_sum ↑`.
+  якщо нема) — рядок `qty ↑/створюється` ЗАВЖДИ як `line_kind='normal'`, ціна через
+  `get_price`, `total_sum ↑`.
 - Магазин-ціль (`client_kind='shop'`/`is_own_shop=1`): ціль-накладна стає `accepted`
   → товар одразу у POS (`compute_current_stock`), борг магазину НЕ створюється.
 - Фінанси обох накладних синхронізуються `recompute_invoice_finance` (працює і
@@ -357,6 +360,22 @@ CREATE TABLE invoice_transfers (
 - Оплата приймається за фінальною (скоригованою) сумою; фінанси відображають її.
 - Різниця з `/orders/{id}/transfer`: той — стадія чернеток (до накладної, дочірні
   orders); `/invoices/{id}/transfer` — стадія сформованих накладних.
+- **Корекція обміну (`source_line_kind='exchange'`)**: дозволяє взяти кількість з
+  обмінного рядка (`line_kind='exchange'`, безкоштовний) — на відміну від
+  `'normal'`, тут ДОЗВОЛЕНО `to_client_id == client_id` цієї ж накладної
+  ("не можна переміщати самому собі" діє лише для звичайних рядків). Три
+  сценарії корекції коли клієнт фактично не обміняв, а: (1) продав як
+  звичайний — `to_client_id` = сам клієнт, кількість переходить у платний
+  рядок (`tgt = src`, той самий invoice); (2) не забрав — `to_client_id` =
+  магазин; (3) зіпсувався/загублений — `to_client_id` = writeoff. `invByPC` у
+  BakingPage вже включає `line_kind='exchange'` у попит нарівні зі звичайним
+  (виключає лише `'surplus'`), а `redistribByPC` нейтралізує переміщення
+  customer/shop незалежно від типу рядка-джерела — тож жодна з трьох корекцій
+  не змінює «Замовлено». `RoutesPage.tsx` (`InvoiceDetailPanel`) — окрема
+  таблиця «Корекція обміну» під основною, з опцією «✓ Продано цьому ж
+  клієнту» першою в дропдауні цілей. Анотації "передано →"/"отримано від"
+  розрізняються за `invoice_transfers.line_kind` (`transfersFor(productId,
+  kind)`); self-переміщення показує окремий текст «↺ продано як звичайний».
 
 ### Рухи та залишки
 ```sql
@@ -529,8 +548,13 @@ CREATE TABLE finance_articles (
     editable INTEGER DEFAULT 0       -- 1 = PATCH amount/notes дозволено (поточний день)
 );
 -- PARTIAL UNIQUE INDEX: системні статті унікальні за (name, direction).
--- За замовчуванням editable=1: Оплата, Внесення в касу, Виплата з каси,
--- Готівка водія, Списання.
+-- За замовчуванням editable=1 (міграція 032, виправлено міграцією 040 —
+-- 032 звірялась з неіснуючою назвою 'Виплата з каси' замість справжньої
+-- 'Виведення з каси', і не включала кілька канонічних статей узагалі):
+-- Оплата, Внесення в касу, Виведення з каси, Оплата з каси, Готівка водія,
+-- Списання боргу, Кредит обміну, Виручка магазину, Списання магазину.
+-- НЕ editable (автогенеровані системою): Накладна, Початковий баланс,
+-- Архівний залишок.
 --
 -- PATCH /finances/{id} дозволяє редагування суми/нотатки якщо: finance_date
 -- == поточна робоча дата (перевіряє frontend) І article.editable=1 І
@@ -1330,7 +1354,7 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 
 **v1.1.7** — фінанси (auth + edit) + групи клієнтів + друковані форми:
 - **Auth-fix**: `frontend/src/api/finances.ts`, `importAccdb.ts`, `issues.ts` — усі raw `fetch()` переведено на `api/client.ts` (виправляє "Не авторизовано" при збереженні оплат і копіюванні цін).
-- **Edit фінансових сум**: міграція **032** + поле `editable` у `finance_articles` + `PATCH /finances/{id}` (схема `FinanceUpdate`). UI: кнопка ✏ замість 🗑 у FinancesPage (показується тільки для `finance_date == workDate` + `article.editable=1`). Чекбокс "Редаг. суми" у Довіднику фінансових статей. Default editable=1 для: Оплата, Внесення в касу, Виплата з каси, Готівка водія, Списання. ⚠ Умову `created_by != 'system'` пізніше прибрано (див. розділ "Фінанси" вище) — актуальне правило захищає лише `finance_type == 'invoice'`.
+- **Edit фінансових сум**: міграція **032** + поле `editable` у `finance_articles` + `PATCH /finances/{id}` (схема `FinanceUpdate`). UI: кнопка ✏ замість 🗑 у FinancesPage (показується тільки для `finance_date == workDate` + `article.editable=1`). Чекбокс "Редаг. суми" у Довіднику фінансових статей. Default editable=1 для: Оплата, Внесення в касу, Виплата з каси, Готівка водія, Списання. ⚠ Умову `created_by != 'system'` пізніше прибрано (див. розділ "Фінанси" вище) — актуальне правило захищає лише `finance_type == 'invoice'`. ⚠ "Виплата з каси" у списку вище — помилка тодішньої міграції 032 (такої статті не існує); виправлено міграцією 040, актуальний список — там само.
 - **Групи клієнтів**: міграція **033** + таблиця `client_groups` + `clients.client_group_id` (FK з `ON DELETE SET NULL`). Модель `ClientGroup` (route_id, name, sort_order). Роутер `/client-groups` CRUD + `GET/PUT /{id}/members`. Cascade у `update_client`: при зміні `route_id` група старого маршруту скидається у NULL. Нова вкладка AdminPage "Групи клієнтів" + dropdown у формі клієнта (фільтр за поточним route_id). У формі ClientGroupsTab — multi-select клієнтів для призначення.
 - **Друковані форми у Маршрутах** (sticky-секція `printFormsBar` внизу панелі списку, `flex-shrink: 0`):
   - GET `/print/group-sort` — Сортування товару по групах клієнтів (агрегація orders за route → group → product, для завантаження машини).
