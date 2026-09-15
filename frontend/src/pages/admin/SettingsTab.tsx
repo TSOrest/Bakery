@@ -49,6 +49,10 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
       Object.entries(SETTINGS_LABELS).forEach(([k]) => {
         vals[k] = data[k]?.value ?? ''
       })
+      // Перемикач "Додаткові функції" поза SETTINGS_LABELS — підтягуємо окремо,
+      // інакше чекбокс показував би "вимкнено" при кожному відкритті сторінки
+      // незалежно від збереженого значення.
+      vals['invoice_exchange_inline'] = data['invoice_exchange_inline']?.value ?? '0'
       setForm(vals)
       setTgToken(data['telegram_bot_token']?.value ?? '')
       setTgPhones(data['telegram_allowed_phones']?.value ?? '')
@@ -170,6 +174,26 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
               <br />
               <span style={{ fontSize: '0.82rem', color: '#e67e22' }}>
                 ⚠ Функція в розробці — увімкнення показує опцію «Маршрут (резерв)» у списку розподілу, але рух товару по маршруту ще не реалізовано.
+              </span>
+            </span>
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', maxWidth: 520, marginTop: '0.9rem' }}>
+            <input
+              type="checkbox"
+              checked={form['invoice_exchange_inline'] === '1'}
+              onChange={(e) => {
+                const val = e.target.checked ? '1' : '0'
+                setForm(f => ({ ...f, invoice_exchange_inline: val }))
+                api.put('/settings/', { invoice_exchange_inline: val }).catch(() => {})
+              }}
+              style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+            />
+            <span>
+              <span style={{ fontWeight: 500 }}>Обмін колонкою в накладній</span>
+              <br />
+              <span style={{ fontSize: '0.82rem', color: '#666' }}>
+                Кількість обміну показується в загальному списку виробів одразу за колонкою «Кільк.» замість окремої секції «ОБМІН» унизу накладної. Стосується друку в браузері і PDF, яке бот надсилає клієнту в Telegram.
               </span>
             </span>
           </label>

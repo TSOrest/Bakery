@@ -57,6 +57,7 @@ DEFAULT_SETTINGS = {
     "order_past_days":       ("1",              "Днів назад від сьогодні доступних для редагування замовлень"),
     "work_date_next_day_time": ("18:00",        "Час переходу дати роботи на наступний день"),
     "role_permissions":      ("",               "Права ролей (JSON)"),
+    "invoice_exchange_inline": ("0",            "Обмін колонкою в накладній замість окремої секції (0/1)"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
     "github_client_id":      ("",               "GitHub OAuth App Client ID"),
     "github_client_secret":  ("",               "GitHub OAuth App Client Secret"),

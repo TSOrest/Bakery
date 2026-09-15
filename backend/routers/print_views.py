@@ -99,6 +99,43 @@ def _merge_lines_for_display(lines: list) -> list:
     return [merged[k] for k in order]
 
 
+def _apply_inline_exchange(main_lines: list, exch_lines: list) -> dict[int, float]:
+    """Коли увімкнено налаштування 'обмін колонкою' (`invoice_exchange_inline`):
+    дописує в `main_lines` (мутує on-place, append) синтетичні рядки з
+    qty=price=sum=0 для виробів, що є ЛИШЕ в обміні (без звичайного рядка).
+    Повертає {product_id: сумарна кількість обміну} — рендер-код сам вирішує
+    як показати цю кількість (нова колонка) і сам зобов'язаний після виклику
+    не рендерити окрему секцію «ОБМІН» (передати далі порожній exch_lines)."""
+    exch_by_product: dict[int, float] = {}
+    for el in exch_lines:
+        exch_by_product[el.product_id] = exch_by_product.get(el.product_id, 0.0) + el.qty
+    main_product_ids = {l.product_id for l in main_lines}
+    for pid, qty in exch_by_product.items():
+        if pid not in main_product_ids:
+            main_lines.append(SimpleNamespace(
+                product_id=pid, qty=0.0, price=0.0, price_override=None, sum=0.0,
+            ))
+    return exch_by_product
+
+
+def _obmin_getter(exch_by_product: dict[int, float]):
+    """Замикання: повертає кількість обміну для product_id, але лише ОДИН раз.
+    Якщо той самий виріб має 2 рядки з різною ціною (після _merge_lines_for_display),
+    другий виклик для того самого product_id поверне 0 — обмін показується лише
+    в першому з рядків."""
+    applied: set[int] = set()
+
+    def get(pid: int) -> float:
+        if pid in applied:
+            return 0.0
+        qty = exch_by_product.get(pid, 0.0)
+        if qty:
+            applied.add(pid)
+        return qty
+
+    return get
+
+
 def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = False) -> str:
     bakery_name = cfg.get("bakery_name", "Пекарня")
     city        = cfg.get("city", "")
@@ -121,6 +158,19 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     # Об'єднуємо однаковий виріб за однаковою ціною лише для друку (БД не чіпаємо)
     main_lines = _merge_lines_for_display(main_lines)
     exch_lines = _merge_lines_for_display(exch_lines)
+
+    # Опціонально (налаштування): обмін показується колонкою в загальному
+    # списку замість окремої секції «ОБМІН» унизу. Активуємо лише коли в цій
+    # накладній справді є обмін — без цього вигляд лишається сьогоднішнім
+    # незалежно від стану перемикача.
+    exchange_inline = cfg.get("invoice_exchange_inline", "0") == "1"
+    obmin_active = exchange_inline and bool(exch_lines)
+    exch_by_product: dict[int, float] = {}
+    if obmin_active:
+        exch_by_product = _apply_inline_exchange(main_lines, exch_lines)
+        exch_lines = []
+    get_obmin = _obmin_getter(exch_by_product) if obmin_active else (lambda pid: 0.0)
+    obmin_th = '<th class="c" style="width:26px">Обм.</th>' if obmin_active else ""
 
     # Групуємо основні рядки по категорії виробу (відділу)
     # cat_id → [(line, product)]
@@ -153,18 +203,24 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
             g_sum    += line.sum
             total_qty    += line.qty
             total_names  += 1
+            obmin_cell = ""
+            if obmin_active:
+                obmin_qty = get_obmin(line.product_id)
+                obmin_text = f"{obmin_qty:g}" if obmin_qty else ""
+                obmin_cell = f'\n        <td class="c">{obmin_text}</td>'
             rows_html += f"""
       <tr>
         <td class="n">{p_name}</td>
-        <td class="c">{line.qty:g}</td>
+        <td class="c">{line.qty:g}</td>{obmin_cell}
         <td class="c">{unit}</td>
         <td class="r">{fmt(eff_price)}</td>
         <td class="r">{fmt(line.sum)}</td>
       </tr>"""
         group_totals[cid] = g_sum
+        subtotal_colspan = 5 if obmin_active else 4
         rows_html += f"""
       <tr class="subtotal">
-        <td colspan="4" class="r">Сума по &nbsp;<b>{cat_label}</b></td>
+        <td colspan="{subtotal_colspan}" class="r">Сума по &nbsp;<b>{cat_label}</b></td>
         <td class="r"><b>{fmt(g_sum)}</b></td>
       </tr>"""
 
@@ -216,9 +272,9 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
 <div class="inv-block">
   <div class="inv-top">
     <span class="city"><b>{route_name}</b>{f" · {city}" if city else ""}</span>
+    {copy_label}
     <span class="inv-date">{ua_date(inv.invoice_date)}</span>
   </div>
-  {copy_label}
   <div class="inv-title">Накладна №&nbsp;<span class="inv-num">{inv.invoice_number}</span></div>
 
   <table class="meta-tbl">
@@ -233,6 +289,7 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
       <tr>
         <th>Назва</th>
         <th class="c" style="width:38px">Кільк.</th>
+        {obmin_th}
         <th class="c" style="width:32px">Од.</th>
         <th class="r" style="width:54px">Ціна</th>
         <th class="r" style="width:60px">Сума</th>
@@ -247,7 +304,6 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     <b>{total_qty:g}</b>&nbsp;штук, на суму:
     <span class="total-box">{fmt(inv.total_sum)}</span>
   </div>
-  <div class="kopiyky">грн.&nbsp;____&nbsp;коп.</div>
 
   <div class="sigs">
     <div>Директор:&nbsp;<i>{director or "________________"}</i></div>
@@ -280,10 +336,13 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
 }
 
 /* ── Шапка ── */
-.inv-top { display: flex; justify-content: space-between; font-size: 9pt; margin-bottom: 1mm; }
+.inv-top { display: flex; justify-content: space-between; font-size: 9pt; margin-bottom: 1mm; position: relative; }
 .city { font-size: 9.5pt; }
 .inv-date { font-size: 9.5pt; font-style: italic; }
-.copy-label { font-size: 9pt; color: #555; margin-bottom: 0; }
+.copy-label {
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  font-size: 9pt; color: #555;
+}
 .inv-title {
   font-size: 14pt; font-weight: bold; text-align: center;
   margin: 1.5mm 0 2mm;
@@ -327,11 +386,9 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
   border: 2px solid #000; padding: 0.5mm 3mm;
   margin-left: 2mm;
 }
-.kopiyky { font-size: 9pt; color: #555; margin-bottom: 2mm; }
-
 /* ── Підписи ── */
 .sigs {
-  display: flex; justify-content: space-between;
+  display: grid; grid-template-columns: 1fr 1fr;
   font-size: 9pt; margin-top: 1.5mm;
   border-top: 1px solid #bbb; padding-top: 1mm;
 }
@@ -539,6 +596,17 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     main_lines = _merge_lines_for_display(main_lines)
     exch_lines = _merge_lines_for_display(exch_lines)
 
+    # Опціонально (налаштування): обмін показується колонкою в загальному
+    # списку замість окремої секції «ОБМІН» унизу — те саме правило, що й у
+    # render_invoice_block, дзеркально (див. коментар там).
+    exchange_inline = cfg.get("invoice_exchange_inline", "0") == "1"
+    obmin_active = exchange_inline and bool(exch_lines)
+    exch_by_product: dict[int, float] = {}
+    if obmin_active:
+        exch_by_product = _apply_inline_exchange(main_lines, exch_lines)
+        exch_lines = []
+    get_obmin = _obmin_getter(exch_by_product) if obmin_active else (lambda pid: 0.0)
+
     groups: dict = {}
     cat_order: list = []
     for line in main_lines:
@@ -553,17 +621,28 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     HDR_BG  = colors.HexColor("#d8d8d8")
     SUB_BG  = colors.HexColor("#f0f0f0")
     BORDER  = colors.HexColor("#aaaaaa")
-    # Назва | Кільк | Од | Ціна | Сума — пропорції з HTML CSS (38px/32px/54px/60px → pt: 13/9/19/21mm)
+    # Назва | Кільк | (Обм.) | Од | Ціна | Сума — пропорції з HTML CSS
+    # (38px/32px/54px/60px → pt: 13/9/19/21mm); Обм. — вузька колонка (короткі
+    # значення), та сама ширина що й Од.
     C_QTY, C_UNIT, C_PRICE, C_SUM = 13*mm, 9*mm, 19*mm, 21*mm
-    COL_W = [W - C_QTY - C_UNIT - C_PRICE - C_SUM, C_QTY, C_UNIT, C_PRICE, C_SUM]
+    C_OBMIN = 9*mm
+    if obmin_active:
+        COL_W = [W - C_QTY - C_OBMIN - C_UNIT - C_PRICE - C_SUM, C_QTY, C_OBMIN, C_UNIT, C_PRICE, C_SUM]
+    else:
+        COL_W = [W - C_QTY - C_UNIT - C_PRICE - C_SUM, C_QTY, C_UNIT, C_PRICE, C_SUM]
 
-    lines_data = [[
+    header_row = [
         S("Назва", font=FONT_BOLD, size=FS, align=TA_CENTER),
         S("Кільк.", font=FONT_BOLD, size=FS, align=TA_CENTER),
+    ]
+    if obmin_active:
+        header_row.append(S("Обм.", font=FONT_BOLD, size=FS, align=TA_CENTER))
+    header_row += [
         S("Од.", font=FONT_BOLD, size=FS, align=TA_CENTER),
         S("Ціна", font=FONT_BOLD, size=FS, align=TA_RIGHT),
         S("Сума", font=FONT_BOLD, size=FS, align=TA_RIGHT),
-    ]]
+    ]
+    lines_data = [header_row]
 
     total_qty = 0
     total_names = 0
@@ -574,20 +653,25 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
             eff_price = line.price_override if line.price_override else line.price
             total_qty    += line.qty
             total_names  += 1
-            lines_data.append([
+            line_row = [
                 S(p_name, size=FS),
                 S(f"{line.qty:g}", size=FS, align=TA_CENTER),
+            ]
+            if obmin_active:
+                obmin_qty = get_obmin(line.product_id)
+                line_row.append(S(f"{obmin_qty:g}" if obmin_qty else "", size=FS, align=TA_CENTER))
+            line_row += [
                 S(unit, size=FS, align=TA_CENTER),
                 S(fmt(eff_price), size=FS, align=TA_RIGHT),
                 S(fmt(line.sum), size=FS, align=TA_RIGHT),
-            ])
+            ]
+            lines_data.append(line_row)
         cat_label = esc(all_cats[cid].name) if cid and cid in all_cats else "Інше"
         g_sum = sum(l.sum for l, _ in groups[cid])
-        lines_data.append([
-            S(f"Сума по  <b>{cat_label}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT),
-            S(""), S(""), S(""),
-            S(f"<b>{fmt(g_sum)}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT),
-        ])
+        subtotal_row = [S(f"Сума по  <b>{cat_label}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT)]
+        subtotal_row += [S("")] * (4 if obmin_active else 3)
+        subtotal_row.append(S(f"<b>{fmt(g_sum)}</b>", font=FONT_BOLD, size=FS, align=TA_RIGHT))
+        lines_data.append(subtotal_row)
 
     lines_tbl = Table(lines_data, colWidths=COL_W, repeatRows=1)
     base_style = [
@@ -600,14 +684,17 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
         ("LEFTPADDING",   (0, 0), (-1, -1), 1.5),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 1.5),
     ]
-    # Subtotal rows (last row of each group)
+    # Subtotal rows (last row of each group). Заспанений діапазон — усі колонки
+    # окрім останньої (Сума): 0-3 у звичайному 5-колонковому режимі,
+    # 0-4 коли додано колонку Обмін (6 колонок).
+    span_end = 4 if obmin_active else 3
     row = 1
     for cid in cat_order:
         row += len(groups[cid])
         base_style.append(("BACKGROUND",  (0, row), (-1, row), SUB_BG))
-        base_style.append(("SPAN",        (0, row), (3, row)))
+        base_style.append(("SPAN",        (0, row), (span_end, row)))
         # Прибираємо вертикальні лінії всередині заспаненого діапазону
-        base_style.append(("LINEAFTER",   (0, row), (2, row), 0, colors.white))
+        base_style.append(("LINEAFTER",   (0, row), (span_end - 1, row), 0, colors.white))
         row += 1
     lines_tbl.setStyle(TableStyle(base_style))
     story.append(lines_tbl)
@@ -660,7 +747,6 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
     ]))
     story.append(total_tbl)
-    story.append(S("грн. ____ коп.", size=6.5, color=colors.HexColor("#555555")))
     story.append(Spacer(1, 2*mm))
 
     # ── Підписи ───────────────────────────────────────────────────────────────
