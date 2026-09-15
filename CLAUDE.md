@@ -531,6 +531,18 @@ CREATE TABLE finance_articles (
 -- PARTIAL UNIQUE INDEX: системні статті унікальні за (name, direction).
 -- За замовчуванням editable=1: Оплата, Внесення в касу, Виплата з каси,
 -- Готівка водія, Списання.
+--
+-- PATCH /finances/{id} дозволяє редагування суми/нотатки якщо: finance_date
+-- == поточна робоча дата (перевіряє frontend) І article.editable=1 І
+-- finance_type != 'invoice'. Борговий запис накладної (invoice) захищений
+-- завжди — його суму підтримує recompute_invoice_finance, ручна правка
+-- розсинхронізувала б журнал із самою накладною. Автоматичні записи оплат
+-- (created_by='system', finance_type='payment' — з'являються при прийнятті
+-- накладної з сумою оплати) РЕДАГОВНІ нарівні з ручними: цю умову
+-- (created_by != 'system') прибрано, бо recompute_invoice_finance записи
+-- оплат не перераховує — виправляти помилково внесену оплату (напр. накладну
+-- прийняли з оплатою, якої фактично не було) інакше можна було лише через
+-- прямий доступ до БД.
 
 CREATE TABLE finances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1318,7 +1330,7 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 
 **v1.1.7** — фінанси (auth + edit) + групи клієнтів + друковані форми:
 - **Auth-fix**: `frontend/src/api/finances.ts`, `importAccdb.ts`, `issues.ts` — усі raw `fetch()` переведено на `api/client.ts` (виправляє "Не авторизовано" при збереженні оплат і копіюванні цін).
-- **Edit фінансових сум**: міграція **032** + поле `editable` у `finance_articles` + `PATCH /finances/{id}` (схема `FinanceUpdate`). UI: кнопка ✏ замість 🗑 у FinancesPage (показується тільки для `finance_date == workDate` + `article.editable=1` + `created_by != 'system'`). Чекбокс "Редаг. суми" у Довіднику фінансових статей. Default editable=1 для: Оплата, Внесення в касу, Виплата з каси, Готівка водія, Списання.
+- **Edit фінансових сум**: міграція **032** + поле `editable` у `finance_articles` + `PATCH /finances/{id}` (схема `FinanceUpdate`). UI: кнопка ✏ замість 🗑 у FinancesPage (показується тільки для `finance_date == workDate` + `article.editable=1`). Чекбокс "Редаг. суми" у Довіднику фінансових статей. Default editable=1 для: Оплата, Внесення в касу, Виплата з каси, Готівка водія, Списання. ⚠ Умову `created_by != 'system'` пізніше прибрано (див. розділ "Фінанси" вище) — актуальне правило захищає лише `finance_type == 'invoice'`.
 - **Групи клієнтів**: міграція **033** + таблиця `client_groups` + `clients.client_group_id` (FK з `ON DELETE SET NULL`). Модель `ClientGroup` (route_id, name, sort_order). Роутер `/client-groups` CRUD + `GET/PUT /{id}/members`. Cascade у `update_client`: при зміні `route_id` група старого маршруту скидається у NULL. Нова вкладка AdminPage "Групи клієнтів" + dropdown у формі клієнта (фільтр за поточним route_id). У формі ClientGroupsTab — multi-select клієнтів для призначення.
 - **Друковані форми у Маршрутах** (sticky-секція `printFormsBar` внизу панелі списку, `flex-shrink: 0`):
   - GET `/print/group-sort` — Сортування товару по групах клієнтів (агрегація orders за route → group → product, для завантаження машини).
