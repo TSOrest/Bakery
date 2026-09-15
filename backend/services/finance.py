@@ -11,6 +11,34 @@ from backend.models.invoices import Invoice
 from backend.schemas.finance import ClientBalance, FinanceSummary
 
 
+def get_cash_balance(db: Session, as_of: Optional[str] = None, exclusive: bool = False) -> float:
+    """Залишок у касі: накопичена сума всіх НЕ-накладних фінансових операцій
+    (Оплата, Внесення в касу, Готівка водія, Оплата/Виведення з каси,
+    Списання боргу тощо) станом на as_of — готівка, якою можна оплатити
+    з каси або видати виручку власниці. Не плутати з "Чистий баланс"
+    (client_balance) — це геть інший концепт: борг/переплата КЛІЄНТІВ
+    (дебіторка), а не готівка на руках.
+
+    Те саме поняття, що "Залишок в касі" у Денному звіті (_dr_section3,
+    backend/routers/print_views.py) — винесено сюди єдиною функцією, щоб
+    дашборд і друкований звіт завжди рахували однаково (раніше кожен мав
+    свій дублікат запиту — ризик розійтись при майбутніх правках).
+
+    exclusive=True — рахує СТРОГО до as_of (не включаючи) — "залишок на
+    початок дня" для звіту. exclusive=False (default) — включно з as_of —
+    "поточний залишок" для дашборду (скільки в касі прямо зараз).
+    """
+    from backend.models.finances import FinanceArticle
+    if as_of is None:
+        as_of = _date.today().isoformat()
+    invoice_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == "Накладна").all()]
+    q = db.query(func.sum(Finance.amount * Finance.sign))
+    q = q.filter(Finance.finance_date < as_of) if exclusive else q.filter(Finance.finance_date <= as_of)
+    if invoice_ids:
+        q = q.filter((Finance.article_id.is_(None)) | Finance.article_id.notin_(invoice_ids))
+    return round(q.scalar() or 0.0, 2)
+
+
 def get_client_balance(db: Session, client_id: int, as_of: Optional[str] = None) -> float:
     """Повертає баланс клієнта станом на дату as_of (включно). Якщо None — всі записи."""
     q = db.query(func.sum(Finance.amount * Finance.sign)).filter(Finance.client_id == client_id)
@@ -109,6 +137,7 @@ def get_summary(db: Session, as_of: Optional[str] = None) -> FinanceSummary:
         total_debt          = round(abs(total_debt), 2),
         total_credit        = round(total_credit, 2),
         net_balance         = round(total_credit + total_debt, 2),
+        cash_balance        = get_cash_balance(db, as_of=today_s),
         clients_in_debt     = sum(1 for b in balances if b.balance < 0),
         clients_with_credit = sum(1 for b in balances if b.balance > 0),
         income_7d           = round(income_7d, 2),
@@ -138,6 +167,13 @@ def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
     """
     Створює запис у finances коли накладна переходить у статус delivered.
     Якщо запис вже існує — не дублює.
+
+    article_id обов'язково прив'язується до системної статті 'Накладна'
+    (як і create_payment_finance_entry прив'язує 'Оплата') — інакше Денний
+    звіт (_dr_section3/_is_invoice_entry, backend/routers/print_views.py)
+    не розпізнає запис як борг накладної і помилково враховує його суму як
+    рух готівки в "Залишок в касі" (подвійний облік боргу клієнтів,
+    штучно занижує залишок, аж до від'ємних значень).
     """
     existing = (
         db.query(Finance)
@@ -151,10 +187,14 @@ def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
     if existing:
         return
 
+    from backend.models.finances import FinanceArticle
+    article = db.query(FinanceArticle).filter(FinanceArticle.name == 'Накладна').first()
+
     entry = Finance(
         finance_date = invoice.invoice_date,
         client_id    = invoice.client_id,
         finance_type = "invoice",
+        article_id   = article.id if article else None,
         amount       = round(invoice.total_sum, 2),
         sign         = -1,
         notes        = invoice.invoice_number,

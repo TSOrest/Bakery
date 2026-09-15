@@ -1547,25 +1547,24 @@ def _dr_section3(db: Session, date: str) -> str:
         return False
 
     # ── Залишок в касі на початок дня (всі не-накладні до цієї дати) ──────────
-    prev_q = db.query(func.sum(Finance.amount * Finance.sign)).filter(
-        Finance.finance_date < date,
-    )
-    if invoice_art_ids:
-        prev_q = prev_q.filter(
-            (Finance.article_id.is_(None)) | Finance.article_id.notin_(invoice_art_ids)
-        )
-    prev_balance = round((prev_q.scalar() or 0.0), 2)
+    # Спільна функція з backend/services/finance.py (get_cash_balance) — те
+    # саме поняття, що й "Залишок у касі" на дашборді фінансів; винесено в
+    # одну функцію, щоб не дублювати запит і не розійтись при майбутніх
+    # правках.
+    from backend.services.finance import get_cash_balance
+    prev_balance = get_cash_balance(db, as_of=date, exclusive=True)
 
     # ── Записи поточного дня ───────────────────────────────────────────────────
     entries = db.query(Finance).filter(Finance.finance_date == date).all()
 
     if not entries:
         prev_cls = "dr-income" if prev_balance >= 0 else "dr-expense"
+        prev_chr = "+" if prev_balance >= 0 else "−"
         prev_row = (
             f'<tr><td>Залишок на початок дня</td>'
-            f'<td class="dr-num {prev_cls} dr-money">{fmt(prev_balance)}&nbsp;грн</td></tr>'
+            f'<td class="dr-num {prev_cls} dr-money">{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</td></tr>'
             f'<tr><td><strong>Залишок в касі</strong></td>'
-            f'<td class="dr-num {prev_cls} dr-money"><strong>{fmt(prev_balance)}&nbsp;грн</strong></td></tr>'
+            f'<td class="dr-num {prev_cls} dr-money"><strong>{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</strong></td></tr>'
         ) if prev_balance else ""
         if prev_row:
             return f'<table class="dr-table dr-fin-total-table"><tbody>{prev_row}</tbody></table>'
@@ -1652,26 +1651,38 @@ def _dr_section3(db: Session, date: str) -> str:
     )
 
     # ── 3.4 Залишок в касі ────────────────────────────────────────────────────
+    # fmt(cash_balance) напряму показував би "-100,00" (звичайний ASCII-дефіс
+    # від Python-форматування від'ємних чисел) — не узгоджено зі стилізованим
+    # «−» (U+2212), яким показані всі інші суми звіту (prev_block, client/cash
+    # rows). Той самий патерн +/− chr + fmt(abs(...)), що й скрізь у файлі.
     bal_cls = "dr-income" if cash_balance >= 0 else "dr-expense"
+    bal_chr = "+" if cash_balance >= 0 else "−"
     bal_block = (
         f'<table class="dr-table dr-fin-total-table">'
         f'<tbody>'
         f'<tr><td><strong>Залишок в касі</strong></td>'
-        f'<td class="dr-num dr-money {bal_cls}"><strong>{fmt(cash_balance)}&nbsp;грн</strong></td></tr>'
+        f'<td class="dr-num dr-money {bal_cls}"><strong>{bal_chr}&nbsp;{fmt(abs(cash_balance))}&nbsp;грн</strong></td></tr>'
         f'</tbody></table>'
     )
 
     return f"""
   {prev_block}
   <div class="dr-fin-block">
-    <div class="dr-fin-title">Клієнтські операції</div>
+    <div class="dr-fin-title" title="Накладні — вартість переданого товару в борг; Оплата — реальні отримані гроші. Різниця (нижче) показує чи клієнти винні, чи переплатили — це борг, НЕ готівка в касі.">
+      Клієнтські операції <span class="dr-fin-hint">(борг клієнтів — не готівка)</span>
+    </div>
     <table class="dr-table dr-fin-table"><tbody>{client_html}{debt_row}</tbody></table>
   </div>
   <div class="dr-fin-block">
-    <div class="dr-fin-title">Касові операції</div>
+    <div class="dr-fin-title" title="Готівка, що реально пройшла через касу: оплати клієнтів, внесення, видача виручки тощо.">
+      Касові операції <span class="dr-fin-hint">(реальний рух готівки)</span>
+    </div>
     <table class="dr-table dr-fin-table"><tbody>{cash_html}</tbody></table>
   </div>
-  {bal_block}"""
+  {bal_block}
+  <div class="dr-fin-caption" title="Залишок в касі = Залишок на початок дня + усі касові операції. Вартість накладних (борг клієнтів) у цю суму НЕ входить.">
+    ℹ Залишок на початок дня + касові операції вище. Вартість накладних (борг клієнтів) сюди не входить.
+  </div>"""
 
 
 @router.get("/daily-report", response_class=HTMLResponse)
@@ -1718,6 +1729,8 @@ def daily_report(date: str, db: Session = Depends(get_db)):
     .dr-fin-total-table {{ width:60%;min-width:300px;margin-top:8px; }}
     .dr-fin-total-table td {{ padding:4px 6px;border:1px solid #bcc6d4;background:#e8edf3; }}
     .dr-subtotal td {{ background:#f5f0e8!important;border-top:1px dashed #bbb;font-size:8.5pt; }}
+    .dr-fin-hint    {{ font-weight:normal;font-size:7.5pt;color:#999; }}
+    .dr-fin-caption {{ font-size:7.5pt;color:#888;margin-top:3px;max-width:60%;min-width:300px; }}
   </style>
 </head>
 <body>

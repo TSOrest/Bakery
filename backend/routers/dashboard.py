@@ -62,27 +62,26 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
     baking_baked    = sum(t.baked_qty   or 0 for t in baking_today)
     baking_products = len(baking_today)
 
-    # ── Артикли для фільтрів (підтримка і старого finance_type і нового article_id) ──
+    # ── Артикли для фільтрів ─────────────────────────────────────────────────
+    # УВАГА: фільтруємо ЛИШЕ за article_id, без fallback на finance_type.
+    # В імпортованих з .accdb даних finance_type ненадійний для цього —
+    # касові статті ("Оплата з каси", "Виведення з каси") мають
+    # finance_type='invoice', а "Списання магазину" — finance_type='payment"
+    # (той самий import-артефакт, що й у _dr_section3/_is_invoice_entry,
+    # backend/routers/print_views.py). OR-fallback на finance_type раніше
+    # додавав ці кас-операції до "виставлено"/"надходжень", завищуючи суми
+    # на весь обсяг помилково підхоплених операцій.
     def _payment_filter(q):
-        """Фільтр оплат: article.name LIKE '%лата%' АБО legacy finance_type='payment'."""
         payment_ids = [
             a.id for a in db.query(FinanceArticle).filter(
                 FinanceArticle.name.in_(['Оплата', 'Готівка від водія', 'Внесення в касу'])
             ).all()
         ]
-        from sqlalchemy import or_
-        return q.filter(or_(
-            Finance.article_id.in_(payment_ids) if payment_ids else False,
-            Finance.finance_type == 'payment',
-        ))
+        return q.filter(Finance.article_id.in_(payment_ids))
 
     def _invoice_filter(q):
         invoice_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == 'Накладна').all()]
-        from sqlalchemy import or_
-        return q.filter(or_(
-            Finance.article_id.in_(invoice_ids) if invoice_ids else False,
-            Finance.finance_type == 'invoice',
-        ))
+        return q.filter(Finance.article_id.in_(invoice_ids))
 
     # ── Надходження за тиждень ────────────────────────────────────────────────
     payments_week = (
@@ -117,6 +116,18 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
     )
     payments_today_sum   = sum(p.amount for p in payments_today_rows)
     payments_today_count = len(payments_today_rows)
+
+    # ── Виведено з каси сьогодні (Виведення з каси + Оплата з каси) ──────────
+    cash_out_ids = [
+        a.id for a in db.query(FinanceArticle).filter(
+            FinanceArticle.name.in_(['Виведення з каси', 'Оплата з каси'])
+        ).all()
+    ]
+    cash_out_today = (
+        db.query(func.sum(Finance.amount))
+        .filter(Finance.finance_date == today, Finance.article_id.in_(cash_out_ids))
+        .scalar() or 0.0
+    ) if cash_out_ids else 0.0
 
     # ── Топ-5 продуктів за замовленнями сьогодні ──────────────────────────────
     top_products_rows = (
@@ -194,6 +205,7 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
             "revenue":        round(revenue_today, 2),
             "payments_sum":   round(payments_today_sum, 2),
             "payments_count": payments_today_count,
+            "cash_out":       round(cash_out_today, 2),
         },
 
         # Замовлення

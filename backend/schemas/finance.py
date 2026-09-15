@@ -115,6 +115,7 @@ class FinanceSummary(BaseModel):
     total_debt:    float   # сума боргів всіх клієнтів (від'ємні баланси)
     total_credit:  float   # сума кредитів (позитивні баланси)
     net_balance:   float   # total_credit - total_debt
+    cash_balance:  float = 0  # залишок у касі (готівка) — окремий концепт від боргу клієнтів
     clients_in_debt:   int
     clients_with_credit: int
     income_7d:  float = 0  # надходження за останні 7 днів
