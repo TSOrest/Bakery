@@ -288,7 +288,7 @@ function DayDetailPanel({ date }: { date: string }) {
                 <div className={styles.bigLabel}>надійшло</div>
               </div>
               <div>
-                <div className={styles.bigNumber} style={{ color: '#2563eb', fontSize: '1.5rem' }}>
+                <div className={styles.bigNumber} style={{ color: '#4a6fa5', fontSize: '1.5rem' }}>
                   ₴&nbsp;{fmt(t.cash_out)}
                 </div>
                 <div className={styles.bigLabel}>виведено з каси</div>
