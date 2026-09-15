@@ -249,7 +249,16 @@ def update_finance(
 
     Дозволено лише якщо:
     - стаття має editable=1;
-    - запис створено вручну (created_by != 'system') — автоматичні від накладних не торкаємось.
+    - це НЕ борговий запис накладної (finance_type != 'invoice') — його суму
+      підтримує recompute_invoice_finance із invoice.total_sum, ручна правка
+      розсинхронізувала б журнал з самою накладною. Виправляти можна лише
+      через рядки накладної.
+
+    Автоматичні записи оплат (created_by='system', finance_type='payment' —
+    з'являються при прийнятті накладної з сумою оплати) РЕДАГОВНІ нарівні з
+    ручними: recompute_invoice_finance їх не перераховує (лишає як є), тож
+    немає ризику розсинхронізації — лише спосіб виправити помилково внесену
+    суму (напр. оператор прийняв накладну з оплатою, якої фактично не було).
 
     Перевірку дати робить frontend (показує кнопку лише для finance_date == workDate).
     amount=0 дозволено для обнулення помилково внесеного запису.
@@ -259,10 +268,10 @@ def update_finance(
     if not entry:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
 
-    if entry.created_by == "system":
+    if entry.finance_type == "invoice":
         raise HTTPException(
             status_code=400,
-            detail="Автоматичний запис не можна редагувати вручну",
+            detail="Борговий запис накладної не можна редагувати вручну — виправте суму в самій накладній",
         )
 
     article = db.get(FinanceArticle, entry.article_id) if entry.article_id else None

@@ -345,9 +345,12 @@ function ClientPanel({ balance, workDate, articles, onChanged, onClose }: Client
     onChanged()
   }
 
+  // Борговий запис накладної (finance_type='invoice') лишається захищеним —
+  // його суму підтримує recompute_invoice_finance. Автоматичні записи оплат
+  // (created_by='system', з'являються при прийнятті накладної з оплатою)
+  // редаговні нарівні з ручними — recompute_invoice_finance їх не чіпає.
   const canEditFinance = (e: Finance): boolean => {
     if (e.finance_date !== workDate) return false
-    if (e.created_by === 'system') return false
     if (e.finance_type === 'invoice') return false
     if (!e.article_id) return false
     const art = articles.find(a => a.id === e.article_id)
@@ -577,9 +580,12 @@ export default function FinancesPage() {
 
   const [editingFinance, setEditingFinance] = useState<Finance | null>(null)
 
+  // Борговий запис накладної (finance_type='invoice') лишається захищеним —
+  // його суму підтримує recompute_invoice_finance. Автоматичні записи оплат
+  // (created_by='system', з'являються при прийнятті накладної з оплатою)
+  // редаговні нарівні з ручними — recompute_invoice_finance їх не чіпає.
   const canEditFinance = (e: Finance): boolean => {
     if (e.finance_date !== today) return false
-    if (e.created_by === 'system') return false
     if (e.finance_type === 'invoice') return false
     if (!e.article_id) return false
     const art = articles.find(a => a.id === e.article_id)
