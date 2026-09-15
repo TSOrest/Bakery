@@ -612,25 +612,31 @@ export default function FinancesPage() {
       {/* Зведення + KPI внутрішніх клієнтів — один рядок */}
       {summary && (
         <div className={styles.summaryBar}>
+          {/* Залишок у касі — окремо від боргу клієнтів: скільки готівки є
+              зараз, якою можна оплатити з каси або видати виручку власниці. */}
+          <div className={`${styles.summaryCard} ${styles.summaryCardFeatured}`}>
+            <span className={styles.summaryLabel}>Залишок у касі</span>
+            <span className={`${styles.summaryValue} ${summary.cash_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
+              {summary.cash_balance >= 0 ? '+' : ''}{fmt(summary.cash_balance)} грн
+            </span>
+            <span className={styles.summaryHint}>готівка для оплат і видачі виручки</span>
+          </div>
           <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Загальний борг</span>
+            <span className={styles.summaryLabel}>Борг клієнтів</span>
             <span className={`${styles.summaryValue} ${styles.debtColor}`}>
               {fmt(summary.total_debt)} грн
             </span>
-            <span className={styles.summaryHint}>{summary.clients_in_debt} клієнтів</span>
+            <span className={styles.summaryHint}>
+              {summary.clients_in_debt} клієнтів
+              {summary.total_credit > 0 && ` · нетто ${fmt(summary.net_balance)} грн`}
+            </span>
           </div>
           <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Переплати</span>
+            <span className={styles.summaryLabel}>Переплата клієнтів</span>
             <span className={`${styles.summaryValue} ${styles.creditColor}`}>
               {fmt(summary.total_credit)} грн
             </span>
             <span className={styles.summaryHint}>{summary.clients_with_credit} клієнтів</span>
-          </div>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>Чистий баланс</span>
-            <span className={`${styles.summaryValue} ${summary.net_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
-              {summary.net_balance >= 0 ? '+' : ''}{fmt(summary.net_balance)} грн
-            </span>
           </div>
           {internalKpi && (<>
             <div className={styles.summaryCard}>

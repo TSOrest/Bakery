@@ -54,6 +54,10 @@
   font-size: 12px;
   color: #999;
 }
+.summaryCardFeatured {
+  border-left: 4px solid #2563eb;
+  background: #eff6ff;
+}
 
 /* ── Кольори балансу ── */
 .debtColor   { color: #c0392b; }

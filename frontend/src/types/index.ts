@@ -212,6 +212,7 @@ export interface FinanceSummary {
   total_debt: number
   total_credit: number
   net_balance: number
+  cash_balance: number   // залишок у касі (готівка) — окремо від боргу клієнтів
   clients_in_debt: number
   clients_with_credit: number
   income_7d: number

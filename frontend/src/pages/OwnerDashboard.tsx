@@ -1,8 +1,11 @@
 /**
  * Дашборд власника.
- * Верхній рядок — накопичувальні KPI (фінансовий стан, боржники).
- * Нижня секція — календар (ліворуч) + деталі обраного дня (праворуч).
+ * Календар (ліворуч) + деталі обраного дня (праворуч), потім графічна аналітика.
  * За замовчуванням обраний день = робоча дата; клік по клітинці змінює деталі.
+ * (Раніше над календарем був рядок KPI-карток — "Фінансовий стан"/"Топ
+ * боржники"/"Замовлення (7 днів)"/"Надходження" — прибрано: дублювали картки
+ * боргу у summaryBar FinancesPage.tsx і вкладку "Баланси клієнтів", а тижневі
+ * цифри замовлень/надходжень не давали окремої користі.)
  */
 
 import { useEffect, useState, useCallback } from 'react'
@@ -49,6 +52,7 @@ interface DashboardData {
     revenue:        number
     payments_sum:   number
     payments_count: number
+    cash_out:       number   // виведено з каси (Виведення з каси + Оплата з каси)
   }
   top_debtors: { client_id: number; client_name: string; balance: number }[]
   orders: {
@@ -151,9 +155,10 @@ function CalendarView({ selectedDay, onSelectDay }: {
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ]
   while (cells.length % 7 !== 0) cells.push(null)
+  const weekRows = cells.length / 7
 
   return (
-    <div className={styles.calCard} style={{ marginBottom: 0 }}>
+    <div className={styles.calCard} style={{ marginBottom: 0, height: '100%' }}>
       <div className={styles.calHeader}>
         <button className={styles.calNavBtn} onClick={prevMonth}>‹</button>
         <div className={styles.calTitle}>
@@ -164,7 +169,7 @@ function CalendarView({ selectedDay, onSelectDay }: {
         <button className={styles.calTodayBtn} onClick={goToday}>Сьогодні</button>
       </div>
 
-      <div className={styles.calGrid}>
+      <div className={styles.calGrid} style={{ gridTemplateRows: `auto repeat(${weekRows}, 1fr)` }}>
         {DAY_HEADS.map(d => (
           <div key={d} className={`${styles.calDayHead} ${d === 'Сб' || d === 'Нд' ? styles.calWeekend : ''}`}>
             {d}
@@ -250,14 +255,6 @@ function DayDetailPanel({ date }: { date: string }) {
   return (
     <div>
 
-      {/* Заголовок */}
-      <div style={{
-        fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase',
-        letterSpacing: '0.08em', color: '#7a8899', marginBottom: 10,
-      }}>
-        Деталі — {label}
-      </div>
-
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         {/* Якщо немає торгових даних — коротка заглушка */}
@@ -277,18 +274,24 @@ function DayDetailPanel({ date }: { date: string }) {
             title={`Виручка і оплати — ${label}`}
             accent={t.payments_sum > 0 ? 'success' : t.revenue > 0 ? 'warning' : undefined}
           >
-            <div className={styles.twoCol}>
+            <div className={styles.threeCol}>
               <div>
-                <div className={styles.bigNumber} style={{ color: '#1a3a5c', fontSize: '1.5rem' }}>
-                  {fmt(t.revenue)}
+                <div className={styles.bigNumber} style={{ color: '#e74c3c', fontSize: '1.5rem' }}>
+                  ₴&nbsp;{fmt(t.revenue)}
                 </div>
-                <div className={styles.bigLabel}>виставлено грн</div>
+                <div className={styles.bigLabel}>виставлено</div>
               </div>
               <div>
                 <div className={styles.bigNumber} style={{ color: '#27ae60', fontSize: '1.5rem' }}>
-                  {fmt(t.payments_sum)}
+                  ₴&nbsp;{fmt(t.payments_sum)}
                 </div>
-                <div className={styles.bigLabel}>надійшло грн</div>
+                <div className={styles.bigLabel}>надійшло</div>
+              </div>
+              <div>
+                <div className={styles.bigNumber} style={{ color: '#2563eb', fontSize: '1.5rem' }}>
+                  ₴&nbsp;{fmt(t.cash_out)}
+                </div>
+                <div className={styles.bigLabel}>виведено з каси</div>
               </div>
             </div>
             {t.payments_count > 0 && (
@@ -299,10 +302,14 @@ function DayDetailPanel({ date }: { date: string }) {
             )}
           </Card>
 
-          {/* Замовлення */}
-          {(orders.today_clients > 0 || orders.today_qty > 0) && (
-            <Card title="Замовлення" accent={orders.today_clients > 0 ? 'success' : 'warning'}>
-              <div className={styles.twoCol}>
+          {/* Замовлення і випічка — об'єднано (кількість одиниць у "замовлено"
+              і baking.ordered — те саме число, показувати двічі зайве) */}
+          {(orders.today_clients > 0 || orders.today_qty > 0 || baking.products > 0) && (
+            <Card
+              title="Замовлення і випічка"
+              accent={baking.products > 0 ? (bakingOk ? 'success' : 'danger') : (orders.today_clients > 0 ? 'success' : 'warning')}
+            >
+              <div className={baking.products > 0 ? styles.threeCol : styles.twoCol}>
                 <div>
                   <div className={styles.bigNumber} style={{ color: '#1a3a5c', fontSize: '1.5rem' }}>
                     {orders.today_clients}
@@ -313,44 +320,37 @@ function DayDetailPanel({ date }: { date: string }) {
                   <div className={styles.bigNumber} style={{ color: '#1a3a5c', fontSize: '1.5rem' }}>
                     {orders.today_qty % 1 === 0 ? orders.today_qty.toFixed(0) : orders.today_qty.toFixed(1)}
                   </div>
-                  <div className={styles.bigLabel}>одиниць</div>
+                  <div className={styles.bigLabel}>одиниць замовлено</div>
                 </div>
-              </div>
-            </Card>
-          )}
-
-          {/* Випічка */}
-          {baking.products > 0 && (
-            <Card title="Випічка" accent={bakingOk ? 'success' : 'danger'}>
-              <div className={styles.twoCol}>
-                <div>
-                  <div className={styles.bigNumber} style={{ color: '#1a3a5c', fontSize: '1.5rem' }}>
-                    {baking.ordered.toFixed(0)}
+                {baking.products > 0 && (
+                  <div>
+                    <div className={styles.bigNumber} style={{ color: bakingOk ? '#27ae60' : '#e67e22', fontSize: '1.5rem' }}>
+                      {baking.baked.toFixed(0)}
+                    </div>
+                    <div className={styles.bigLabel}>спечено з {baking.ordered.toFixed(0)}</div>
                   </div>
-                  <div className={styles.bigLabel}>замовлено</div>
-                </div>
-                <div>
-                  <div className={styles.bigNumber} style={{ color: bakingOk ? '#27ae60' : '#e67e22', fontSize: '1.5rem' }}>
-                    {baking.baked.toFixed(0)}
+                )}
+              </div>
+              {baking.products > 0 && (
+                <>
+                  <div className={styles.divider} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: '0.88rem' }}>
+                    <span style={{ color: '#555' }}>Виконання плану</span>
+                    <div className={styles.progressBar} style={{ flex: 1, margin: 0 }}>
+                      <div
+                        className={styles.progressFill}
+                        style={{
+                          width: `${Math.min(baking.fulfillment_pct, 100)}%`,
+                          background: bakingOk ? '#27ae60' : '#e67e22',
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontWeight: 600, color: bakingOk ? '#27ae60' : '#e67e22', whiteSpace: 'nowrap' }}>
+                      {baking.fulfillment_pct}%
+                    </span>
                   </div>
-                  <div className={styles.bigLabel}>спечено</div>
-                </div>
-              </div>
-              <div className={styles.divider} />
-              <StatRow
-                label="Виконання плану"
-                value={`${baking.fulfillment_pct}%`}
-                color={bakingOk ? '#27ae60' : '#e67e22'}
-              />
-              <div className={styles.progressBar}>
-                <div
-                  className={styles.progressFill}
-                  style={{
-                    width: `${Math.min(baking.fulfillment_pct, 100)}%`,
-                    background: bakingOk ? '#27ae60' : '#e67e22',
-                  }}
-                />
-              </div>
+                </>
+              )}
             </Card>
           )}
 
@@ -426,7 +426,6 @@ export default function OwnerDashboard() {
   const [data,       setData]       = useState<DashboardData | null>(null)
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
-  const [lastUpdate, setLastUpdate] = useState('')
   const [selectedDay, setSelectedDay] = useState(today)
 
   // Синхронізація обраного дня з робочою датою
@@ -436,7 +435,6 @@ export default function OwnerDashboard() {
     try {
       const d = await api.get<DashboardData>(`/dashboard/?date_param=${today}`)
       setData(d)
-      setLastUpdate(new Date().toLocaleTimeString('uk-UA'))
       setError('')
     } catch (e) {
       setError(String(e))
@@ -455,113 +453,19 @@ export default function OwnerDashboard() {
   if (error)   return <div style={{ padding: '2rem', color: '#e74c3c' }}>{error}</div>
   if (!data)   return null
 
-  const { finance, top_debtors } = data
-  const netColor = finance.net_balance >= 0 ? '#27ae60' : '#e74c3c'
-
   return (
     <div className={styles.embedded}>
 
-      {/* Рядок оновлення */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: '0.82rem', color: '#6b7280' }}>
-          {today !== new Date().toISOString().slice(0, 10)
-            ? `Дані на ${fmtDate(today)}`
-            : 'Поточний стан'}
-        </span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {lastUpdate && <span style={{ fontSize: '0.78rem', color: '#aaa' }}>↻ {lastUpdate}</span>}
-          <button onClick={load} style={{
-            background: '#f1f5f9', border: '1px solid #d0d7de',
-            borderRadius: 5, padding: '3px 10px', fontSize: '0.8rem',
-            cursor: 'pointer', color: '#555',
-          }}>Оновити</button>
-        </div>
-      </div>
-
-      {/* ── KPI + Календар + Деталі (єдина 4-колонкова сітка) ─────────── */}
+      {/* ── Календар + Деталі (єдина 4-колонкова сітка) ─────────────────
+          KPI-картки (Фінансовий стан / Топ боржники / Замовлення (7 днів) /
+          Надходження) прибрано — дублювали картки боргу у "Фінанси" вгорі
+          сторінки (summaryBar) і вкладку "Баланси клієнтів", а тижневі
+          цифри замовлень/надходжень не несли окремої користі. */}
       <div className={styles.grid}>
 
-        <Card title="Фінансовий стан" accent={finance.net_balance < 0 ? 'danger' : 'success'}>
-          <div className={styles.bigNumber} style={{ color: netColor }}>
-            {finance.net_balance >= 0 ? '+' : ''}{fmt(finance.net_balance)} грн
-          </div>
-          <div className={styles.bigLabel}>нетто-баланс</div>
-          <div className={styles.divider} />
-          <StatRow label="Загальний борг клієнтів" value={`${fmt(finance.total_debt)} грн`}
-            sub={`(${finance.clients_in_debt} кл.)`} color="#e74c3c" />
-          <StatRow label="Аванси / переплата" value={`${fmt(finance.total_credit)} грн`}
-            sub={`(${finance.clients_with_credit} кл.)`} color="#27ae60" />
-          <div className={styles.divider} />
-          <StatRow label="Надійшло за 7 днів"  value={`${fmt(finance.payments_week)} грн`} />
-          <StatRow label="Надійшло за 30 днів" value={`${fmt(finance.payments_month)} грн`} />
-        </Card>
-
-        <Card title="Топ боржники" accent={top_debtors.length > 0 ? 'danger' : 'success'}>
-          {top_debtors.length === 0 ? (
-            <div className={styles.emptyNote}>Боргів немає</div>
-          ) : (
-            <div className={styles.debtorList}>
-              {top_debtors.map(d => (
-                <div key={d.client_id} className={styles.debtorRow}>
-                  <span className={styles.debtorName}>{d.client_name}</span>
-                  <span className={styles.debtorBalance}>−{fmt(Math.abs(d.balance))} грн</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        {/* Замовлення (7 днів) */}
-        <Card title="Замовлення (7 днів)" accent={data.orders.week_count > 0 ? 'success' : undefined}>
-          <div className={styles.twoCol}>
-            <div>
-              <div className={styles.bigNumber} style={{ color: '#1a3a5c' }}>
-                {data.orders.week_count}
-              </div>
-              <div className={styles.bigLabel}>накладних</div>
-            </div>
-            <div>
-              <div className={styles.bigNumber} style={{ color: '#1a3a5c' }}>
-                {fmtK(data.orders.week_qty)}
-              </div>
-              <div className={styles.bigLabel}>одиниць</div>
-            </div>
-          </div>
-          {data.orders.top_products.length > 0 && (
-            <>
-              <div className={styles.divider} />
-              <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7a8899', marginBottom: 4 }}>
-                Топ за день
-              </div>
-              {data.orders.top_products.slice(0, 4).map(p => (
-                <StatRow
-                  key={p.name}
-                  label={p.name}
-                  value={p.qty % 1 === 0 ? p.qty.toFixed(0) : p.qty.toFixed(1)}
-                  sub="шт"
-                />
-              ))}
-            </>
-          )}
-        </Card>
-
-        {/* Надходження */}
-        <Card title="Надходження" accent={finance.payments_month > 0 ? 'success' : undefined}>
-          <div className={styles.bigNumber} style={{ color: '#27ae60' }}>
-            {fmt(finance.payments_week)} грн
-          </div>
-          <div className={styles.bigLabel}>за 7 днів</div>
-          <div className={styles.divider} />
-          <StatRow label="За 30 днів" value={`${fmt(finance.payments_month)} грн`} />
-          <StatRow
-            label="Середнє / день"
-            value={`${fmt(finance.payments_month / 30)} грн`}
-            color="#27ae60"
-          />
-        </Card>
-
-        {/* Календар — span 2 колонки = 2 KPI wide */}
-        <div style={{ gridColumn: 'span 2' }}>
+        {/* Календар — span 2 колонки = 2 KPI wide; розтягнутий на всю висоту рядка
+            (рівно з висотою карток деталей праворуч, яка задає висоту рядка) */}
+        <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column' }}>
           <CalendarView selectedDay={selectedDay} onSelectDay={setSelectedDay} />
         </div>
 
