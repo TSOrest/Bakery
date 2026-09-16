@@ -28,6 +28,66 @@ const CLIENT_KIND_PREFIX: Record<string, string> = {
   customer: '',
 }
 
+// ─── KPI картки маршрутів — форматування сум і "розумне" скорочення назв ──────
+
+/** Розбиває суму на цілу частину (з розділювачем тисяч) і копійки — копійки
+ * виводяться дрібнішим текстом (styles.kpiKopecks), щоб не займати місце. */
+function splitMoney(value: number): { sign: string; whole: string; frac: string } {
+  const neg = value < 0
+  const [wholeStr, fracStr] = Math.abs(value).toFixed(2).split('.')
+  return { sign: neg ? '−' : '', whole: Number(wholeStr).toLocaleString('uk-UA'), frac: fracStr }
+}
+
+/** Повний рядок суми як простий текст — для title-тултіпа. */
+function fullMoneyPlain(value: number): string {
+  const { sign, whole, frac } = splitMoney(value)
+  return `${sign}${whole},${frac} ₴`
+}
+
+/** Сума з копійками дрібнішим текстом — сума завжди повна, ніколи не
+ * скорочується (скорочуються лише підписи "Кредит"/"Дебет" -> "К"/"Д" і
+ * назва рейсу — abbreviateRouteLabel). */
+function MoneyValue({ value, dashIfZero }: { value: number; dashIfZero?: boolean }) {
+  if (dashIfZero && value === 0) return <>—</>
+  const { sign, whole, frac } = splitMoney(value)
+  return <>{sign}{whole}<span className={styles.kpiKopecks}>,{frac}</span>&nbsp;₴</>
+}
+
+// Одноразовий canvas для вимірювання реальної ширини тексту — дає змогу
+// скорочувати назву рейсу і суми ЛИШЕ коли вони фактично не влазять у
+// наявну ширину картки, а не за довільним лімітом символів.
+let _measureCanvas: HTMLCanvasElement | null = null
+const KPI_TITLE_FONT = '700 12px system-ui, sans-serif'
+const KPI_TITLE_LETTER_SPACING = 0.04 * 12  // .kpiCardTitle: letter-spacing 0.04em, канвас це не враховує
+
+function measureTextWidth(text: string, font: string, letterSpacing = 0): number {
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas')
+  const ctx = _measureCanvas.getContext('2d')
+  if (!ctx) return text.length * 7
+  ctx.font = font
+  return ctx.measureText(text).width + letterSpacing * text.length
+}
+
+/** "Перемишляни (39)" → якщо не влазить у maxWidth — "Перем. (39)" тощо.
+ * Кількість клієнтів у дужках лишається завжди повністю читаною. Оцінка
+ * ширини свідомо трохи запасна (safety margin у викликах нижче) — краще
+ * зайвий раз скоротити назву, ніж дати браузерному "..." зʼїсти кількість. */
+function abbreviateRouteLabel(name: string, count: number, maxWidth: number): string {
+  const suffix = ` (${count})`
+  const full = `${name}${suffix}`.toUpperCase()
+  if (measureTextWidth(full, KPI_TITLE_FONT, KPI_TITLE_LETTER_SPACING) <= maxWidth) {
+    return `${name}${suffix}`
+  }
+  const budget = maxWidth - measureTextWidth(suffix.toUpperCase(), KPI_TITLE_FONT, KPI_TITLE_LETTER_SPACING)
+  const upper = name.toUpperCase()
+  for (let len = name.length - 1; len >= 1; len--) {
+    if (measureTextWidth(upper.slice(0, len) + '.', KPI_TITLE_FONT, KPI_TITLE_LETTER_SPACING) <= budget) {
+      return `${name.slice(0, len)}.${suffix}`
+    }
+  }
+  return `${name.charAt(0)}.${suffix}`
+}
+
 // ─── Форматування дати ─────────────────────────────────────────────────────────
 
 function formatDate(d: string) {
@@ -586,6 +646,25 @@ export default function RoutesPage() {
     document.addEventListener('mouseup', onUp)
   }
 
+  // ── Ширина смуги KPI-карток (для "розумного" скорочення назв рейсів) ──────────
+  // callback-ref, а не звичайний useRef+useEffect([]) — сторінка на час
+  // завантаження (loading) рендерить зовсім інше дерево (early return нижче),
+  // тож .kpiStrip у DOM ще немає коли effect з порожнім deps встиг би
+  // спрацювати; callback-ref натомість гарантовано викликається щоразу, як
+  // сам DOM-елемент реально з'являється/зникає.
+  const [kpiStripEl, setKpiStripEl] = useState<HTMLDivElement | null>(null)
+  const [kpiStripWidth, setKpiStripWidth] = useState(0)
+
+  useEffect(() => {
+    if (!kpiStripEl) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width
+      if (w) setKpiStripWidth(w)
+    })
+    ro.observe(kpiStripEl)
+    return () => ro.disconnect()
+  }, [kpiStripEl])
+
   // ── Завантаження ─────────────────────────────────────────────────────────────
 
   const load = async (date: string) => {
@@ -681,11 +760,18 @@ export default function RoutesPage() {
       routeId: number | null,
       routeName: string,
       filterClients: Client[],
-      filterInvoices: Invoice[],
     ): RouteKpi => {
       const clientIdSet = new Set(filterClients.map((c) => c.id))
-      const correctives = filterInvoices.filter((i) => i.corrective_for_id !== null)
-      const baseNonCancelled = filterInvoices.filter(
+      // Накладні фільтруємо за КЛІЄНТОМ (clientIdSet), а не за invoice.route_id:
+      // при корекції (переміщення частини товару на "Списання"/"Пайок"/
+      // "Недопечено") цільова накладна системного клієнта успадковує
+      // route_id джерела (_resolve_or_create_invoice, backend/routers/invoices.py) —
+      // фільтр за route_id зарахував би її суму в цей маршрут, хоча системний
+      // клієнт не входить у filterClients і в списку/лічильнику клієнтів не
+      // видний. Так само рахує debitSum нижче — тепер узгоджено.
+      const routeInvoices = invoices.filter((i) => clientIdSet.has(i.client_id))
+      const correctives = routeInvoices.filter((i) => i.corrective_for_id !== null)
+      const baseNonCancelled = routeInvoices.filter(
         (i) => i.corrective_for_id === null && i.status !== 'cancelled'
       )
       const debitSum = finances
@@ -718,18 +804,12 @@ export default function RoutesPage() {
     const customerClients = clients.filter(isRouteClient)
 
     return [
-      makeCard(null, 'Всі', allNonSystemClients, invoices),
-      makeCard(-1, 'Внутрішні', internalClients,
-        invoices.filter((i) => internalClients.some((c) => c.id === i.client_id))),
+      makeCard(null, 'Всі', allNonSystemClients),
+      makeCard(-1, 'Внутрішні', internalClients),
       ...routes
         .filter((r) => r.is_active)
         .map((r) =>
-          makeCard(
-            r.id,
-            r.name,
-            customerClients.filter((c) => c.route_id === r.id),
-            invoices.filter((i) => i.route_id === r.id),
-          )
+          makeCard(r.id, r.name, customerClients.filter((c) => c.route_id === r.id))
         ),
     ]
   }, [clients, routes, invoices, orders, finances])
@@ -927,10 +1007,21 @@ export default function RoutesPage() {
         <div className={styles.invoiceList} style={{ width: `${leftWidth}%` }}>
 
           {/* ── KPI картки ──────────────────────────────────────────────────────── */}
-          <div className={styles.kpiStrip}>
+          <div className={styles.kpiStrip} ref={setKpiStripEl}>
             {kpiCards.map((card) => {
           const isActive = activeRouteId === card.routeId
           const balance = card.debitSum - card.invoiceSum
+          // Доступна ширина заголовка цієї картки — щоб скоротити назву рейсу
+          // ЛИШЕ якщо вона фактично не влазить (abbreviateRouteLabel). Суми
+          // кредиту/дебету завжди повні — під них замість цього скорочено
+          // самі підписи ("Кредит"/"Дебет" → "К"/"Д" нижче в розмітці).
+          const perCardWidth = kpiCards.length > 0
+            ? (kpiStripWidth - 8 * (kpiCards.length - 1)) / kpiCards.length
+            : 0
+          const titleMaxWidth = Math.max(0, perCardWidth - 24 - 8)
+          const titleLabel = kpiStripWidth > 0
+            ? abbreviateRouteLabel(card.routeName, card.clientCount, titleMaxWidth)
+            : `${card.routeName} (${card.clientCount})`
           return (
             <div
               key={card.routeId ?? 'all'}
@@ -939,8 +1030,8 @@ export default function RoutesPage() {
             >
               {/* Заголовок з фоном і смугою статусів */}
               <div className={styles.kpiCardHeader}>
-                <div className={styles.kpiCardTitle}>
-                  {card.routeName} ({card.clientCount})
+                <div className={styles.kpiCardTitle} title={`${card.routeName} (${card.clientCount})`}>
+                  {titleLabel}
                 </div>
                 <div className={styles.kpiStatusBar}>
                   {card.clientCount > 0 && (['no_activity','needs_invoice','draft','sent','processing','accepted'] as const).map((st) => {
@@ -958,37 +1049,31 @@ export default function RoutesPage() {
                 </div>
               </div>
 
-              {/* Тіло: баланс + дві колонки */}
+              {/* Тіло: баланс + кредит/дебет одна під одною */}
               <div className={styles.kpiCardBody}>
                 <div
                   className={`${styles.kpiBalance} ${balance >= 0 ? styles.kpiBalancePos : styles.kpiBalanceNeg}`}
-                  title={`${balance >= 0 ? '+' : ''}${balance.toFixed(2)} ₴`}
+                  title={`${balance >= 0 ? '+' : ''}${fullMoneyPlain(balance)}`}
                 >
-                  {balance >= 0 ? '+' : ''}{balance.toFixed(0)} ₴
+                  {balance >= 0 ? '+' : ''}<MoneyValue value={balance} />
                 </div>
                 <div className={styles.kpiColumns}>
                   <div className={styles.kpiCredit}>
-                    <span className={styles.kpiColLabel}>Кредит</span>
-                    <span
-                      className={styles.kpiColValue}
-                      title={card.invoiceSum > 0 ? `${card.invoiceSum.toFixed(2)} ₴` : undefined}
-                    >
-                      {card.invoiceSum > 0 ? `${card.invoiceSum.toFixed(0)} ₴` : '—'}
+                    <span className={styles.kpiColLabel} title="Кредит">К</span>
+                    <span className={styles.kpiColValue}>
+                      <MoneyValue value={card.invoiceSum} dashIfZero />
                     </span>
                   </div>
                   <div className={styles.kpiDebit}>
-                    <span className={styles.kpiColLabel}>Дебет</span>
-                    <span
-                      className={styles.kpiColValue}
-                      title={card.debitSum > 0 ? `${card.debitSum.toFixed(2)} ₴` : undefined}
-                    >
-                      {card.debitSum > 0 ? `${card.debitSum.toFixed(0)} ₴` : '—'}
+                    <span className={styles.kpiColLabel} title="Дебет">Д</span>
+                    <span className={styles.kpiColValue}>
+                      <MoneyValue value={card.debitSum} dashIfZero />
                     </span>
                   </div>
                 </div>
                 {card.correctionSum !== 0 && (
                   <div className={styles.kpiCorrectionLine}>
-                    {card.correctionSum > 0 ? '+' : ''}{card.correctionSum.toFixed(2)} ₴ кор.
+                    {card.correctionSum > 0 ? '+' : ''}<MoneyValue value={card.correctionSum} /> кор.
                   </div>
                 )}
               </div>

@@ -31,7 +31,7 @@
   background: #fff;
   cursor: pointer;
   flex: 1;
-  min-width: 150px;
+  min-width: 84px;
   overflow: hidden;
   transition: border-color 0.1s, box-shadow 0.1s;
 }
@@ -104,49 +104,63 @@
 .kpiBalancePos { color: #27ae60; }
 .kpiBalanceNeg { color: #c0392b; }
 
-/* Дві колонки: Кредит / Дебет */
+/* Кредит / Дебет — тепер один під одним (назва зліва, сума справа), щоб
+   картка була вужчою і більше рейсів вміщалось без прокрутки. */
 .kpiColumns {
   display: flex;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 .kpiCredit,
 .kpiDebit {
-  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.3rem;
   border-radius: 4px;
-  padding: 0.28rem 0.45rem;
+  padding: 0.15rem 0.4rem;
   min-width: 0;
 }
 .kpiCredit { background: #fff0f0; }
 .kpiDebit  { background: #f0fff4; }
 
 .kpiColLabel {
-  display: block;
-  font-size: 0.62rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: 0.68rem;
+  font-weight: 700;
   opacity: 0.65;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: help;
 }
 .kpiCredit .kpiColLabel { color: #8b0000; }
 .kpiDebit  .kpiColLabel { color: #1a5c30; }
 
 .kpiColValue {
-  display: block;
   font-weight: 700;
   font-size: 0.7rem;
-  margin-top: 0.08rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .kpiCredit .kpiColValue { color: #c0392b; }
 .kpiDebit  .kpiColValue { color: #27ae60; }
+
+/* Копійки — дрібніше і трохи прозоріше, щоб не перевантажувати картку */
+.kpiKopecks {
+  font-size: 0.78em;
+  opacity: 0.75;
+}
 
 /* Рядок корекцій (якщо є) */
 .kpiCorrectionLine {
   font-size: 0.68rem;
   color: #e67e22;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ─── Основний 50/50 layout ──────────────────────────────────────────────── */
