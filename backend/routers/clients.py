@@ -53,7 +53,14 @@ def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     audit_fields = {"discount_pct", "is_active"}
-    patch = data.model_dump(exclude_none=True)
+    # exclude_unset (не exclude_none!) — форма завжди надсилає ВСІ поля, і поле,
+    # яке оператор навмисно очистив (напр. route_id: null, щоб зняти маршрут),
+    # має явно записатись у null. exclude_none раніше просто викидав такі поля
+    # з patch — значення в базі лишалось старим, і "зняти маршрут"/"очистити
+    # адресу"/"очистити телефон" тощо ніколи не спрацьовувало. exclude_unset
+    # коректно розрізняє "поле не надіслали" (частковий PATCH, напр. кнопка
+    # "Відновити" шле лише {is_active: 1}) від "поле надіслали як null".
+    patch = data.model_dump(exclude_unset=True)
     for field, value in patch.items():
         if field in audit_fields:
             old_val = getattr(c, field, None)
