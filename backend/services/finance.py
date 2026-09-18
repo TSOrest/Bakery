@@ -3,7 +3,7 @@
 from datetime import datetime, date as _date, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from sqlalchemy import func, case, and_
 
 from backend.models.finances import Finance
 from backend.models.references import Client
@@ -48,10 +48,19 @@ def get_client_balance(db: Session, client_id: int, as_of: Optional[str] = None)
     return round(result or 0.0, 2)
 
 
-def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBalance]:
+def get_all_balances(
+    db: Session,
+    as_of: Optional[str] = None,
+    exclude_invoice_dates: Optional[List[str]] = None,
+) -> List[ClientBalance]:
     """Баланси всіх клієнтів (включно з деактивованими) станом на дату as_of.
     Деактивований клієнт може мати борг — він повинен відображатись у фінзвіті.
     Один GROUP BY запит замість 3 запитів на кожного клієнта.
+
+    exclude_invoice_dates — дати, на які борг з накладної (стаття "Накладна")
+    не враховується в балансі: щойно виставлена сьогодні накладна — це ще
+    поточна операція (машина в рейсі), не стабільний борг клієнта. Оплати
+    та решта операцій за ці дати рахуються як завжди.
     """
     from backend.models.references import Route
 
@@ -78,6 +87,17 @@ def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBal
 
     if as_of:
         fin_q = fin_q.filter(Finance.finance_date <= as_of)
+
+    if exclude_invoice_dates:
+        from backend.models.finances import FinanceArticle
+        invoice_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == "Накладна").all()]
+        if invoice_ids:
+            fin_q = fin_q.filter(
+                ~and_(
+                    Finance.article_id.in_(invoice_ids),
+                    Finance.finance_date.in_(exclude_invoice_dates),
+                )
+            )
 
     agg = {
         row.client_id: row
@@ -106,9 +126,17 @@ def get_all_balances(db: Session, as_of: Optional[str] = None) -> List[ClientBal
     return result
 
 
-def get_summary(db: Session, as_of: Optional[str] = None) -> FinanceSummary:
-    """Загальна зведена статистика боргів станом на as_of — тільки по звичайних клієнтах."""
-    balances = [b for b in get_all_balances(db, as_of) if b.client_kind == "customer"]
+def get_summary(
+    db: Session,
+    as_of: Optional[str] = None,
+    exclude_invoice_dates: Optional[List[str]] = None,
+) -> FinanceSummary:
+    """Загальна зведена статистика боргів станом на as_of — тільки по звичайних клієнтах.
+    exclude_invoice_dates — див. docstring get_all_balances()."""
+    balances = [
+        b for b in get_all_balances(db, as_of, exclude_invoice_dates)
+        if b.client_kind == "customer"
+    ]
 
     total_debt   = sum(b.balance for b in balances if b.balance < 0)
     total_credit = sum(b.balance for b in balances if b.balance > 0)

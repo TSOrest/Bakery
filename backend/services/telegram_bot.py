@@ -39,7 +39,7 @@ from backend.models.orders import Order
 from backend.models.baking import BakingTask
 from backend.models.invoices import Invoice
 from backend.models.references import Client, Product, ClientBotUser
-from backend.services.finance import get_all_balances, get_client_balance
+from backend.services.finance import get_all_balances, get_client_balance, get_summary
 from backend.services.prices import get_price, get_price_with_source
 
 _PRICE_SOURCE_LABEL = {'base': 'Б', 'discounted': '%', 'individual': 'І', 'manual': 'Р'}
@@ -366,20 +366,28 @@ def _report_finance() -> str:
     дані і термінологія, що й на дашборді власника (get_dashboard()), щоб
     цифри в боті й на сайті завжди збігались. Без "Нетто-баланс" (плутав —
     це просто аванси мінус борг, дублікат) і без "Топ боржники" (повний
-    список — окрема команда /debts, дублювати тут не потрібно)."""
+    список — окрема команда /debts, дублювати тут не потрібно).
+
+    Борг/переплата рахуються ОКРЕМО від get_dashboard() — з виключенням
+    накладних, виставлених сьогодні (див. _report_debts() і docstring
+    get_all_balances()): щойно виставлена накладна — ще поточна операція
+    (машина в рейсі), не стабільний борг. Решта цифр (каса, виручка,
+    надходження) — як і раніше, з дашборду."""
     from backend.routers.dashboard import get_dashboard
 
+    today = date.today().isoformat()
     with SessionLocal() as db:
         d = get_dashboard(date_param=None, db=db)
+        debt = get_summary(db, exclude_invoice_dates=[today])
 
-    fin, t = d["finance"], d["today"]
-    cash_sign = "+" if fin["cash_balance"] >= 0 else ""
+    t = d["today"]
+    cash_sign = "+" if debt.cash_balance >= 0 else ""
     lines = [
         "💰 <b>Фінансовий звіт</b>",
-        f"Залишок у касі: <b>{cash_sign}{_fmt(fin['cash_balance'])} грн</b>",
+        f"Залишок у касі: <b>{cash_sign}{_fmt(debt.cash_balance)} грн</b>",
         "",
-        f"Борг клієнтів: {_fmt(fin['total_debt'])} грн ({fin['clients_in_debt']} кл.)",
-        f"Переплата клієнтів: {_fmt(fin['total_credit'])} грн ({fin['clients_with_credit']} кл.)",
+        f"Борг клієнтів: {_fmt(debt.total_debt)} грн ({debt.clients_in_debt} кл.)",
+        f"Переплата клієнтів: {_fmt(debt.total_credit)} грн ({debt.clients_with_credit} кл.)",
         "",
         f"<b>Сьогодні ({d['date']}):</b>",
         f"Виставлено: {_fmt(t['revenue'])} грн",
@@ -447,8 +455,12 @@ def _daily_report_pdf_bytes() -> bytes:
 
 
 def _report_debts() -> str:
+    """Список боржників — без клієнтів, чий "борг" складається лише з
+    накладної, виставленої сьогодні (ще поточна операція, не борг, що
+    затримався — див. docstring get_all_balances())."""
+    today = date.today().isoformat()
     with SessionLocal() as db:
-        balances = get_all_balances(db)
+        balances = get_all_balances(db, exclude_invoice_dates=[today])
 
     # Лише client_kind='customer' — див. коментар у _report_finance().
     debtors = sorted(
