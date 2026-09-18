@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ─── Стара схема (ShopCount) — залишається для сумісності ─────────────────────
@@ -50,8 +50,8 @@ class OtherStockInOut(BaseModel):
 class ShopDisposalLineCreate(BaseModel):
     disposal_type: str  # writeoff | ration | client | sale
     client_id: Optional[int] = None
-    qty: float
-    price: Optional[float] = None   # для disposal_type='sale' — ціна продажу
+    qty: float = Field(..., gt=0)
+    price: Optional[float] = Field(None, ge=0)   # для disposal_type='sale' — ціна продажу
     notes: Optional[str] = None
 
 
@@ -83,8 +83,8 @@ class ShopReconciliationLineOut(BaseModel):
 
 
 class ShopReconciliationLineUpdate(BaseModel):
-    entered_balance: Optional[float] = None
-    price: Optional[float] = None
+    entered_balance: Optional[float] = Field(None, ge=0)
+    price: Optional[float] = Field(None, ge=0)
 
 
 class ShopReconciliationHeaderOut(BaseModel):
@@ -157,8 +157,8 @@ class ShopReceiptCreate(BaseModel):
     shop_client_id: int
     receipt_date: str
     product_id: int
-    qty: float
-    purchase_price: Optional[float] = 0.0
+    qty: float = Field(..., gt=0)
+    purchase_price: Optional[float] = Field(0.0, ge=0)
     notes: Optional[str] = None
 
 
@@ -180,15 +180,15 @@ class ShopReceiptOut(BaseModel):
 
 class ShopSaleLineIn(BaseModel):
     product_id: int
-    qty: float
-    price: float
+    qty: float = Field(..., gt=0)
+    price: float = Field(..., ge=0)
     batch_date: Optional[str] = None   # яку партію продано (дата надходження)
 
 
 class ShopSaleCreate(BaseModel):
     shop_client_id: int
     sale_date: str
-    lines: List[ShopSaleLineIn]
+    lines: List[ShopSaleLineIn] = Field(..., min_length=1)
     session_id: Optional[str] = None
     notes: Optional[str] = None
 

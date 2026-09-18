@@ -17,6 +17,7 @@ from backend.models.orders import Order
 from backend.models.invoices import Invoice, InvoiceLine
 from backend.models.references import Product, Category, Client
 from backend.models.finances import Finance, FinanceArticle
+from backend.models.auth import User
 from backend.routers.auth import require_user
 from backend.schemas.shop import (
     ShopCountOut, ShopCountUpdate,
@@ -32,7 +33,16 @@ from backend.schemas.shop import (
     ShopSaleCreate, ShopSaleOut, ShopSaleLineOut, PosProductRow,
 )
 
-router = APIRouter(prefix="/shop", tags=["Магазин"])
+router = APIRouter(prefix="/shop", tags=["Магазин"], dependencies=[Depends(require_user)])
+
+
+def _forbid_seller(user: User = Depends(require_user)) -> User:
+    """Закриваючі/видаляючі дії над звіркою — не для ролі seller (POS-каса,
+    обмежена на фронтенді лише сторінкою /pos; без цієї перевірки прямий
+    виклик API дозволяв продавцю закрити чи видалити чужу звірку)."""
+    if user.role == "seller":
+        raise HTTPException(status_code=403, detail="Ця дія недоступна для ролі продавця")
+    return user
 
 
 # ─── Допоміжні функції ────────────────────────────────────────────────────────
@@ -872,7 +882,7 @@ def update_opening_cash(
     rec_id: int,
     body: ShopReconciliationOpeningCashUpdate,
     db: Session = Depends(get_db),
-    _user=Depends(require_user),
+    _user: User = Depends(_forbid_seller),
 ):
     """Оновлює cash_actual стартової звірки (rec_type='opening')."""
     rec = db.get(ShopReconciliation, rec_id)
@@ -1241,6 +1251,7 @@ def confirm_reconciliation(
     rec_id: int,
     body: ShopReconciliationConfirm,
     db: Session = Depends(get_db),
+    _user: User = Depends(_forbid_seller),
 ):
     """
     Підтверджує звірку:
@@ -1302,7 +1313,7 @@ def confirm_reconciliation(
 
 
 @router.delete("/reconciliations/{rec_id}", status_code=204)
-def delete_reconciliation(rec_id: int, db: Session = Depends(get_db)):
+def delete_reconciliation(rec_id: int, db: Session = Depends(get_db), _user: User = Depends(_forbid_seller)):
     rec = db.get(ShopReconciliation, rec_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Звірку не знайдено")
@@ -1339,6 +1350,8 @@ def add_disposal(
         raise HTTPException(status_code=422, detail="Невірний тип розподілу")
     if body.disposal_type == "client" and not body.client_id:
         raise HTTPException(status_code=422, detail="Для типу 'клієнт' треба вказати client_id")
+    if body.disposal_type == "client" and not db.get(Client, body.client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     if body.disposal_type == "sale" and not body.price:
         raise HTTPException(status_code=422, detail="Для типу 'продаж' треба вказати ціну")
 
@@ -1412,6 +1425,28 @@ def list_receipts(
 
 @router.post("/receipts", response_model=ShopReceiptOut, status_code=201)
 def create_receipt(data: ShopReceiptCreate, db: Session = Depends(get_db)):
+    if not db.get(Client, data.shop_client_id):
+        raise HTTPException(status_code=404, detail="Магазин (клієнта) не знайдено")
+    if not db.get(Product, data.product_id):
+        raise HTTPException(status_code=404, detail="Виріб не знайдено")
+    # Дзеркало перевірки у delete_receipt: без неї надходження заднім числом
+    # у вже закритий діапазон мовчки зникало з усіх екранів (compute_current_stock
+    # рахує "отримано" лише від last_closed.period_to+1) і потім взагалі не
+    # видалялось через API (delete_receipt цю ж перевірку вже мав, лише навпаки).
+    last_closed = (
+        db.query(ShopReconciliation)
+        .filter(
+            ShopReconciliation.shop_client_id == data.shop_client_id,
+            ShopReconciliation.closed == 1,
+        )
+        .order_by(ShopReconciliation.period_to.desc())
+        .first()
+    )
+    if last_closed and data.receipt_date <= last_closed.period_to:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Дата надходження у вже закритому діапазоні (до {last_closed.period_to}) — вкажіть дату після закритої звірки",
+        )
     r = ShopReceipt(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(r)
     safe_commit(db)

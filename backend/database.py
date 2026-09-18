@@ -112,6 +112,39 @@ def _should_skip_alter_add_column(conn, stmt: str) -> bool:
     return _column_exists(conn, m.group(1), m.group(2))
 
 
+def _strip_sql_comments(sql: str) -> str:
+    """Прибирає `--`-коментарі з кожного рядка (до кінця рядка), не лише
+    рядки що ПОВНІСТЮ є коментарем.
+
+    ⚠ Баг (виявлено тестом, виправлено): попередня логіка (`run_migrations`)
+    спершу ділила файл на statements по `;`, а коментарі прибирала ЛИШЕ
+    цілими рядками (`ln.strip().startswith("--")`). Якщо коментар містив
+    крапку з комою всередині тексту (напр. "зберігається окремим рядком;
+    written_off = ..." у 013_shop_disposal_lines.sql, чи "дата
+    надходження/випічки; NULL = залишок..." у 014_shop_line_batch_date.sql)
+    — `split(";")` різав СЕРЕДИНУ коментаря навпіл: перша половина йшла з
+    `--`-префіксом (коректно відфільтровувалась), друга половина лишалась
+    БЕЗ префіксу і потрапляла в SQL як сміття. У 014 це ламало
+    `CREATE TABLE shop_reconciliation_lines_v2 (...)` синтаксичною
+    помилкою — і оскільки в тому ж файлі нижче є безумовні `DROP TABLE
+    shop_reconciliation_lines`/`shop_disposal_lines` (окремі, синтаксично
+    чисті statements, що виконувались УСПІШНО), таблиці видалялись
+    назавжди, а перестворення (rename `_v2` → оригінал) НІКОЛИ не
+    відбувалось через провал самого початкового CREATE. На реальній
+    продакшн-базі це непомітно, бо міграція 014 позначена застосованою
+    задовго до того, як цей коментар зіпсувався — але БУДЬ-ЯКА нова
+    інсталяція (і тестова БД) втрачала обидві таблиці мовчки назавжди.
+    Виправлено: коментарі прибираються по рядку (до кінця рядка) ще ДО
+    поділу на statements — крапка з комою всередині коментаря більше не
+    впливає на межі statement.
+    """
+    out_lines = []
+    for ln in sql.splitlines():
+        idx = ln.find("--")
+        out_lines.append(ln[:idx] if idx != -1 else ln)
+    return "\n".join(out_lines)
+
+
 def run_migrations() -> None:
     """Автоматично застосовує нові SQL-міграції з database/migrations/.
 
@@ -134,12 +167,45 @@ def run_migrations() -> None:
         for sql_file in sorted(migrations_dir.glob("*.sql")):
             if sql_file.name in applied:
                 continue
-            sql = sql_file.read_text(encoding="utf-8")
+            # ⚠ Баг (виявлено тестом, виправлено): 014_shop_line_batch_date.sql
+            # перебудовує shop_reconciliation_lines/shop_disposal_lines через
+            # create-copy-DROP-rename (потрібно було зняти старий UNIQUE-
+            # constraint, замінивши partial-indexes). На РЕАЛЬНІЙ базі це вже
+            # застосовано (позначено applied) задовго до цього фіксу. Але на
+            # СВІЖІЙ базі (`create_all()` створює фінальну схему одразу,
+            # включно з batch_date) create-copy крок падає з mismatch
+            # (shop_disposal_lines там уже має пізнішу колонку `price` з
+            # міграції 029) — а безумовні DROP TABLE нижче в тому ж файлі всі
+            # одно виконувались УСПІШНО (окремі, синтаксично чисті
+            # statements), назавжди видаляючи обидві таблиці без
+            # відновлення. Не помічено раніше: жоден live-тест не створював
+            # СВІЖУ базу з нуля — і на dev/prod bakery.db, і в тестах раніше
+            # ці таблиці підвантажувались лише непрямо. Виправлено: якщо
+            # цільовий стан (колонка batch_date) вже є — все re-build не
+            # потрібен, файл повністю пропускається.
+            if sql_file.name == "014_shop_line_batch_date.sql" and _column_exists(
+                conn, "shop_reconciliation_lines", "batch_date"
+            ):
+                # Партиційні unique-індекси з цього файлу все одно потрібні —
+                # створюємо їх напряму (IF NOT EXISTS: на вже мігрованій
+                # реальній базі вони вже є з оригінального прогону 014).
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_recline_opening "
+                    "ON shop_reconciliation_lines(reconciliation_id, product_id) "
+                    "WHERE batch_date IS NULL"
+                ))
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_recline_batch "
+                    "ON shop_reconciliation_lines(reconciliation_id, product_id, batch_date) "
+                    "WHERE batch_date IS NOT NULL"
+                ))
+                conn.execute(text("INSERT INTO schema_migrations (name) VALUES (:n)"), {"n": sql_file.name})
+                conn.commit()
+                continue
+            sql = _strip_sql_comments(sql_file.read_text(encoding="utf-8"))
             errors: list[str] = []
             for raw_stmt in sql.split(";"):
-                # Прибираємо коментарі окремими рядками
-                lines = [ln for ln in raw_stmt.splitlines() if not ln.strip().startswith("--")]
-                stmt = "\n".join(lines).strip()
+                stmt = raw_stmt.strip()
                 if not stmt:
                     continue
                 # Пропустити ALTER TABLE ADD COLUMN якщо колонка вже існує
