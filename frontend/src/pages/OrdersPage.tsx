@@ -854,6 +854,7 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
         clients={clients}
         products={products}
         routes={routes}
+        isDateLocked={isDateLocked}
       />
 
     </div>

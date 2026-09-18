@@ -9,6 +9,7 @@ import styles from './RoutesPage.module.css'
 import PriceTypeBadge from '../components/PriceTypeBadge'
 import HelpTip from '../components/HelpTip'
 import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 // ─── Лейбли статусів ───────────────────────────────────────────────────────────
 
@@ -110,14 +111,17 @@ interface DetailPanelProps {
   director: string
   accountant: string
   paymentAmount: number
+  enableCancel: boolean
   onStatusChange: (inv: Invoice) => void
   onRefresh: () => void
 }
 
 function InvoiceDetailPanel({
   invoice: invoiceProp, client, allClients, products, categories, routes,
-  bakeryName, director, accountant, paymentAmount, onStatusChange, onRefresh,
+  bakeryName, director, accountant, paymentAmount, enableCancel, onStatusChange, onRefresh,
 }: DetailPanelProps) {
+  const confirm = useConfirm()
+  const toast = useToast()
   const productName = (id: number) => {
     const p = products.find((p) => p.id === id)
     return p?.short_name ?? p?.name ?? `#${id}`
@@ -169,6 +173,29 @@ function InvoiceDetailPanel({
       onStatusChange(updated)
     } finally {
       setAccepting(false)
+    }
+  }
+
+  // ── Скасування (draft/sent → cancelled) ──────────────────────────────────────
+  const [cancelling, setCancelling] = useState(false)
+
+  const handleCancel = async () => {
+    const ok = await confirm({
+      title: 'Скасувати накладну?',
+      message: `Накладна ${invoice.invoice_number} буде позначена як скасована. Це не можна відмінити.`,
+      confirmText: 'Скасувати накладну',
+      danger: true,
+    })
+    if (!ok) return
+    setCancelling(true)
+    try {
+      const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=cancelled`, {})
+      onStatusChange(updated)
+      toast.success('Накладну скасовано')
+    } catch {
+      toast.error('Не вдалось скасувати накладну')
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -298,6 +325,11 @@ function InvoiceDetailPanel({
           {(status === 'sent' || status === 'processing') && !isShop && (
             <button className={styles.btnAccept} onClick={handleAccept} disabled={accepting}>
               {accepting ? '...' : '✓ Прийнято'}
+            </button>
+          )}
+          {enableCancel && (status === 'draft' || status === 'sent') && !isShop && (
+            <button className={styles.btnCancel} onClick={handleCancel} disabled={cancelling}>
+              {cancelling ? '...' : '❌ Скасувати'}
             </button>
           )}
           {isShop && status !== 'accepted' && (
@@ -625,6 +657,7 @@ export default function RoutesPage() {
   const [bakeryName, setBakeryName] = useState('Пекарня')
   const [director,   setDirector]   = useState('')
   const [accountant, setAccountant] = useState('')
+  const [enableInvoiceCancel, setEnableInvoiceCancel] = useState(false)
 
   const [activeRouteId,    setActiveRouteId]    = useState<number | null>(null)
   const [selectedClient,   setSelectedClient]   = useState<Client | null>(null)
@@ -698,6 +731,7 @@ export default function RoutesPage() {
       if (cfg.bakery_name?.value)     setBakeryName(cfg.bakery_name.value)
       if (cfg.director?.value)        setDirector(cfg.director.value)
       if (cfg.accountant_name?.value) setAccountant(cfg.accountant_name.value)
+      setEnableInvoiceCancel(cfg.enable_invoice_cancel?.value === '1')
     } catch (e) {
       console.error('RoutesPage load failed:', e)
     } finally {
@@ -927,8 +961,11 @@ export default function RoutesPage() {
     if (needsInvoiceClients.length === 0) return
     setGeneratingDrafts(true)
     try {
-      // route_id: конкретний маршрут якщо вибраний; інакше всі customer-клієнти
-      const qs = activeRouteId && activeRouteId > 0 ? `&route_id=${activeRouteId}` : ''
+      // route_id: конкретний маршрут якщо вибраний; 0 = сентинел «без маршруту»
+      // (вкладка «Внутрішні» — інакше формувало б накладні для ВСІХ маршрутів);
+      // відсутній параметр — усі customer-клієнти одразу (вкладка «Всі»).
+      const qs = activeRouteId === -1 ? '&route_id=0'
+        : activeRouteId && activeRouteId > 0 ? `&route_id=${activeRouteId}` : ''
       const res = await api.post<{ created: number }>(
         `/invoices/generate-drafts?date=${workDate}${qs}`, {}
       )
@@ -1309,6 +1346,7 @@ export default function RoutesPage() {
               director={director}
               accountant={accountant}
               paymentAmount={paymentAmounts[selectedInvoice.id] ?? selectedInvoice.total_sum}
+              enableCancel={enableInvoiceCancel}
               onStatusChange={handleStatusChange}
               onRefresh={() => load(workDate)}
             />

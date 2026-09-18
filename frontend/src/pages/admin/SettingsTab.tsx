@@ -23,6 +23,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   order_lock_time:          'Час блокування замовлень',
   order_past_days:          'Днів назад для редагування замовлень',
   work_date_next_day_time:  'Час переходу дати роботи на завтра',
+  cash_tracking_start_date: 'Дата початку обліку каси (РРРР-ММ-ДД, порожньо = завжди)',
 }
 
 export type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
@@ -53,6 +54,7 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
       // інакше чекбокс показував би "вимкнено" при кожному відкритті сторінки
       // незалежно від збереженого значення.
       vals['invoice_exchange_inline'] = data['invoice_exchange_inline']?.value ?? '0'
+      vals['enable_invoice_cancel'] = data['enable_invoice_cancel']?.value ?? '0'
       setForm(vals)
       setTgToken(data['telegram_bot_token']?.value ?? '')
       setTgPhones(data['telegram_allowed_phones']?.value ?? '')
@@ -194,6 +196,26 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
               <br />
               <span style={{ fontSize: '0.82rem', color: '#666' }}>
                 Кількість обміну показується в загальному списку виробів одразу за колонкою «Кільк.» замість окремої секції «ОБМІН» унизу накладної. Стосується друку в браузері і PDF, яке бот надсилає клієнту в Telegram.
+              </span>
+            </span>
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', maxWidth: 520, marginTop: '0.9rem' }}>
+            <input
+              type="checkbox"
+              checked={form['enable_invoice_cancel'] === '1'}
+              onChange={(e) => {
+                const val = e.target.checked ? '1' : '0'
+                setForm(f => ({ ...f, enable_invoice_cancel: val }))
+                api.put('/settings/', { enable_invoice_cancel: val }).catch(() => {})
+              }}
+              style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+            />
+            <span>
+              <span style={{ fontWeight: 500 }}>Кнопка «Скасувати накладну»</span>
+              <br />
+              <span style={{ fontSize: '0.82rem', color: '#666' }}>
+                У Маршрутах з'являється кнопка «❌ Скасувати» для чернеток і відправлених накладних (без фінансових наслідків на цих стадіях). Прийняті накладні скасувати не можна — лише через «Корекцію».
               </span>
             </span>
           </label>

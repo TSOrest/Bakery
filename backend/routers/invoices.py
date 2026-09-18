@@ -287,7 +287,13 @@ def generate_drafts(
     з замовленнями на дату. Системні клієнти (writeoff/ration/underbaked) виключені.
     Магазини створюються разом з усіма, але їх накладні фіналізуються окремо —
     «Закрити накладну магазину» у Випічці (без масових операцій у Маршрутах).
-    Ідемпотентно (пропускає клієнтів з наявною не-cancelled накладною)."""
+    Ідемпотентно (пропускає клієнтів з наявною не-cancelled накладною).
+
+    route_id=0 — сентинел «без маршруту» (вкладка «Внутрішні» у Маршрутах;
+    реальні route_id завжди >=1, autoincrement). Без нього фільтр route_id
+    для внутрішніх клієнтів не передавався взагалі — кнопка формувала
+    накладні для клієнтів УСІХ маршрутів, а не лише внутрішніх.
+    """
     from backend.models.references import Client
 
     q = db.query(Client).filter(
@@ -296,7 +302,9 @@ def generate_drafts(
         | (Client.client_kind == "shop")
         | (Client.is_own_shop == 1),
     )
-    if route_id is not None:
+    if route_id == 0:
+        q = q.filter(Client.route_id.is_(None))
+    elif route_id is not None:
         q = q.filter(Client.route_id == route_id)
     clients = q.all()
 

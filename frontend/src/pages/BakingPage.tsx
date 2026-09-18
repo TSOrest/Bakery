@@ -187,7 +187,9 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
     if (raw === undefined) return
     const newQty = Number(raw)
     setEditQty(prev => { const n = { ...prev }; delete n[line.key]; return n })
-    if (newQty < 0 || newQty === line.qty) return
+    // Верхня межа як і при додаванні нового рядка (handleAddSurplus): не можна
+    // штучно роздути "надходження" магазину понад реально спечену кількість.
+    if (newQty < 0 || newQty === line.qty || newQty > line.qty + surplusRemaining) return
     if (line.kind === 'invoice') {
       await api.post('/invoices/set-surplus', {
         shop_client_id: line.client_id, product_id: line.product_id,
@@ -289,7 +291,7 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
                       <td className={styles.lineQty}>
                         {surplusRowsEditable ? (
                           <input
-                            type="number" min={1} step={1}
+                            type="number" min={1} step={1} max={line.qty + surplusRemaining}
                             value={editQty[line.key] ?? String(line.qty)}
                             className={styles.addQtyInput}
                             onChange={e => setEditQty(prev => ({ ...prev, [line.key]: e.target.value }))}

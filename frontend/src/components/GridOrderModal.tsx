@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import Modal from './Modal'
 import { api } from '../api/client'
+import { useToast } from './Toast'
 import type {
   BulkOrderUpsertResponse, Category, Client, GridCell, GridResponse, Product, Route,
 } from '../types'
@@ -20,6 +21,7 @@ interface Props {
   clients: Client[]
   products: Product[]
   routes: Route[]
+  isDateLocked: boolean         // архівна дата (order_past_days) — та сама перевірка, що в OrdersPage
 }
 
 type SaveStatus = 'saving' | 'saved' | 'error'
@@ -44,8 +46,9 @@ function nf(n: number): string {
 }
 
 export default function GridOrderModal({
-  open, onClose, workDate, categories, clients, products, routes,
+  open, onClose, workDate, categories, clients, products, routes, isDateLocked,
 }: Props) {
+  const toast = useToast()
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [grid, setGrid] = useState<GridResponse | null>(null)
@@ -143,7 +146,7 @@ export default function GridOrderModal({
     grid?.cells[cid]?.[pid] ?? EMPTY_CELL
 
   const isLocked = (cid: number): boolean =>
-    !!grid && grid.locked_client_ids.includes(cid)
+    isDateLocked || (!!grid && grid.locked_client_ids.includes(cid))
 
   // ── Підсумки (по рядку клієнта, по колонці виробу, загальні) ──────────────
   const visibleClients = useMemo(
@@ -343,9 +346,10 @@ export default function GridOrderModal({
       }
     }
     if (applied > 0) scheduleFlush(100)
-    if (skipped > 0) {
-      // eslint-disable-next-line no-console
-      console.warn(`Paste: пропущено ${skipped} клієнт(ів) з накладною (locked)`)
+    const cellCount = lines.length
+    if (applied > 0 || skipped > 0) {
+      const skipNote = skipped > 0 ? ` (пропущено ${skipped} заблокованих рядків)` : ''
+      toast.success(`Вставлено ${applied} значень у ${cellCount} рядків${skipNote}`)
     }
   }
 

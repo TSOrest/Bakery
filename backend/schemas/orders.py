@@ -1,9 +1,10 @@
 """Pydantic-схеми для замовлень."""
 
 from __future__ import annotations
+from datetime import date as _date
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OrderSource(str, Enum):
@@ -33,6 +34,15 @@ class OrderCreate(BaseModel):
     parent_order_id: Optional[int] = None
     delivered_qty: Optional[float] = None
     origin_id: Optional[int] = None
+
+    @field_validator("order_date")
+    @classmethod
+    def valid_order_date(cls, v: str) -> str:
+        try:
+            _date.fromisoformat(v)
+        except ValueError:
+            raise ValueError("Дата має бути у форматі РРРР-ММ-ДД")
+        return v
 
 
 class OrderUpdate(BaseModel):
