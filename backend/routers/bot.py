@@ -62,6 +62,23 @@ def _send_to_client(chat_id: str, text: str) -> None:
         log.warning("Failed to send Telegram message to chat %s: %s", chat_id, exc)
 
 
+def _safe_notify(chat_id: str, tpl: str, **kwargs) -> None:
+    """Форматує шаблон і надсилає — без падіння всієї дії, якщо адмін-
+    редагований шаблон (Налаштування → Бот → Шаблони) містить биту
+    плейсхолдер-дужку. Раніше `tpl.format(...)` викликався напряму як
+    аргумент `_send_to_client()` — помилка форматування ставалась ДО
+    виклику (`_send_to_client`'s власний try/except її не ловив), тож
+    зміна статусу замовлення (safe_commit нижче) взагалі не зберігалась —
+    команда 500-ила для ВСІХ замовлень бота, доки хтось не виправив текст
+    шаблону назад."""
+    try:
+        text = tpl.format(**kwargs)
+    except Exception as exc:
+        log.warning("Bad bot template (chat %s): %s", chat_id, exc)
+        return
+    _send_to_client(chat_id, text)
+
+
 def _all_chat_ids_for_client(db: Session, client_id: int) -> list[str]:
     """Повертає всі активні chat_id авторизованих користувачів клієнта."""
     rows = (
@@ -153,9 +170,9 @@ def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db
             tpl = _get_setting(db, "bot_tpl_confirmed",
                                "✅ {product} × {qty} шт на {date} підтверджено.")
             total = _order_sum(db, order_date, order.client_id)
-            _send_to_client(placer_chat, tpl.format(
+            _safe_notify(placer_chat, tpl,
                 date=order_date, sum=_fmt(total), reason="",
-                product=product_name, qty=int(order.qty)))
+                product=product_name, qty=int(order.qty))
 
     elif req.action == "reject":
         order.bot_status = "rejected"
@@ -163,9 +180,9 @@ def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db
         if placer_chat:
             tpl = _get_setting(db, "bot_tpl_rejected",
                                "❌ {product} × {qty} шт на {date} відхилено. Причина: {reason}")
-            _send_to_client(placer_chat, tpl.format(
+            _safe_notify(placer_chat, tpl,
                 date=order_date, reason=req.reason or "не вказана", sum="",
-                product=product_name, qty=int(order.qty)))
+                product=product_name, qty=int(order.qty))
 
     elif req.action == "modify":
         if req.new_qty is None or req.new_qty <= 0:
@@ -179,9 +196,9 @@ def verify_order(order_id: int, req: VerifyRequest, db: Session = Depends(get_db
             tpl = _get_setting(db, "bot_tpl_modified",
                                "✏️ {product}: замовлено {qty} шт → змінено на {new_qty} шт на {date}.")
             total = _order_sum(db, order_date, order.client_id)
-            _send_to_client(placer_chat, tpl.format(
+            _safe_notify(placer_chat, tpl,
                 date=order_date, sum=_fmt(total), reason=req.reason or "",
-                product=product_name, qty=int(old_qty), new_qty=int(req.new_qty)))
+                product=product_name, qty=int(old_qty), new_qty=int(req.new_qty))
     else:
         raise HTTPException(400, "Невідома дія")
 
@@ -224,7 +241,7 @@ def broadcast_reminder(order_date: Optional[str] = None, db: Session = Depends(g
             skipped += 1
             continue
         for chat_id in _all_chat_ids_for_client(db, c.id):
-            _send_to_client(chat_id, tpl.format(date=target, sum="", reason=""))
+            _safe_notify(chat_id, tpl, date=target, sum="", reason="")
             sent += 1
 
     return BroadcastResponse(sent=sent, skipped=skipped)
@@ -264,7 +281,7 @@ def broadcast_deadline(order_date: Optional[str] = None, db: Session = Depends(g
             skipped += 1
             continue
         for chat_id in _all_chat_ids_for_client(db, c.id):
-            _send_to_client(chat_id, tpl.format(date=target, sum="", reason=""))
+            _safe_notify(chat_id, tpl, date=target, sum="", reason="")
             sent += 1
 
     return BroadcastResponse(sent=sent, skipped=skipped)

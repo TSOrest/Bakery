@@ -8,6 +8,22 @@ import styles from './IssuesWidget.module.css'
 
 type Tab = 'new' | 'list'
 
+// api/client.ts кидає Error(`${status} ${statusText}: ${rawBodyText}`) — тіло
+// відповіді зазвичай {"detail": "..."}. Дістає реальну причину замість
+// статичного "перевірте інтернет", яка була неправдивою (напр. справжня
+// причина — "GitHub не налаштовано", а не проблема з мережею).
+function extractApiErrorDetail(err: unknown): string | null {
+  if (!(err instanceof Error)) return null
+  const idx = err.message.indexOf('{')
+  if (idx === -1) return null
+  try {
+    const body = JSON.parse(err.message.slice(idx))
+    return typeof body?.detail === 'string' ? body.detail : null
+  } catch {
+    return null
+  }
+}
+
 const TYPE_OPTIONS = [
   { value: 'bug',        label: '🐛 Помилка' },
   { value: 'suggestion', label: '💡 Пропозиція' },
@@ -333,7 +349,12 @@ export default function IssuesWidget() {
   async function loadIssues() {
     setLoading(true); setError('')
     try { setIssues(await fetchIssues()) }
-    catch { setError('Не вдалося завантажити звернення') }
+    catch (err: unknown) {
+      // Реальна причина від сервера (напр. "GitHub не налаштовано") раніше
+      // повністю відкидалась — статичний текст завжди звинувачував
+      // з'єднання, навіть коли причина геть інша.
+      setError(extractApiErrorDetail(err) ?? 'Не вдалося завантажити звернення')
+    }
     finally { setLoading(false) }
   }
 
@@ -384,8 +405,8 @@ export default function IssuesWidget() {
       setSuccess(`Звернення надіслано!${imageWarning}`)
       setForm({ title: '', body: '', issue_type: 'bug' })
       removeScreenshot()
-    } catch {
-      setError('Помилка надсилання. Перевірте підключення до інтернету.')
+    } catch (err: unknown) {
+      setError(extractApiErrorDetail(err) ?? 'Помилка надсилання. Перевірте підключення до інтернету.')
     } finally {
       setSending(false)
     }
