@@ -12,7 +12,7 @@ router = APIRouter(prefix="/routes", tags=["Маршрути"])
 
 
 @router.get("/", response_model=List[RouteOut])
-def list_routes(active_only: bool = True, db: Session = Depends(get_db)):
+def list_routes(active_only: bool = True, db: Session = Depends(get_db), _=Depends(require_user)):
     q = db.query(Route)
     if active_only:
         q = q.filter(Route.is_active == 1)
@@ -41,7 +41,7 @@ def update_route(route_id: int, data: RouteCreate, db: Session = Depends(get_db)
 
 
 @router.get("/{route_id}/clients-count")
-def route_clients_count(route_id: int, db: Session = Depends(get_db)):
+def route_clients_count(route_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     """Кількість активних клієнтів на маршруті — для UI підказки перед деактивацією."""
     r = db.get(Route, route_id)
     if not r:

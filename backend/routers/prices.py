@@ -16,7 +16,7 @@ from backend.schemas.pricing import (
     ClientPriceOverrideCreate, ClientPriceOverrideOut,
 )
 from backend.services.prices import get_price, get_price_with_source
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_admin, require_user
 
 router = APIRouter(prefix="/prices", tags=["Ціни"])
 
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/prices", tags=["Ціни"])
 # ── Ефективні ціни для клієнта ─────────────────────────────────────────────────
 
 @router.get("/effective-batch")
-def effective_prices_batch(client_ids: str, date: str, db: Session = Depends(get_db)):
+def effective_prices_batch(client_ids: str, date: str, db: Session = Depends(get_db), _=Depends(require_user)):
     """Ефективні ціни для кількох клієнтів за один запит.
     client_ids — через кому: "1,2,3".
     Повертає {client_id: {product_id: {price, source}}}.
@@ -111,7 +111,7 @@ def effective_prices_batch(client_ids: str, date: str, db: Session = Depends(get
 
 
 @router.get("/effective")
-def effective_prices_for_client(client_id: int, date: str, db: Session = Depends(get_db)):
+def effective_prices_for_client(client_id: int, date: str, db: Session = Depends(get_db), _=Depends(require_user)):
     """Ефективні ціни всіх активних продуктів для клієнта на задану дату.
     Повертає {product_id: {price, source}} де source ∈ base|discounted|individual|manual.
     """
@@ -130,6 +130,7 @@ def list_prices(
     product_id:  Optional[int] = None,
     active_only: bool = True,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     q = db.query(Price)
     if active_only:
@@ -237,6 +238,7 @@ def bulk_preview(
     effective_date: str,
     excluded_ids:   str = Query(default=""),   # product_ids через кому
     db: Session = Depends(get_db),
+    _=Depends(require_admin),
 ):
     """Повертає попередній перегляд масової зміни цін (без збереження).
     Повертає valid_from поточної ціни і has_collision (якщо вже є ціна з >= effective_date).
@@ -375,6 +377,7 @@ def resolve_price(
     client_id:  int,
     date:       str,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """Повертає актуальну ціну для клієнта+продукт на дату."""
     price = get_price(db, product_id, client_id, date)
@@ -402,6 +405,7 @@ def list_overrides(
     client_id:  Optional[int] = None,
     product_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     q = db.query(ClientPriceOverride)
     if client_id:

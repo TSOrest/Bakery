@@ -50,6 +50,7 @@ def _counts_for(group_ids: List[int], db: Session) -> dict[int, int]:
 def list_client_groups(
     route_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     """Список груп. Якщо route_id задано — фільтр за маршрутом."""
     q = db.query(ClientGroup)
@@ -122,7 +123,7 @@ def delete_client_group(
 
 
 @router.get("/{group_id}/members", response_model=List[int])
-def list_group_members(group_id: int, db: Session = Depends(get_db)):
+def list_group_members(group_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     """ID клієнтів які зараз входять у групу (активні + неактивні)."""
     rows = (
         db.query(Client.id)

@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Category, Unit
 from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_admin, require_user
 
 router = APIRouter(tags=["Довідники"])
 
 
 @router.get("/categories", response_model=List[CategoryOut])
-def list_categories(active_only: bool = False, db: Session = Depends(get_db)):
+def list_categories(active_only: bool = False, db: Session = Depends(get_db), _=Depends(require_user)):
     q = db.query(Category)
     if active_only:
         q = q.filter(Category.is_active == 1)
@@ -66,7 +66,7 @@ def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(r
 
 
 @router.get("/units", response_model=List[UnitOut])
-def list_units(active_only: bool = False, db: Session = Depends(get_db)):
+def list_units(active_only: bool = False, db: Session = Depends(get_db), _=Depends(require_user)):
     q = db.query(Unit)
     if active_only:
         q = q.filter(Unit.is_active == 1)

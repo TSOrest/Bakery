@@ -8,13 +8,13 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Product
 from backend.schemas.references import ProductCreate, ProductUpdate, ProductOut
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_admin, require_user
 
 router = APIRouter(prefix="/products", tags=["Вироби"])
 
 
 @router.get("/age")
-def get_product_ages(date: Optional[str] = None, db: Session = Depends(get_db)):
+def get_product_ages(date: Optional[str] = None, db: Session = Depends(get_db), _=Depends(require_user)):
     """Вік кожного виробу в днях (від дати останньої випічки до заданої дати).
     Повертає лише ті вироби, де baked_qty > 0 і є випічка до зазначеної дати."""
     ref = date or dt.now().strftime('%Y-%m-%d')
@@ -42,6 +42,7 @@ def get_product_ages(date: Optional[str] = None, db: Session = Depends(get_db)):
 def list_products(
     active_only: bool = True,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     q = db.query(Product)
     if active_only:
@@ -50,7 +51,7 @@ def list_products(
 
 
 @router.get("/{product_id}", response_model=ProductOut)
-def get_product(product_id: int, db: Session = Depends(get_db)):
+def get_product(product_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     p = db.get(Product, product_id)
     if not p:
         raise HTTPException(status_code=404, detail="Виріб не знайдено")

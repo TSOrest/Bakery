@@ -1510,6 +1510,36 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 `tests/test_debts_report_excludes_system_clients.py`,
 `tests/test_finance_article_sign_and_rename_guards.py`.
 
+## Високі знахідки QA-аудиту — Розділ 4: Довідники, адмін, безпека (виправлено)
+
+Розділ 4 (2 з 3 — гранульовані права ролей відкладено в окрему хвилю, див.
+Контекст у плані аудиту: не дірка безпеки, fail-safe — просто не дає прав,
+які власник реально налаштував):
+
+1. **`/auth/github/*` без авторизації** (`backend/routers/auth_github.py`) —
+   Device Flow (`/start`, `/poll`), статус (`/status`) і `/logout` не мали
+   жодної залежності auth: будь-хто в локальній мережі міг запустити OAuth
+   Device Flow пекарні або відкликати вже підключений GitHub-акаунт.
+   Виправлено: `dependencies=[Depends(require_admin)]` на рівні роутера (як
+   уже було в `import_accdb.py`). Не зачіпає `IssuesWidget.tsx` (💬 на всіх
+   сторінках, усі ролі) — там `getGitHubStatus()` лише для необов'язкового
+   аватара автора коментаря, обгорнутий у `.catch(() => {})`; сам сабміт
+   звернення йде через `/issues`, не `/auth/github/*`.
+2. **GET довідників читались без входу взагалі** — `products.py`,
+   `clients.py`, `prices.py`, `routes.py`, `categories.py`,
+   `client_groups.py`, `ingredients.py` (включно з `margin-report` —
+   собівартість/маржа). Мутації (POST/PUT/DELETE) вже мали `require_admin`,
+   але самі GET-и не мали НІЯКОЇ залежності — будь-хто в локальній мережі
+   без токена міг прочитати повний список клієнтів (адреси, телефони,
+   знижки), ціни, склад інгредієнтів, маржинальність. Виправлено:
+   `Depends(require_user)` на кожен GET (без прив'язки до конкретної
+   ролі — те саме узгоджене рішення, що для гранульованих прав вище;
+   `bulk-preview` у `prices.py` — виняток, лишився `require_admin`, бо це
+   попередній перегляд саме адмінської масової зміни цін, не звичайний
+   довідник).
+
+Тести: `tests/test_auth_protection.py` (розширено).
+
 ## Аудит-фікси v0.9.36-v1.0.4
 
 **v0.9.36-v0.9.39:**

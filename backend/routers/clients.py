@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Client
 from backend.schemas.references import ClientCreate, ClientUpdate, ClientOut
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_admin, require_user
 from backend.models.audit import write_audit
 from backend.models.auth import User
 
@@ -18,6 +18,7 @@ def list_clients(
     route_id: Optional[int] = None,
     active_only: bool = True,
     db: Session = Depends(get_db),
+    _=Depends(require_user),
 ):
     q = db.query(Client)
     if active_only:
@@ -28,7 +29,7 @@ def list_clients(
 
 
 @router.get("/{client_id}", response_model=ClientOut)
-def get_client(client_id: int, db: Session = Depends(get_db)):
+def get_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")

@@ -15,7 +15,7 @@ from backend.schemas.ingredients import (
     MarginRow, MarginReport,
 )
 from backend.services.costs import calculate_cost, recalculate_all_costs
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_admin, require_user
 
 router = APIRouter(tags=["Інгредієнти"])
 
@@ -23,7 +23,7 @@ router = APIRouter(tags=["Інгредієнти"])
 # ── Інгредієнти ───────────────────────────────────────────────────────────────
 
 @router.get("/ingredients/", response_model=List[IngredientOut])
-def list_ingredients(db: Session = Depends(get_db)):
+def list_ingredients(db: Session = Depends(get_db), _=Depends(require_user)):
     return db.query(Ingredient).order_by(Ingredient.name).all()
 
 
@@ -93,7 +93,7 @@ def delete_ingredient(ingredient_id: int, db: Session = Depends(get_db), _=Depen
 # ── Склад виробу ──────────────────────────────────────────────────────────────
 
 @router.get("/products/{product_id}/ingredients", response_model=List[ProductIngredientOut])
-def get_product_ingredients(product_id: int, db: Session = Depends(get_db)):
+def get_product_ingredients(product_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
     rows = (
         db.query(ProductIngredient)
         .filter(ProductIngredient.product_id == product_id)
@@ -233,7 +233,7 @@ def recalculate_all(db: Session = Depends(get_db), _=Depends(require_admin)):
 # ── Звіт маржі ────────────────────────────────────────────────────────────────
 
 @router.get("/margin-report", response_model=MarginReport)
-def margin_report(date: Optional[str] = None, db: Session = Depends(get_db)):
+def margin_report(date: Optional[str] = None, db: Session = Depends(get_db), _=Depends(require_user)):
     """
     Звіт маржинальності: собівартість vs поточна ціна для кожного активного виробу.
     date — дата для визначення актуальної ціни (за замовчуванням сьогодні).

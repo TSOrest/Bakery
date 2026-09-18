@@ -12,8 +12,9 @@ from urllib.error import URLError, HTTPError
 from backend.database import get_db
 from backend.models.settings import Setting
 from backend.services.crypto import encrypt_setting
+from backend.routers.auth import require_admin
 
-router = APIRouter(prefix="/auth/github", tags=["auth-github"])
+router = APIRouter(prefix="/auth/github", tags=["auth-github"], dependencies=[Depends(require_admin)])
 
 _GH_DEVICE_URL = "https://github.com/login/device/code"
 _GH_TOKEN_URL  = "https://github.com/login/oauth/access_token"

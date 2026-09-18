@@ -18,6 +18,18 @@ UNAUTH_MUST_401 = [
     ("get",    "/api/v1/import/db-status",         None),
     ("get",    "/api/v1/dashboard/",               None),
     ("get",    "/api/v1/bot/order-status",         None),
+    # Розділ 4 — GET довідників раніше читались без входу взагалі.
+    ("get",    "/api/v1/products/",                None),
+    ("get",    "/api/v1/clients/",                 None),
+    ("get",    "/api/v1/prices/",                  None),
+    ("get",    "/api/v1/routes/",                  None),
+    ("get",    "/api/v1/categories",               None),
+    ("get",    "/api/v1/units",                     None),
+    ("get",    "/api/v1/client-groups/",           None),
+    ("get",    "/api/v1/ingredients/",             None),
+    ("get",    "/api/v1/margin-report",            None),
+    ("post",   "/api/v1/auth/github/start",        None),
+    ("get",    "/api/v1/auth/github/status",       None),
 ]
 
 
@@ -81,3 +93,42 @@ def test_settings_hides_secrets_from_operator(app_client, admin_token, operator_
 
 def test_settings_get_requires_auth(app_client):
     assert app_client.get("/api/v1/settings/").status_code == 401
+
+
+# ── Розділ 4: GET довідників доступні будь-якій автентифікованій ролі ──────────
+
+REFERENCE_GET_ENDPOINTS = [
+    "/api/v1/products/",
+    "/api/v1/clients/",
+    "/api/v1/prices/",
+    "/api/v1/routes/",
+    "/api/v1/categories",
+    "/api/v1/units",
+    "/api/v1/client-groups/",
+    "/api/v1/ingredients/",
+]
+
+
+@pytest.mark.parametrize("path", REFERENCE_GET_ENDPOINTS)
+def test_reference_get_allowed_for_any_authenticated_role(app_client, operator_token, path):
+    """require_user (не require_admin) — довідники читає будь-яка роль,
+    без прив'язки до конкретної (гранульовані права ролей — окрема,
+    відкладена задача)."""
+    resp = app_client.get(path, headers={"Authorization": f"Bearer {operator_token}"})
+    assert resp.status_code == 200
+
+
+def test_github_oauth_start_forbidden_for_operator(app_client, operator_token):
+    resp = app_client.post(
+        "/api/v1/auth/github/start",
+        headers={"Authorization": f"Bearer {operator_token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_github_oauth_status_forbidden_for_operator(app_client, operator_token):
+    resp = app_client.get(
+        "/api/v1/auth/github/status",
+        headers={"Authorization": f"Bearer {operator_token}"},
+    )
+    assert resp.status_code == 403
