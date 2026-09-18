@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 from backend.database import get_db, safe_commit
 from backend.models.orders import Order
 from backend.models.invoices import Invoice
+from backend.models.references import Client, Product
 from backend.schemas.orders import (
     OrderCreate, OrderUpdate, OrderOut, TransferRequest, OrderWithChildrenOut,
     GridCell, GridExtraLine, GridResponse,
@@ -252,6 +253,14 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
 
 @router.post("/", response_model=OrderOut, status_code=201)
 def create_order(data: OrderCreate, db: Session = Depends(get_db), _=Depends(require_user)):
+    # Раніше неіснуючий client_id/product_id ловився лише post-factum через
+    # safe_commit() і давав оманливий 409 "запис вже існує" — семантично
+    # протилежне реальній причині (насправді "клієнта/виріб не знайдено").
+    if not db.get(Client, data.client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+    if not db.get(Product, data.product_id):
+        raise HTTPException(status_code=404, detail="Виріб не знайдено")
+
     o = Order(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(o)
     safe_commit(db)
@@ -265,8 +274,13 @@ def update_order(order_id: int, data: OrderUpdate, db: Session = Depends(get_db)
     o = db.get(Order, order_id)
     if not o:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
+    # exclude_none=True викидало з патча БУДЬ-ЯКЕ поле зі значенням null,
+    # незалежно від того, чи оператор навмисно очистив його (напр. скинути
+    # price_override назад на автоматичну ціну), чи просто не вказав —
+    # очищення мовчки не спрацьовувало (той самий фікс, що вже зроблений
+    # для clients.py).
     audit_fields = {"qty", "price_override", "delivered_qty"}
-    for field, value in data.model_dump(exclude_none=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         if field in audit_fields:
             old_val = getattr(o, field, None)
             if old_val != value:
@@ -301,6 +315,19 @@ def transfer_order(
     parent = db.get(Order, order_id)
     if not parent:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
+
+    # На відміну від /invoices/{id}/transfer, тут немає ані line_kind, ані
+    # обмінних рядків — це стадія чернеток ДО формування накладних, і
+    # винятку "продано як звичайний" тут не існує. Самопереміщення лишало
+    # рядок у межах eff_qty батьківського замовлення (already-запит вище
+    # явно виключає client_id == parent.client_id) і ОДНОЧАСНО додавало
+    # дочірній рядок тому самому клієнту — товар дублювався в підсумковій
+    # накладній.
+    if data.to_client_id == parent.client_id:
+        raise HTTPException(status_code=400, detail="Не можна переміщати самому собі")
+
+    if not db.get(Client, data.to_client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
 
     # Вже переміщена кількість
     already = (

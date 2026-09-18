@@ -9,9 +9,10 @@ from pathlib import Path
 # (bakery-YYYY-MM-DD.log), звідки їх читає переглядач логів (log_viewer.py).
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import engine, Base, run_migrations
@@ -189,6 +190,55 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Переклад найпоширеніших повідомлень Pydantic-валідації (422) — за
+# замовчуванням вони англійською технічним жаргоном ("Input should be
+# greater than or equal to 0"), на відміну від кастомних HTTPException
+# (404/400/409), які всюди написані українською. Системно для ВСІХ
+# ендпоінтів зі стандартною Pydantic-перевіркою полів.
+_VALIDATION_MESSAGES = {
+    "missing":              "Поле обов'язкове",
+    "greater_than_equal":   "Значення має бути не менше {ge}",
+    "greater_than":         "Значення має бути більше {gt}",
+    "less_than_equal":      "Значення має бути не більше {le}",
+    "less_than":            "Значення має бути менше {lt}",
+    "string_too_short":     "Занадто короткий текст (мінімум {min_length} символів)",
+    "string_too_long":      "Занадто довгий текст (максимум {max_length} символів)",
+    "string_type":          "Очікується текст",
+    "int_type":              "Очікується ціле число",
+    "int_parsing":           "Не вдалося розпізнати як ціле число",
+    "float_type":            "Очікується число",
+    "float_parsing":         "Не вдалося розпізнати як число",
+    "bool_type":             "Очікується так/ні",
+    "bool_parsing":          "Не вдалося розпізнати як так/ні",
+    "date_from_datetime_parsing": "Не вдалося розпізнати дату (очікується РРРР-ММ-ДД)",
+    "enum":                  "Недопустиме значення",
+    "value_error":           "Некоректне значення",
+}
+
+
+def _translate_validation_error(err: dict) -> str:
+    template = _VALIDATION_MESSAGES.get(err.get("type", ""))
+    if not template:
+        return err.get("msg", "Некоректне значення")
+    try:
+        return template.format(**(err.get("ctx") or {}))
+    except (KeyError, IndexError):
+        return template
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError):
+    detail = [
+        {
+            "loc": err.get("loc"),
+            "type": err.get("type"),
+            "msg": _translate_validation_error(err),
+        }
+        for err in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
+
 
 # Підключаємо роутери
 PREFIX = "/api/v1"

@@ -191,6 +191,53 @@ def create_payment_finance_entry(db: Session, invoice: Invoice, amount: float) -
     db.add(entry)
 
 
+def _find_invoice_finance_entry(db: Session, invoice: Invoice):
+    """Знаходить існуючий борговий запис цієї накладної.
+
+    Основний пошук — за notes == invoice_number (працює для записів,
+    створених самим застосунком). Для 99.7% імпортованих зі старої бази
+    накладних notes містить вільний текст замість номера — без цього
+    fallback-у recompute_invoice_finance() не знаходила б існуючий запис
+    при корекції такої накладної і мовчки створювала б ДРУГИЙ, дублюючи
+    борг клієнта. Fallback: (client_id, finance_date) — та сама пара, за
+    якою й сам імпорт групував замовлення в накладні, тож застосовується
+    ЛИШЕ коли для цієї пари існує рівно одна накладна (уникаємо ризику
+    зачепити чужий запис, якщо клієнт мав кілька накладних тієї ж дати).
+    Міграція 045 backfill-ить notes для однозначних випадків — цей
+    fallback лишається додатковим захистом від дублювання для решти
+    (напр. якщо backfill з якоїсь причини не охопив рядок).
+    """
+    existing = (
+        db.query(Finance)
+        .filter(
+            Finance.client_id    == invoice.client_id,
+            Finance.finance_type == "invoice",
+            Finance.notes        == invoice.invoice_number,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    same_date_invoices = (
+        db.query(Invoice)
+        .filter(Invoice.client_id == invoice.client_id, Invoice.invoice_date == invoice.invoice_date)
+        .all()
+    )
+    if len(same_date_invoices) != 1 or same_date_invoices[0].id != invoice.id:
+        return None
+
+    return (
+        db.query(Finance)
+        .filter(
+            Finance.client_id    == invoice.client_id,
+            Finance.finance_type == "invoice",
+            Finance.finance_date == invoice.invoice_date,
+        )
+        .first()
+    )
+
+
 def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
     """
     Створює запис у finances коли накладна переходить у статус delivered.
@@ -202,16 +249,21 @@ def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
     не розпізнає запис як борг накладної і помилково враховує його суму як
     рух готівки в "Залишок в касі" (подвійний облік боргу клієнтів,
     штучно занижує залишок, аж до від'ємних значень).
+
+    Магазин/системні клієнти (shop/writeoff/ration) борг не ведуть — товар
+    передається, не продається (recompute_invoice_finance вже мала цю
+    перевірку, але лише для ПОДАЛЬШИХ корекцій; саме ПРИЙНЯТТЯ накладної
+    (backend/routers/invoices.py, update_invoice_status) викликало цю
+    функцію напряму, без перевірки — борг магазину міг з'явитись у момент
+    прийняття і лишитись назавжди, якщо жодної подальшої корекції не
+    відбувалось).
     """
-    existing = (
-        db.query(Finance)
-        .filter(
-            Finance.client_id    == invoice.client_id,
-            Finance.finance_type == "invoice",
-            Finance.notes        == invoice.invoice_number,
-        )
-        .first()
-    )
+    client = db.get(Client, invoice.client_id)
+    kind   = (client.client_kind if client else "customer") or "customer"
+    if kind != "customer":
+        return
+
+    existing = _find_invoice_finance_entry(db, invoice)
     if existing:
         return
 
@@ -248,15 +300,7 @@ def recompute_invoice_finance(db: Session, invoice: Invoice) -> None:
     client = db.get(Client, invoice.client_id)
     kind   = (client.client_kind if client else "customer") or "customer"
 
-    existing = (
-        db.query(Finance)
-        .filter(
-            Finance.client_id    == invoice.client_id,
-            Finance.finance_type == "invoice",
-            Finance.notes        == invoice.invoice_number,
-        )
-        .first()
-    )
+    existing = _find_invoice_finance_entry(db, invoice)
 
     if kind != "customer":
         if existing:

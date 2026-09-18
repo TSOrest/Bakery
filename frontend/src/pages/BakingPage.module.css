@@ -243,6 +243,10 @@
   border-color: #1a3a5c;
   background: #f0f5ff;
 }
+/* Індикатор збереження — той самий шаблон, що в OrderModal/OrdersPage */
+.bakedInput.saving { border-color: #f5a623; background: #fff9f0; }
+.bakedInput.saved  { border-color: #27ae60; background: #f0fff5; }
+.bakedInput.error  { border-color: #e74c3c; background: #fff5f5; }
 
 /* ─── Панель надлишків ────────────────────────────────────── */
 

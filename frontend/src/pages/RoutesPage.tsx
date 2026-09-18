@@ -148,10 +148,15 @@ function InvoiceDetailPanel({
 
   const handleSend = async () => {
     setSending(true)
-    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=sent`, {})
-    setSending(false)
-    onStatusChange(updated)
-    window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')
+    try {
+      const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=sent`, {})
+      onStatusChange(updated)
+      window.open(`/api/v1/print/invoice/${invoice.id}`, '_blank')
+    } finally {
+      // Без finally: збій запиту (мережа, паралельна зміна статусу) лишав
+      // кнопку заблокованою з "..." назавжди, до перезавантаження сторінки.
+      setSending(false)
+    }
   }
 
   // ── Пряме прийняття (sent/processing → accepted) ─────────────────────────────
@@ -159,9 +164,12 @@ function InvoiceDetailPanel({
 
   const handleAccept = async () => {
     setAccepting(true)
-    const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=accepted`, { payment_amount: paymentAmount })
-    setAccepting(false)
-    onStatusChange(updated)
+    try {
+      const updated = await api.put<Invoice>(`/invoices/${invoice.id}/status?status=accepted`, { payment_amount: paymentAmount })
+      onStatusChange(updated)
+    } finally {
+      setAccepting(false)
+    }
   }
 
 
@@ -978,12 +986,31 @@ export default function RoutesPage() {
     // acceptableChecked вже відфільтрований по видимих
     if (!acceptableChecked.length) return
     setAcceptingBulk(true)
-    for (const id of acceptableChecked) {
-      const paymentAmount = paymentAmounts[id] ?? 0
-      await api.put(`/invoices/${id}/status?status=accepted`, { payment_amount: paymentAmount })
+    // По-елементний try/catch (за зразком sendMachines) — раніше падіння на
+    // N-й накладній зупиняло цикл без жодного повідомлення, які саме
+    // накладні встигли прийнятись, а які ні; зовнішній finally гарантує,
+    // що кнопка не залипне назавжди.
+    const failed: number[] = []
+    let okCount = 0
+    try {
+      for (const id of acceptableChecked) {
+        const paymentAmount = paymentAmounts[id] ?? 0
+        try {
+          await api.put(`/invoices/${id}/status?status=accepted`, { payment_amount: paymentAmount })
+          okCount++
+        } catch {
+          failed.push(id)
+        }
+      }
+      if (failed.length > 0) {
+        toast.error(`Не вдалось прийняти ${failed.length} з ${failed.length + okCount} накладних. Спробуйте ще раз.`)
+      } else if (okCount > 0) {
+        toast.success(`Прийнято накладних: ${okCount}`)
+      }
+    } finally {
+      setAcceptingBulk(false)
+      await load(workDate)
     }
-    await load(workDate)
-    setAcceptingBulk(false)
   }
 
   // ── Оновлення одного invoice ──────────────────────────────────────────────────

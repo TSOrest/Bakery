@@ -457,6 +457,7 @@ export default function BakingPage() {
   // null = значення не надано (порожнє поле), number = явно введене (в т.ч. 0)
   const bakedTimers  = useRef<Record<number, ReturnType<typeof setTimeout>>>({})
   const [bakedMap,       setBakedMap]       = useState<Record<number, number | null>>({})
+  const [bakedSaving,    setBakedSaving]    = useState<Record<number, 'saving' | 'saved' | 'error'>>({})
   const [loadedBakedQty, setLoadedBakedQty] = useState<Record<number, number | null>>({})
   const [enteredIds,     setEnteredIds]     = useState<Set<number>>(new Set())
 
@@ -519,9 +520,13 @@ export default function BakingPage() {
   const handleGenerate = async () => {
     if (!(await checkPendingAndConfirm())) return
     setGenerating(true)
-    await api.post(`/baking/tasks/generate?task_date=${workDate}`, {})
-    await load(workDate)
-    setGenerating(false)
+    try {
+      await api.post(`/baking/tasks/generate?task_date=${workDate}`, {})
+      await load(workDate)
+    } finally {
+      // Без finally: збій запиту лишав кнопку заблокованою на "Формую..." назавжди.
+      setGenerating(false)
+    }
   }
 
   // ─── Закрити накладну магазину (надлишки → POS) ───────────────────────────
@@ -575,19 +580,33 @@ export default function BakingPage() {
     setBakedMap((prev) => ({ ...prev, [task.product_id]: value }))
     if (bakedTimers.current[task.product_id]) clearTimeout(bakedTimers.current[task.product_id])
     bakedTimers.current[task.product_id] = setTimeout(async () => {
-      const numValue = value ?? 0
-      let realId = task.id
-      if (task.id === 0) {
-        if (numValue === 0) return  // не створюємо задачу для пустого/нульового віртуального рядка
-        // Віртуальний рядок: спочатку створюємо задачу
-        const created = await api.post<BakingTask>(
-          `/baking/tasks/ensure?task_date=${task.task_date}&product_id=${task.product_id}`, {}
-        )
-        setTasks((prev) => [...prev, created])
-        realId = created.id
+      const pid = task.product_id
+      setBakedSaving((s) => ({ ...s, [pid]: 'saving' }))
+      try {
+        const numValue = value ?? 0
+        let realId = task.id
+        if (task.id === 0) {
+          if (numValue === 0) {
+            setBakedSaving((s) => { const n = { ...s }; delete n[pid]; return n })
+            return  // не створюємо задачу для пустого/нульового віртуального рядка
+          }
+          // Віртуальний рядок: спочатку створюємо задачу
+          const created = await api.post<BakingTask>(
+            `/baking/tasks/ensure?task_date=${task.task_date}&product_id=${task.product_id}`, {}
+          )
+          setTasks((prev) => [...prev, created])
+          realId = created.id
+        }
+        const updated = await api.put<BakingTask>(`/baking/tasks/${realId}`, { baked_qty: numValue })
+        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+        setBakedSaving((s) => ({ ...s, [pid]: 'saved' }))
+        setTimeout(() => setBakedSaving((s) => { const n = { ...s }; delete n[pid]; return n }), 1500)
+      } catch {
+        // Раніше — жодного try/catch: збій запиту (мережа, конфлікт) лишав
+        // введене число на екрані без жодного сигналу, що воно НЕ зберіглось
+        // у базі (canCloseShops/звіт випічки читають tasks, не bakedMap).
+        setBakedSaving((s) => ({ ...s, [pid]: 'error' }))
       }
-      const updated = await api.put<BakingTask>(`/baking/tasks/${realId}`, { baked_qty: numValue })
-      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
     }, 600)
   }
 
@@ -1027,7 +1046,12 @@ export default function BakingPage() {
                                 step={1}
                                 value={bakedMap[task.product_id] ?? ''}
                                 placeholder="—"
-                                className={styles.bakedInput}
+                                className={
+                                  styles.bakedInput +
+                                  (bakedSaving[task.product_id] === 'saving' ? ' ' + styles.saving : '') +
+                                  (bakedSaving[task.product_id] === 'saved'  ? ' ' + styles.saved  : '') +
+                                  (bakedSaving[task.product_id] === 'error'  ? ' ' + styles.error  : '')
+                                }
                                 data-baked-input="true"
                                 onFocus={(e) => e.target.select()}
                                 onChange={(e) => handleBakedChange(task, e.target.value)}
