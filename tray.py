@@ -44,6 +44,17 @@ except Exception:
         traceback.print_exc(file=_f)
     sys.exit(1)
 
+# Python's ssl-модуль звіряє HTTPS не з довірою Windows, а зі своїм окремим
+# набором кореневих сертифікатів — на застарілих/корпоративних машинах це
+# призводить до мовчазного провалу перевірки оновлень (GitHub API), хоча той
+# самий сайт відкривається в браузері без проблем. truststore перемикає
+# ssl-модуль на системну довіру Windows — той самий стандарт, що й у браузера.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent
 
@@ -168,7 +179,10 @@ def _github_headers() -> dict:
 
 
 def _fetch_latest_tag() -> str:
-    """Returns latest tag from GitHub, or '' on error."""
+    """Returns latest tag from GitHub, or '' on error (порожній результат —
+    _do_check_update трактує як "перевірку не вдалось виконати", а НЕ як
+    "оновлень нема", інакше оператор бачить хибне "встановлена остання
+    версія" при звичайному збої мережі/сертифіката)."""
     try:
         req = __import__("urllib.request", fromlist=["Request"]).Request(
             GITHUB_TAGS_URL,
@@ -178,8 +192,17 @@ def _fetch_latest_tag() -> str:
             tags = json.loads(r.read())
             if tags:
                 return tags[0]["name"]
-    except Exception:
-        pass
+    except Exception as exc:
+        # Раніше гасилось повністю без слідy в логах — саме через це
+        # неможливо було зрозуміти віддалено, чому перевірка "не бачить"
+        # нову версію. Тепер лишається запис для log_viewer.py.
+        try:
+            log = _today_log()
+            log.parent.mkdir(exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]  [UPDATE] перевірка версії провалилась: {exc!r}\n")
+        except Exception:
+            pass
     return ""
 
 
@@ -603,7 +626,16 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
             _notify(icon, "Bakery — оновлення",
                     f"Доступна нова версія {latest}. Відкрийте меню треї.")
     elif show_if_none:
-        _msgbox("Bakery — оновлення", f"Встановлена остання версія: {current}", 0)
+        if latest:
+            _msgbox("Bakery — оновлення", f"Встановлена остання версія: {current}", 0)
+        else:
+            _msgbox(
+                "Bakery — оновлення",
+                "Не вдалося перевірити оновлення — немає зв'язку з GitHub "
+                "(або проблема з сертифікатами на цьому комп'ютері). "
+                "Спробуйте пізніше або зверніться до розробника.",
+                0,
+            )
 
 
 def _run_install(icon, current: str, latest: str) -> None:
