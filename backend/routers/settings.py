@@ -20,7 +20,13 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["Налаштування"])
 
 # Секрети, які ніколи не віддаються у браузер (їх читає лише backend).
-_ALWAYS_STRIP = {"github_client_secret", "github_oauth_token"}
+# ⚠ github_issues_token (виправлено): не було в цьому списку — GET /settings/
+# віддавав його у відкритому тексті БУДЬ-ЯКІЙ авторизованій ролі, включно з
+# seller (POS-каса). Токен, ймовірно, мертвий код (жоден файл backend його
+# не читає — заміщений github_oauth_token/device-flow), але сам факт
+# видачі робочого GitHub-токена найнижчій ролі — критична дірка незалежно
+# від того, чи його ще використовує код.
+_ALWAYS_STRIP = {"github_client_secret", "github_oauth_token", "github_issues_token"}
 # Секрети, доступні лише адміну (SettingsTab префілить поле токена бота).
 _ADMIN_ONLY = {"telegram_bot_token"}
 

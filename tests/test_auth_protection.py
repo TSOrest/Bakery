@@ -50,17 +50,23 @@ def test_settings_hides_secrets_from_operator(app_client, admin_token, operator_
     app_client.put("/api/v1/settings/github_client_secret",
                    json={"value": "SECRET_XYZ"},
                    headers={"Authorization": f"Bearer {admin_token}"})
+    app_client.put("/api/v1/settings/github_issues_token",
+                   json={"value": "ghp_ISSUES_TOKEN_XYZ"},
+                   headers={"Authorization": f"Bearer {admin_token}"})
     app_client.put("/api/v1/settings/telegram_bot_token",
                    json={"value": "BOTTOKEN_123"},
                    headers={"Authorization": f"Bearer {admin_token}"})
 
     # Оператор НЕ бачить жодного секрету
+    # (⚠ QA-аудит: github_issues_token раніше НЕ був у списку прихованих —
+    # GET /settings/ віддавав його у відкритому тексті будь-якій ролі.)
     r_op = app_client.get("/api/v1/settings/",
                           headers={"Authorization": f"Bearer {operator_token}"})
     assert r_op.status_code == 200
     op = r_op.json()
     assert "github_client_secret" not in op
     assert "github_oauth_token" not in op
+    assert "github_issues_token" not in op
     assert "telegram_bot_token" not in op
 
     # Адмін бачить токен бота (потрібен для редагування), але не github-секрети
@@ -70,6 +76,7 @@ def test_settings_hides_secrets_from_operator(app_client, admin_token, operator_
     assert adm.get("telegram_bot_token", {}).get("value") == "BOTTOKEN_123"
     assert "github_client_secret" not in adm
     assert "github_oauth_token" not in adm
+    assert "github_issues_token" not in adm
 
 
 def test_settings_get_requires_auth(app_client):

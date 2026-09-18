@@ -25,7 +25,7 @@ class InvoiceLineCreate(BaseModel):
 class InvoiceLineQtyUpdate(BaseModel):
     """Оновлення кількості рядка накладної."""
     id: int
-    qty: float
+    qty: float = Field(..., ge=0)
     price_override: Optional[float] = None
 
 

@@ -31,13 +31,19 @@ def get_dashboard(date_param: Optional[str] = None, db: Session = Depends(get_db
     month_ago = (today_d - timedelta(days=30)).isoformat()
 
     # ── Фінанси ──────────────────────────────────────────────────────────────
-    fin_summary = get_summary(db)
+    # as_of=today — БЕЗ цього дашборд ігнорував обрану дату для ВСІХ
+    # фінансових цифр (борг/каса/переплата завжди "на зараз", незалежно від
+    # календаря). Підтверджено на реальних даних клієнта: три різні дати з
+    # понад місяцем активної роботи між ними давали побайтово ідентичний
+    # фінансовий блок.
+    fin_summary = get_summary(db, as_of=today)
 
     # ── Топ-5 боржників ───────────────────────────────────────────────────────
     # Лише client_kind='customer' — як і get_summary() вище. Системні клієнти
     # (Списання/Пайок/Магазин/Недопечено) — внутрішні бухгалтерські рахунки,
-    # не реальні боржники (той самий фікс, що і в telegram_bot.py).
-    all_balances = get_all_balances(db)
+    # не реальні боржники (той самий фікс, що і в telegram_bot.py). as_of=today
+    # — той самий фікс, що й вище, для узгодженості зі списком боржників.
+    all_balances = get_all_balances(db, as_of=today)
     top_debtors = sorted(
         [b for b in all_balances if b.balance < 0 and b.client_kind == "customer"],
         key=lambda b: b.balance

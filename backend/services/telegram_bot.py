@@ -427,8 +427,14 @@ def _report_baking() -> str:
     if not tasks:
         return f"🍞 Завдань на випічку {today} немає"
 
-    ordered = sum(t.ordered_qty for t in tasks)
-    baked   = sum(t.baked_qty for t in tasks)
+    # baked_qty — NULL, доки результат не введено (навмисно, не 0! — див.
+    # baked_entered у /reports/product-balances). Раніше тут падало з
+    # TypeError на sum()/порівнянні/форматуванні — команда мовчки не
+    # відповідала персоналу щоразу, коли випічка ще не введена повністю
+    # (типовий стан більшу частину робочого дня, підтверджено на реальних
+    # даних — 53/53 і 54/54 завдань з baked_qty IS NULL).
+    ordered = sum(t.ordered_qty or 0 for t in tasks)
+    baked   = sum(t.baked_qty or 0 for t in tasks)
     pct     = round(baked / ordered * 100, 1) if ordered else 0
     bar_filled = int(pct / 10)
     bar = "█" * bar_filled + "░" * (10 - bar_filled)
@@ -440,8 +446,12 @@ def _report_baking() -> str:
         "",
     ]
     for t in tasks:
-        status = "✅" if t.baked_qty >= t.ordered_qty else "⏳"
-        lines.append(f"{status} {products.get(t.product_id, '?')}: {t.baked_qty:.0f}/{t.ordered_qty:.0f}")
+        if t.baked_qty is None:
+            status, baked_str = "⏳", "?"
+        else:
+            status = "✅" if t.baked_qty >= t.ordered_qty else "⏳"
+            baked_str = f"{t.baked_qty:.0f}"
+        lines.append(f"{status} {products.get(t.product_id, '?')}: {baked_str}/{t.ordered_qty:.0f}")
     return "\n".join(lines)
 
 
@@ -509,8 +519,24 @@ BOT_COMMANDS = [
 ]
 
 
-def _set_my_commands(token: str) -> None:
-    _api(token, "setMyCommands", commands=BOT_COMMANDS)
+def _clear_default_commands(token: str) -> None:
+    """Порожній список команд у глобальному (дефолтному) scope — інакше
+    Telegram показує "/"-меню зі СТАФ-командами (💰 Стан фінансів, 📉 Борги
+    тощо) БУДЬ-ЯКОМУ користувачу бота, включно з клієнтами: setMyCommands
+    без явного scope застосовується глобально. Сам виклик команди й так
+    захищений _is_staff() — клієнт не отримає реальні дані — але сама
+    видимість цих команд у меню клієнта неприпустима (розкриває внутрішній
+    функціонал і плутає клієнта). Персонал отримує свій список окремо,
+    через scope='chat' — див. _set_staff_commands()."""
+    _api(token, "setMyCommands", commands=[])
+
+
+def _set_staff_commands(token: str, chat_id: int) -> None:
+    """Встановлює список команд ЛИШЕ для конкретного авторизованого
+    персоналу (scope='chat') — не впливає на те, що бачать клієнти чи
+    будь-хто інший у "/"-меню."""
+    _api(token, "setMyCommands", commands=BOT_COMMANDS,
+         scope={"type": "chat", "chat_id": chat_id})
 
 
 # ── Бізнес-логіка — клієнт ───────────────────────────────────────────────────
@@ -842,6 +868,7 @@ def _handle_update(token: str, update: dict) -> None:
         allowed = _get_allowed_phones()
         if phone in allowed:
             _authorize_chat(chat_id, phone)
+            _set_staff_commands(token, chat_id)
             _send(token, chat_id, "✅ Доступ дозволено! Оберіть дію:", _staff_keyboard())
             return
 
@@ -1064,7 +1091,9 @@ def _handle_callback(token: str, callback: dict) -> None:
 
 def _polling_loop(token: str, stop: threading.Event) -> None:
     log.info("Telegram bot started (polling)")
-    _set_my_commands(token)
+    _clear_default_commands(token)
+    for chat_id in _get_authorized_chats():
+        _set_staff_commands(token, int(chat_id))
     offset = 0
     while not stop.is_set():
         try:

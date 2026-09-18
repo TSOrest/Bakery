@@ -14,6 +14,25 @@ from backend.routers.auth import get_current_user
 
 router = APIRouter(prefix="/db-editor", tags=["db-editor"])
 
+# ⚠ Баг (виправлено): ці поля віддавались у відповіді GET .../data у
+# відкритому, повністю робочому вигляді — user_sessions.token (буквальний
+# bearer-токен, вхід без пароля), users.password_hash/salt (bcrypt-хеш).
+# Одна скомпрометована admin-сесія перетворювалась на компрометацію ВСІХ
+# активних сесій. Значення тепер маскуються в відповіді (сам рядок і решта
+# колонок лишаються видимими — потрібні для повсякденного адміністрування).
+_SENSITIVE_COLUMNS: dict[str, set[str]] = {
+    "users":         {"password_hash", "salt"},
+    "user_sessions": {"token"},
+}
+_MASKED = "•••• (прихована — не редагується тут)"
+
+
+def _mask_row(table: str, row: dict) -> dict:
+    sensitive = _SENSITIVE_COLUMNS.get(table)
+    if not sensitive:
+        return row
+    return {k: (_MASKED if k in sensitive and v is not None else v) for k, v in row.items()}
+
 
 # ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -185,7 +204,7 @@ def get_table_data(
         "page": page,
         "page_size": page_size,
         "columns": col_names,
-        "rows": [dict(zip(col_names, r)) for r in rows],
+        "rows": [_mask_row(table, dict(zip(col_names, r))) for r in rows],
     }
 
 
@@ -281,7 +300,12 @@ def update_row(
     # Без цього зловмисник міг би передати key з SQL, наприклад:
     # {'name"; DROP TABLE users; --': 'x'} → injection через f-string у set_clause.
     valid_cols = _get_column_names(db, table)
-    update_data = {k: v for k, v in body.items() if k != pk_col and k in valid_cols}
+    sensitive = _SENSITIVE_COLUMNS.get(table, set())
+    # Захищені поля (token/password_hash/salt) не редагуються через цей
+    # загальний ендпоінт — інакше благе "відкрити рядок і зберегти" в UI
+    # (без зміни цього конкретного поля) перезаписало б реальний токен/хеш
+    # буквальним текстом маски з get_table_data().
+    update_data = {k: v for k, v in body.items() if k != pk_col and k in valid_cols and k not in sensitive}
     invalid_keys = [k for k in body if k != pk_col and k not in valid_cols]
     if invalid_keys:
         raise HTTPException(400, f"Невалідні колонки: {', '.join(invalid_keys)}")
