@@ -12,6 +12,7 @@ created_by='system' — тепер редаговні: потрібно було
 from backend.database import SessionLocal
 from backend.models.references import Client
 from backend.models.finances import Finance, FinanceArticle
+from backend.routers.finances import _current_work_dates
 
 
 def _mk_client(db, name="Клієнт"):
@@ -20,16 +21,23 @@ def _mk_client(db, name="Клієнт"):
     return c
 
 
+def _work_date(db) -> str:
+    """Дата, яку сервер визнає поточною робочою — щоб тести PATCH не залежали
+    від того, о котрій годині вони фактично запускаються."""
+    return sorted(_current_work_dates(db))[-1]
+
+
 def test_system_payment_entry_is_editable(app_client, admin_token):
     """Автоматичний запис оплати (created_by='system', finance_type='payment')
     тепер можна відредагувати — саме той кейс, що й запросив користувач."""
     db = SessionLocal()
+    wd = _work_date(db)
     c = _mk_client(db, "Клієнт-оплата")
     article = db.query(FinanceArticle).filter_by(name="Оплата").first()
     entry = Finance(
-        finance_date="2026-09-15", client_id=c.id, finance_type="payment",
+        finance_date=wd, client_id=c.id, finance_type="payment",
         article_id=article.id if article else None, amount=500.0, sign=1,
-        notes="Оплата по 20260915-001", created_at="2026-09-15T10:00:00",
+        notes="Оплата по 20260915-001", created_at=f"{wd}T10:00:00",
         created_by="system",
     )
     db.add(entry); db.commit(); db.refresh(entry)
@@ -95,12 +103,13 @@ def test_manual_payment_entry_still_editable(app_client, admin_token):
     """Регрес-запобіжник: вручну внесена оплата (created_by != 'system')
     і далі редагується, як і до цієї зміни."""
     db = SessionLocal()
+    wd = _work_date(db)
     c = _mk_client(db, "Клієнт-ручна-оплата")
     article = db.query(FinanceArticle).filter_by(name="Оплата").first()
     entry = Finance(
-        finance_date="2026-09-15", client_id=c.id, finance_type="payment",
+        finance_date=wd, client_id=c.id, finance_type="payment",
         article_id=article.id if article else None, amount=300.0, sign=1,
-        notes="Готівка", created_at="2026-09-15T10:00:00", created_by="admin",
+        notes="Готівка", created_at=f"{wd}T10:00:00", created_by="admin",
     )
     db.add(entry); db.commit(); db.refresh(entry)
     entry_id = entry.id

@@ -1873,7 +1873,13 @@ def debts_report(date: str, db: Session = Depends(get_db)):
     )
     balances: dict[int, float] = {r.client_id: float(r.bal or 0) for r in bal_rows}
 
-    active_ids = {cid for cid, b in balances.items() if abs(b) > 0.005}
+    raw_active_ids = {cid for cid, b in balances.items() if abs(b) > 0.005}
+    clients  = (
+        db.query(Client)
+        .filter(Client.id.in_(raw_active_ids), Client.client_kind == "customer")
+        .all()
+    ) if raw_active_ids else []
+    active_ids = {c.id for c in clients}
     if not active_ids:
         return HTMLResponse(content=f"""<!DOCTYPE html><html lang="uk">
 <head><meta charset="UTF-8"><title>Боргова відомість</title>{_REPORT_CSS}</head>
@@ -1886,7 +1892,6 @@ def debts_report(date: str, db: Session = Depends(get_db)):
 <p class="muted">— Заборгованостей і переплат не виявлено —</p>
 </div></body></html>""")
 
-    clients  = db.query(Client).filter(Client.id.in_(active_ids)).all()
     routes   = {r.id: r for r in db.query(Route).all()}
 
     by_route: dict[int | None, list] = {}

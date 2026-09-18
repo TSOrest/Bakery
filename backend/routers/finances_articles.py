@@ -19,6 +19,9 @@ def list_articles(db: Session = Depends(get_db)):
 
 @router.post("/", response_model=FinanceArticleOut, status_code=201)
 def create_article(data: FinanceArticleCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    dup = db.query(FinanceArticle).filter(FinanceArticle.name == data.name).first()
+    if dup:
+        raise HTTPException(status_code=409, detail="Стаття з такою назвою вже існує")
     article = FinanceArticle(name=data.name, direction=data.direction, is_system=0, needs_client=data.needs_client)
     db.add(article)
     safe_commit(db)
@@ -31,7 +34,21 @@ def update_article(article_id: int, data: FinanceArticleUpdate, db: Session = De
     article = db.get(FinanceArticle, article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Статтю не знайдено")
-    for field, value in data.model_dump(exclude_none=True).items():
+    updates = data.model_dump(exclude_none=True)
+    if "name" in updates and updates["name"] != article.name:
+        if article.is_system:
+            raise HTTPException(
+                status_code=400,
+                detail="Назву системної статті не можна змінити — вона використовується в коді",
+            )
+        dup = (
+            db.query(FinanceArticle)
+            .filter(FinanceArticle.name == updates["name"], FinanceArticle.id != article_id)
+            .first()
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail="Стаття з такою назвою вже існує")
+    for field, value in updates.items():
         setattr(article, field, value)
     safe_commit(db)
     db.refresh(article)

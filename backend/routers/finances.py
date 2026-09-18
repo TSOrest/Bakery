@@ -1,7 +1,7 @@
 """Ендпоінти фінансового модуля."""
 
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from backend.database import get_db, safe_commit
 from backend.models.finances import Finance
 from backend.models.shop import ShopCount
 from backend.models.references import Client
+from backend.models.settings import Setting
 from backend.services.prices import get_price
 from backend.models.finances import FinanceArticle
 from backend.models.audit import write_audit
@@ -207,6 +208,7 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends
         article = db.get(FinanceArticle, data.article_id)
         needs_client = bool(article and article.needs_client == 1)
     else:
+        article = None
         # Legacy: визначаємо за finance_type
         client_required = {"invoice", "payment", "writeoff", "exchange_credit"}
         needs_client = data.finance_type in client_required
@@ -218,6 +220,17 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends
         )
     if data.client_id and not db.get(Client, data.client_id):
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+
+    # sign має відповідати напрямку статті (income → +1, expense → -1) —
+    # інакше запис виглядав би як прихід у списку статті-витрати (чи навпаки),
+    # спотворюючи всі суми, що групуються за напрямком (баланси, звіти).
+    if article is not None:
+        expected_sign = 1 if article.direction == "income" else -1
+        if data.sign != expected_sign:
+            raise HTTPException(
+                status_code=422,
+                detail="Знак суми не відповідає напрямку статті (дохід/витрата)",
+            )
 
     entry = Finance(
         finance_date = data.finance_date,
@@ -238,6 +251,28 @@ def create_finance(data: FinanceCreate, db: Session = Depends(get_db), _=Depends
 
 # ── Редагування суми ──────────────────────────────────────────────────────────
 
+def _current_work_dates(db: Session) -> set[str]:
+    """Обчислює допустимі для редагування дати — та сама формула, що на
+    фронтенді (Layout.tsx, computeEffectiveDate): до часу переходу
+    (налаштування work_date_next_day_time, default 18:00) — сьогодні,
+    після — завтра. Плюс попередній день — покриває легітимну "роботу за
+    вчора" (оператор вручну відкочує дату в хедері, щоб доправити вчорашній
+    запис), не відкриваючи довільно старі записи для правки через прямий
+    виклик API (сам сенс перевірки дати — не дати редагувати давню історію).
+    """
+    setting = db.get(Setting, "work_date_next_day_time")
+    raw = (setting.value if setting else None) or "18:00"
+    try:
+        h, m = (int(x) for x in raw.split(":"))
+    except (ValueError, AttributeError):
+        h, m = 18, 0
+    now = datetime.now()
+    cutoff = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    effective = now if now < cutoff else now + timedelta(days=1)
+    yesterday = effective - timedelta(days=1)
+    return {effective.strftime("%Y-%m-%d"), yesterday.strftime("%Y-%m-%d")}
+
+
 @router.patch("/{finance_id}", response_model=FinanceOut)
 def update_finance(
     finance_id: int,
@@ -252,7 +287,11 @@ def update_finance(
     - це НЕ борговий запис накладної (finance_type != 'invoice') — його суму
       підтримує recompute_invoice_finance із invoice.total_sum, ручна правка
       розсинхронізувала б журнал з самою накладною. Виправляти можна лише
-      через рядки накладної.
+      через рядки накладної;
+    - finance_date входить у поточну робочу дату (або вчорашню — "робота за
+      вчора"). Фронтенд і так показує кнопку лише за цією умовою, але БЕЗ
+      цієї перевірки прямий виклик API міг відредагувати БУДЬ-ЯКИЙ історичний
+      запис — перевірку продубльовано на сервері.
 
     Автоматичні записи оплат (created_by='system', finance_type='payment' —
     з'являються при прийнятті накладної з сумою оплати) РЕДАГОВНІ нарівні з
@@ -260,7 +299,6 @@ def update_finance(
     немає ризику розсинхронізації — лише спосіб виправити помилково внесену
     суму (напр. оператор прийняв накладну з оплатою, якої фактично не було).
 
-    Перевірку дати робить frontend (показує кнопку лише для finance_date == workDate).
     amount=0 дозволено для обнулення помилково внесеного запису.
     Всі зміни фіксуються в audit_log.
     """
@@ -272,6 +310,12 @@ def update_finance(
         raise HTTPException(
             status_code=400,
             detail="Борговий запис накладної не можна редагувати вручну — виправте суму в самій накладній",
+        )
+
+    if entry.finance_date not in _current_work_dates(db):
+        raise HTTPException(
+            status_code=400,
+            detail="Редагувати можна лише записи поточної робочої дати",
         )
 
     article = db.get(FinanceArticle, entry.article_id) if entry.article_id else None

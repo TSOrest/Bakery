@@ -1471,6 +1471,45 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 Тести: `tests/test_orders_high_findings.py`, `tests/test_invoice_accept_shop_no_debt.py`,
 `tests/test_validation_error_translation.py`.
 
+## Високі знахідки QA-аудиту — Розділ 3: Фінанси, звіти, дашборд (виправлено)
+
+Розділ 3 (5 знахідок):
+
+1. **Редагування суми не перевіряло дату на бекенді** (`backend/routers/finances.py`,
+   `update_finance`, PATCH) — фронтенд показує кнопку ✏ лише для
+   `finance_date == workDate` (дата в хедері, будь-яка, довільно змінювана
+   оператором), але сам ендпоінт цього не перевіряв: прямий виклик API міг
+   відредагувати суму БУДЬ-ЯКОГО історичного запису редагованої статті.
+   Виправлено: `_current_work_dates()` рахує на сервері ту саму "поточну
+   робочу дату" за формулою фронтенду (`Layout.tsx`, `computeEffectiveDate`
+   — час переходу з налаштування `work_date_next_day_time`, default 18:00)
+   плюс попередній день (легітимна "робота за вчора"); `update_finance`
+   відхиляє (400) редагування за межами цього вікна.
+2. **Друкована "Боргова відомість" показувала службові рахунки як
+   боржників** (`backend/routers/print_views.py`, `debts_report`) —
+   Списання/Пайок/Недопечено/Магазин (`client_kind != 'customer'`) не
+   фільтрувались, хоча це внутрішні бухгалтерські рахунки. Виправлено:
+   фільтр `client_kind == 'customer'`, як в усіх інших звітах.
+3. **`POST /finances/` не перевіряв sign проти напрямку статті**
+   (`create_finance`) — можна було створити "дохід" зі знаком `-1` (чи
+   навпаки), спотворюючи суми, що групуються за напрямком (баланси, звіти).
+   Виправлено: `sign` має відповідати `article.direction` (income → +1,
+   expense → -1), інакше 422.
+4. **Перейменування системної статті ламало б код** (`backend/routers/finances_articles.py`,
+   `update_article`) — назва системних статей звіряється буквально в кількох
+   місцях (`backend/services/finance.py`, `print_views.py`: "Накладна",
+   "Оплата" тощо). Виправлено: зміна `name` для `is_system=1` блокується
+   (400); `direction`/`editable` лишаються редагованими.
+5. **Дублікат назви статті дозволявся для НЕ-системних** (`create_article`,
+   `update_article`) — унікальність раніше перевірялась лише для системних
+   статей (частковий унікальний індекс, міграція 031). Виправлено: явна
+   перевірка унікальності `name` для будь-якої статті при створенні й
+   перейменуванні (409).
+
+Тести: `tests/test_finance_patch_date_guard.py`,
+`tests/test_debts_report_excludes_system_clients.py`,
+`tests/test_finance_article_sign_and_rename_guards.py`.
+
 ## Аудит-фікси v0.9.36-v1.0.4
 
 **v0.9.36-v0.9.39:**
