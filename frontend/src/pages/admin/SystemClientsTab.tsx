@@ -21,7 +21,11 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
     .then(data => setClients(data.filter(c => c.client_kind !== 'customer' && c.client_kind !== 'shop')))
   useEffect(() => { load() }, [])
 
-  const openNew  = () => { setEditing(null); setForm({ ...emptyClient(), client_kind: 'writeoff' }); setModal(true) }
+  const openNew  = () => {
+    setEditing(null)
+    setForm({ ...emptyClient(), client_kind: availableKinds[0] ?? 'writeoff' })
+    setModal(true)
+  }
   const openEdit = (c: Client) => {
     setEditing(c)
     setForm({
@@ -68,6 +72,15 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
   const activeClients   = clients.filter(c => c.is_active)
   const inactiveClients = clients.filter(c => !c.is_active)
 
+  // Списання/Пайок/Недопечено — сингтони, має існувати лише один активний
+  // клієнт кожного типу (PARTIAL UNIQUE INDEX на рівні БД). Дропдаун типу не
+  // повинен пропонувати тип, який уже зайнятий іншим активним клієнтом —
+  // саме так у базі раніше з'являлись дублікати "Пайок"/"Списання".
+  const existingKinds = new Set(activeClients.map(c => c.client_kind))
+  const availableKinds = SYSTEM_KINDS.filter(
+    k => !existingKinds.has(k) || k === editing?.client_kind
+  )
+
   const renderSysRow = (c: Client, dimmed = false) => (
     <tr key={c.id} style={dimmed ? { opacity: 0.5, background: '#f9fafb' } : undefined}>
       <Td>{c.full_name}</Td>
@@ -90,7 +103,12 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
         <strong>Системні клієнти ({activeClients.length})</strong>
-        <button onClick={openNew} style={addBtnStyle}>+ Додати</button>
+        <button
+          onClick={openNew}
+          disabled={availableKinds.length === 0}
+          title={availableKinds.length === 0 ? 'Усі типи системних клієнтів вже існують' : undefined}
+          style={availableKinds.length === 0 ? { ...addBtnStyle, opacity: 0.4, cursor: 'not-allowed' } : addBtnStyle}
+        >+ Додати</button>
       </div>
 
       <table style={tableStyle}>
@@ -131,7 +149,7 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
             <div className={formStyles.field}>
               <label>Тип</label>
               <select value={form.client_kind} onChange={(e) => setForm({ ...form, client_kind: e.target.value })}>
-                {SYSTEM_KINDS.map(k => (
+                {availableKinds.map(k => (
                   <option key={k} value={k}>{CLIENT_KIND_LABELS[k]}</option>
                 ))}
               </select>

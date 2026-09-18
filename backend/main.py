@@ -94,6 +94,7 @@ def _seed_initial_data() -> None:
     import hashlib, secrets, json
     from datetime import datetime as dt
     from sqlalchemy.orm import Session as OrmSession
+    from sqlalchemy.exc import IntegrityError
     from backend.models.auth import User
     from backend.models.settings import Setting
     from backend.models.finances import FinanceArticle
@@ -139,7 +140,23 @@ def _seed_initial_data() -> None:
                     created_at=dt.now().isoformat(),
                 ))
 
-        db.commit()
+        # _seed_initial_data() виконується на рівні МОДУЛЯ — кожен uvicorn-воркер
+        # (reloader + child при --reload, або дублікат воркера під час перезапуску)
+        # викликає її окремо. "Чи існує?" + вставка вище — TOCTOU-гонка: якщо два
+        # процеси пройшли перевірку "не існує" до того, як хтось із них закомітив,
+        # обидва вставляють системного клієнта — так у базі накопичувались
+        # дублікати "Пайок"/"Списання" (виправлено ретроактивно міграцією 042,
+        # яка й відновила PARTIAL UNIQUE INDEX). Тепер, коли індекс активний,
+        # програний забіг гонки впаде на commit з IntegrityError — ловимо це тут,
+        # а не даємо незловленому винятку зірвати завантаження модуля backend.main
+        # (і, відповідно, старт усього воркера).
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            logging.getLogger("backend.main").info(
+                "_seed_initial_data: конкурентний воркер уже засіяв ці дані — пропускаємо"
+            )
 
 
 _seed_initial_data()
