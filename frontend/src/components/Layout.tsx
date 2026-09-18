@@ -28,16 +28,46 @@ export default function Layout() {
   const [effectiveDate,    setEffectiveDate]    = useState(() => computeEffectiveDate('18:00'))
   const [shopPriceAlert,   setShopPriceAlert]   = useState(false)
 
+  // Для періодичної перевірки переходу дати (нижче) без перестворення
+  // таймера при кожній зміні стану.
+  const nextDayTimeRef = useRef('18:00')
+  const effectiveDateRef = useRef(effectiveDate)
+  const workDateRef = useRef(workDate)
+  useEffect(() => { effectiveDateRef.current = effectiveDate }, [effectiveDate])
+  useEffect(() => { workDateRef.current = workDate }, [workDate])
+
   useEffect(() => {
     api.get<Record<string, { value: string }>>('/settings/')
       .then(s => {
         if (s.bakery_name?.value) setBakeryName(s.bakery_name.value)
         const nextDayTime = s.work_date_next_day_time?.value ?? '18:00'
+        nextDayTimeRef.current = nextDayTime
         const eff = computeEffectiveDate(nextDayTime)
         setEffectiveDate(eff)
         setWorkDate(eff)   // встановлюємо правильну початкову дату після завантаження налаштувань
       })
       .catch(() => {})
+  }, []) // eslint-disable-line
+
+  // Дата роботи мала переходити на завтра сама, коли настає час переходу
+  // (work_date_next_day_time) — але раніше це рахувалось ЛИШЕ один раз при
+  // відкритті сторінки. Якщо застосунок лишається відкритим (напр. на
+  // планшеті цілий день) і час переходу настає без перезавантаження —
+  // дата не рухалась сама. Перевіряємо раз на хвилину; рухаємо робочу дату
+  // ТІЛЬКИ якщо оператор і досі на автоматичній даті (не відходив вручну
+  // назад на іншу дату) — ручний вибір ніколи не перебивається.
+  useEffect(() => {
+    const check = () => {
+      const eff = computeEffectiveDate(nextDayTimeRef.current)
+      if (eff !== effectiveDateRef.current) {
+        if (workDateRef.current === effectiveDateRef.current) {
+          setWorkDate(eff)
+        }
+        setEffectiveDate(eff)
+      }
+    }
+    const timer = setInterval(check, 60 * 1000)
+    return () => clearInterval(timer)
   }, []) // eslint-disable-line
 
   useEffect(() => {
