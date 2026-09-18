@@ -143,6 +143,9 @@ def reset_database(_: User = Depends(require_admin), db: Session = Depends(get_d
             "shop_counts",
             "other_stock_in",
             "invoice_lines",
+            "invoice_transfers",
+            "client_groups",
+            "audit_log",
             "cancellation_lines",
             "route_cancellations",
             "surplus_allocations",
@@ -193,6 +196,13 @@ def reset_database(_: User = Depends(require_admin), db: Session = Depends(get_d
         # Довідники
         for tbl in ("products", "categories", "units", "routes"):
             _del(tbl)
+
+        # Клієнти, що лишаються (системні/магазин), могли мати route_id/
+        # client_group_id, які щойно вказали в порожнечу (routes і client_groups
+        # вище видалені з PRAGMA foreign_keys=OFF — це не падає, але лишає биті
+        # посилання). Обнуляємо явно, щоб не повторити баг з invoice_transfers.
+        if "clients" in existing:
+            conn.execute(text("UPDATE clients SET route_id = NULL, client_group_id = NULL"))
 
     finally:
         conn.execute(text("PRAGMA foreign_keys = ON"))
