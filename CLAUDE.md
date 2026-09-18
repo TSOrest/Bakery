@@ -353,6 +353,44 @@ CREATE TABLE invoice_transfers (
     created_by        TEXT
 );
 ```
+⚠ Баг (виправлено міграцією **043** + `backend/routers/settings.py`): `POST
+/settings/reset-db` ("Скидання бази даних", Бекапи та імпорт) видаляв
+`invoices`, але не `invoice_transfers` (таблиця з'явилась пізніше, у v1.2.0
+— reset-db під неї не оновили). Після скидання+повторного .accdb-імпорту
+нові `invoices` отримують нові `id`, і старі `invoice_transfers` лишаються
+"осиротілими" назавжди — посилаються на накладні, яких вже немає (так на
+реальній базі накопичилось 61 таких рядків, `PRAGMA foreign_key_check`
+показував 122 порушення — по 2 на рядок, source+target). Дані непридатні
+до відновлення (немає способу дізнатись, якій новій накладній відповідав
+старий id) — 043 просто видаляє такі рядки одноразово; `reset_database()`
+тепер видаляє `invoice_transfers` разом з `invoices`, тож ситуація більше
+не повториться.
+
+Той самий клас багу знайшовся ще у трьох місцях (ретельна перевірка на
+прохання користувача — реальний ручний тест "Скинути базу" на dev виявив
+`audit_log`, решту — код-рев'ю за аналогією):
+- **`client_groups`** (прив'язані до `route_id`) — `reset_database()` видаляв
+  `routes`, але не `client_groups`; вони лишались з битим `route_id`.
+- **`clients.route_id` / `clients.client_group_id`** на клієнтах, що
+  лишаються (системні/магазин) — якщо такий клієнт мав маршрут/групу (напр.
+  магазин, вручну прив'язаний до маршруту "Пекарня" — див. вище), після
+  видалення `routes`/`client_groups` ці поля лишались вказувати в
+  порожнечу. Тепер `reset_database()` явно обнуляє їх у кінці.
+- **`audit_log`** (журнал змін `orders`/`invoice_lines`/`finances`/`clients`)
+  — поліморфне посилання (`entity_table`+`entity_id`, без єдиного FK), тож
+  `PRAGMA foreign_key_check` таких рядків НЕ бачить (не порушення constraint,
+  просто стають нерелевантними) — 8 рядків знайдено на реальному
+  ручному тесті скидання. Міграція **044** прибрала їх (перевірка існування
+  по кожній `entity_table` окремо — чіпає лише дійсно осиротіле, не всю
+  історію); `reset_database()` тепер видаляє `audit_log` разом з іншими
+  робочими даними.
+
+Усі чотири — той самий корінь: `reset_database()` виконує видалення з
+`PRAGMA foreign_keys = OFF` (потрібно для self-referential FK на
+`invoices.corrective_for_id`/`orders.parent_order_id`), що дозволяє
+видалити батьківський запис БЕЗ падіння на дочірніх — але й без CASCADE,
+тож будь-яку таблицю/поле, яке посилається на видалене і явно не в списку
+`reset_database()`, потрібно перевіряти вручну при кожній зміні схеми.
 
 **Корекція накладної (v1.2.0) — уніфіковане переміщення замість коригуючих:**
 - `POST /invoices/{id}/transfer {product_id, qty, to_client_id, source_line_kind}` —
@@ -644,6 +682,22 @@ CREATE TABLE user_sessions (
     last_used_at TEXT  -- оновлюється при кожному auth-запиті; NULL = legacy сесія
 );
 ```
+⚠ Баг (виправлено): реальні лог-файли клієнта (3 місяці, 44 МБ) показали
+2045 traceback-ів `sqlalchemy.exc.PendingRollbackError` (до 852/день у дні
+активного одночасного використання) — 97.8% усіх помилок за весь період.
+Причина: `get_current_user()` (`backend/routers/auth.py`) оновлює
+`last_used_at` (throttled, раз/хв) в `try: ... db.commit() ... except
+Exception: pass` — коли `db.commit()` падав (типово `sqlite3.
+OperationalError: database is locked` при конкурентній записи кількох
+операторів+бота), виняток гасився БЕЗ `db.rollback()`. SQLAlchemy 2.0
+лишає сесію в стані "потрібен явний rollback()" — і та ж сесія (той самий
+`db` через `Depends(get_db)`) використовується далі в тому самому запиті
+(типово `require_admin`, лінива підвантажка `user.role`) → друга, вже
+фатальна помилка на дії, геть не пов'язаній з причиною. Виправлено:
+`except Exception: db.rollback()`. Паралельно (`backend/database.py`)
+додано `PRAGMA busy_timeout=5000` — без нього SQLite віддає "database is
+locked" миттєво замість короткого очікування, тож сам лок траплявся
+частіше, ніж потрібно. Тест: `tests/test_auth_session_touch_rollback.py`.
 
 ### Telegram Bot
 ```sql
@@ -1299,6 +1353,22 @@ Windows Task Scheduler → BakeryTray (AtLogon)
 - **БД (міграції 029-031)**:
   - 029: `shop_disposal_lines.price` + перебудова orphan FK (`_v2` → правильна таблиця); CHECK розширено до `'sale'`
   - 030: PARTIAL UNIQUE INDEX на `clients(client_kind)` WHERE writeoff/ration/underbaked — захист від дублів системних клієнтів
+    - ⚠ Баг (виправлено міграцією **042** + `main.py`): `_seed_initial_data()` (`backend/main.py`) виконується
+      на рівні МОДУЛЯ — кожен uvicorn-воркер (reloader + child при `--reload`, або старий/новий воркер під час
+      перезапуску) імпортує `backend.main` і викликає її окремо. Перевірка "клієнт цього kind вже існує?" +
+      вставка — класична TOCTOU-гонка: якщо два процеси проходять перевірку майже одночасно, до того як
+      хтось із них закомітив — обидва бачать "не існує" і обидва вставляють. Це справжня причина дублів
+      "Пайок"/"Списання" (НЕ імпорт .accdb — `import_accdb.py` вже коректно перевикористовує канонічного
+      системного клієнта, і НЕ ручне створення через форму — хоча `SystemClientsTab.tsx` теж мала прогалину,
+      дропдаун типу дозволяв обрати вже зайнятий kind, виправлено заразом як додатковий захист). Чому індекс
+      з міграції 030 не зупинив це: `run_migrations()` (`backend/database.py`) ковтає помилку кожного
+      statement і все одно позначає міграцію застосованою (навмисно — щоб історичні transform-міграції не
+      падали щозапуску на свіжій БД) — якщо на момент першого запуску 030 гонка вже встигла створити дублі,
+      `CREATE UNIQUE INDEX` падав, індекс так і не з'являвся, і повторно міграція вже не виконувалась (нічим
+      було зупинити наступні гонки). Виправлено: 042 зливає всі посилання (orders/invoices/finances/
+      shop_disposal_lines/client_bot_users/client_price_overrides/movements) з дублів на канонічного
+      (найменший id), видаляє дублі, відновлює індекс; `_seed_initial_data()` тепер ловить `IntegrityError`
+      на commit (програний забіг гонки) замість падіння всього воркера при старті.
   - 031: PARTIAL UNIQUE INDEX на `finance_articles(name, direction)` WHERE is_system=1
 - **schema.sql sync (B1)**: повна синхронізація з моделями SQLAlchemy — 29 таблиць, 24 індекси, 24 default settings; видалено застарілі `surplus_*`, `route_cancellations`, `cancellation_lines`
 - **safe_commit() поширено** на категорії, магазин, auth, bot (~34 місця разом)
