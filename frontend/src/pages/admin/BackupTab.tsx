@@ -34,6 +34,8 @@ export default function BackupTab() {
   } | null>(null)
 
   const [showImportWizard, setShowImportWizard] = useState(false)
+  const [showAllBackups, setShowAllBackups] = useState(false)
+  const BACKUPS_COLLAPSED_COUNT = 5
 
   const BACKUP_SETTINGS = [
     { key: 'backup_enabled',      label: 'Автобекап (0=вимк, 1=увімк)',         type: 'text' },
@@ -242,6 +244,9 @@ export default function BackupTab() {
     padding: '0.35rem 0.9rem', cursor: 'pointer', fontSize: '0.85rem',
   }
 
+  const hiddenBackupsCount = Math.max(0, backups.length - BACKUPS_COLLAPSED_COUNT)
+  const visibleBackups = showAllBackups ? backups : backups.slice(0, BACKUPS_COLLAPSED_COUNT)
+
   return (
     <section style={{ maxWidth: 780, padding: '0.5rem 0' }}>
 
@@ -368,7 +373,7 @@ export default function BackupTab() {
               </tr>
             </thead>
             <tbody>
-              {backups.map(b => (
+              {visibleBackups.map(b => (
                 <tr key={b.name} style={{ borderBottom: '1px solid #eef2f7' }}>
                   <td style={{ padding: '0.3rem 0.5rem' }}>
                     {b.name.replace('bakery_', '').replace('.db', '')}
@@ -399,6 +404,16 @@ export default function BackupTab() {
               ))}
             </tbody>
           </table>
+        )}
+        {hiddenBackupsCount > 0 && (
+          <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+            <button
+              style={{ ...btnS, background: 'transparent', color: '#3498db', border: '1px solid #cbd5e1' }}
+              onClick={() => setShowAllBackups(v => !v)}
+            >
+              {showAllBackups ? '▲ Згорнути' : `▼ Показати ще ${hiddenBackupsCount}`}
+            </button>
+          </div>
         )}
       </div>
 
