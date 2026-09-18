@@ -161,7 +161,13 @@ def get_current_user(
                 session.last_used_at = now.isoformat()
                 db.commit()
     except Exception:
-        pass
+        # Найчастіше — "database is locked" при конкурентній записи.
+        # rollback() ОБОВ'ЯЗКОВИЙ: інакше ця сесія (той самий db, що йде
+        # далі в require_admin/бізнес-логіку цього ж запиту) лишається в
+        # стані PendingRollbackError і падає на першому ж наступному
+        # зверненні — саме так одна транзієнтна помилка перетворювалась на
+        # 500 для геть непов'язаної дії оператора.
+        db.rollback()
 
     return user
 

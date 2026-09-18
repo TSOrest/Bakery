@@ -37,6 +37,11 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.execute("PRAGMA cache_size=-32768")
     cursor.execute("PRAGMA temp_store=MEMORY")    # тимчасові таблиці в RAM
     cursor.execute("PRAGMA mmap_size=134217728")  # 128 MB mmap
+    # Без цього SQLite віддає "database is locked" МИТТЄВО при конкурентній
+    # записи (кілька операторів + бот + трей) замість короткого очікування —
+    # саме це спричиняло каскадні PendingRollbackError у реальних логах
+    # клієнта (сотні за день у пікові дні).
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
 
 
