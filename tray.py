@@ -169,13 +169,37 @@ def _read_version(filename: str = "VERSION") -> str:
     return f.read_text(encoding="utf-8-sig").strip() if f.exists() else ""
 
 
-def _github_headers() -> dict:
-    """Заголовки для GitHub API з токеном з БД (потрібен для приватного репо)."""
+def _github_headers(with_token: bool = True) -> dict:
+    """Заголовки для GitHub API. with_token=False — анонімний запит: fallback
+    коли збережений токен клієнта (з інтеграції Звернень) недійсний чи
+    відкликаний — репозиторій публічний, тож анонімний доступ працює
+    однаково добре і не залежить від стану цього токена."""
     headers = {"User-Agent": "BakeryTray/1.0"}
-    token = _read_setting("github_oauth_token")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    if with_token:
+        token = _read_setting("github_oauth_token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
     return headers
+
+
+def _github_api_get(url: str, timeout: int) -> bytes:
+    """GET на публічний GitHub API. Спочатку — зі збереженим токеном (вищі
+    ліміти запитів); якщо GitHub відповідає 401/403 (токен недійсний чи
+    відкликаний — саме так один раз зламало ВСІ перевірки оновлень клієнту,
+    хоча репозиторій публічний і токен тут не обов'язковий) — повторює
+    запит анонімно, без Authorization."""
+    from urllib.error import HTTPError
+    from urllib.request import Request
+    try:
+        req = Request(url, headers=_github_headers(with_token=True))
+        with urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except HTTPError as exc:
+        if exc.code in (401, 403):
+            req = Request(url, headers=_github_headers(with_token=False))
+            with urlopen(req, timeout=timeout) as r:
+                return r.read()
+        raise
 
 
 def _fetch_latest_tag() -> str:
@@ -184,14 +208,9 @@ def _fetch_latest_tag() -> str:
     "оновлень нема", інакше оператор бачить хибне "встановлена остання
     версія" при звичайному збої мережі/сертифіката)."""
     try:
-        req = __import__("urllib.request", fromlist=["Request"]).Request(
-            GITHUB_TAGS_URL,
-            headers=_github_headers(),
-        )
-        with urlopen(req, timeout=8) as r:
-            tags = json.loads(r.read())
-            if tags:
-                return tags[0]["name"]
+        tags = json.loads(_github_api_get(GITHUB_TAGS_URL, timeout=8))
+        if tags:
+            return tags[0]["name"]
     except Exception as exc:
         # Раніше гасилось повністю без слідy в логах — саме через це
         # неможливо було зрозуміти віддалено, чому перевірка "не бачить"
@@ -212,13 +231,8 @@ def _fetch_release_notes(tag: str) -> str:
     if not tag:
         return ""
     try:
-        req = __import__("urllib.request", fromlist=["Request"]).Request(
-            f"{GITHUB_REPO}/releases/tags/{tag}",
-            headers=_github_headers(),
-        )
-        with urlopen(req, timeout=5) as r:
-            data = json.loads(r.read())
-            return data.get("body", "").strip()
+        data = json.loads(_github_api_get(f"{GITHUB_REPO}/releases/tags/{tag}", timeout=5))
+        return data.get("body", "").strip()
     except Exception:
         return ""
 
