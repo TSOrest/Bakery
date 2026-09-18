@@ -1716,6 +1716,54 @@ IF NOT EXISTS` для двох partial-індексів, які він мав в
 
 Тести: `tests/test_shop_auth_and_validation.py`.
 
+## Середні знахідки QA-аудиту — Розділ 4: Довідники, адмін, безпека (виправлено)
+
+Розділ 4 (5 знахідок):
+
+1. **Перетин дат ціни не перевірявся, коли задані ОБИДВІ дати** —
+   `backend/routers/prices.py` (`create_price`). Перевірка колізії була
+   лише в гілці безстрокової ціни (`valid_to is None` — автозакриття
+   попередніх) — коли явно задані і `valid_from`, і `valid_to`, перевірки
+   не було взагалі: дві ціни з накладеними діапазонами могли існувати
+   одночасно (система мовчки бере новішу за `valid_from`, а стара сама
+   собою "відновлюється" після дати закінчення нової). Виправлено: та сама
+   перевірка перетину, що вже є в `replace_price` (409, з датами
+   конфліктної ціни в повідомленні).
+2. **Кнопка «Відновити» маршруту не працювала** — `backend/routers/routes.py`
+   (`update_route`) приймав `RouteCreate` (без поля `is_active` — фізично
+   не міг встановити активність) і використовував `model_dump()` без
+   `exclude_unset` (будь-яке часткове збереження скидало `sort_order` на
+   0 — `RouteCreate.sort_order` default `0`). Виправлено: нова схема
+   `RouteUpdate` (усі поля `Optional`, включно з `is_active`) +
+   `exclude_unset=True` (той самий фікс, що вже застосований для
+   clients/orders цієї сесії). Фронтенд вже надсилав `is_active: 1`
+   правильно — прогалина була суто в бекенд-схемі.
+3. **Однакову назву маршруту можна було створити двічі** —
+   `backend/models/references.py` (`Route.name` — без `unique=True`).
+   Повідомлення "Маршрут із такою назвою вже існує" (`safe_commit`
+   conflict_msg) вже було написане в коді, але не мало DB-обмеження, яке
+   могло б його викликати. Перевірено на реальній базі — дублікатів
+   немає. Виправлено: міграція **046** — unique index на `routes.name` і
+   на `client_groups(name, route_id)` (та сама прогалина; групи вже мали
+   готовий `conflict_msg`, теж ніколи не спрацьовував).
+4. **Пароль без мінімальної довжини** — `backend/routers/auth.py`
+   (`UserCreate`, `UserUpdate`). Підтверджено: пароль `"1"` створювався і
+   одразу працював для входу. Виправлено: `field_validator`, мінімум 6
+   символів (`MIN_PASSWORD_LENGTH`).
+5. **Ім'я файлу бекапу без перевірки виходу за межі папки** —
+   `backend/services/backup.py` (`delete_backup`, `get_backup_meta`,
+   `restore_backup`) і `backend/routers/backup.py` (`download_backup`,
+   `restore_backup` — той самий клас проблеми в роутері, побудова шляху
+   напряму, без сервісних функцій; `restore_backup` — найнебезпечніше
+   місце, бо `backup_path` іде напряму в `tray.py`'s SQLite backup API
+   поверх живої `bakery.db`). Виправлено: `Path(filename).name` (голе
+   ім'я файлу, без `../`/шляхових роздільників) у всіх п'яти місцях —
+   той самий мінімальний принцип, що вже застосований для роздачі
+   фронтенду (`backend/main.py`, `.resolve()`+`is_relative_to`).
+
+Тести: `tests/test_prices_overlap_and_route_fixes.py`,
+`tests/test_password_min_length.py`, `tests/test_backup_path_traversal.py`.
+
 ## Аудит-фікси v0.9.36-v1.0.4
 
 **v0.9.36-v0.9.39:**

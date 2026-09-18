@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Client, Route
-from backend.schemas.references import RouteCreate, RouteOut
+from backend.schemas.references import RouteCreate, RouteUpdate, RouteOut
 from backend.routers.auth import require_user, require_admin
 
 router = APIRouter(prefix="/routes", tags=["Маршрути"])
@@ -29,11 +29,11 @@ def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(req
 
 
 @router.put("/{route_id}", response_model=RouteOut)
-def update_route(route_id: int, data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_route(route_id: int, data: RouteUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
     r = db.get(Route, route_id)
     if not r:
         raise HTTPException(status_code=404, detail="Маршрут не знайдено")
-    for field, value in data.model_dump().items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(r, field, value)
     safe_commit(db, conflict_msg="Маршрут із такою назвою вже існує")
     db.refresh(r)

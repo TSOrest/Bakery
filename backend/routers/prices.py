@@ -160,6 +160,29 @@ def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(req
                 pp.valid_to = prev_day
             else:
                 pp.is_active = 0
+    else:
+        # Ціна з ОБОМА датами (не безстрокова) — раніше перетин узагалі не
+        # перевірявся: дві ціни з накладеними діапазонами могли існувати
+        # одночасно (система "вирішує" конфлікт мовчки, беручи новішу за
+        # valid_from — але стара сама собою "відновлювалась" після дати
+        # закінчення нової, без жодної дії адміна). Той самий принцип
+        # перевірки, що вже є в replace_price (interval overlap).
+        collision = (
+            db.query(Price)
+            .filter(
+                Price.product_id == data.product_id,
+                Price.is_active == 1,
+                Price.valid_from <= data.valid_to,
+                or_(Price.valid_to.is_(None), Price.valid_to >= data.valid_from),
+            )
+            .first()
+        )
+        if collision:
+            period = f"до {collision.valid_to}" if collision.valid_to else "безстроково"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Перетинається з існуючою ціною (діє з {collision.valid_from} {period})",
+            )
 
     p = Price(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)

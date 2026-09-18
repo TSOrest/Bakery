@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, safe_commit
@@ -220,11 +220,21 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+MIN_PASSWORD_LENGTH = 6
+
+
 class UserCreate(BaseModel):
     username:  str
     password:  str
     full_name: str = ""
     role:      str = "operator"
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Пароль має бути мінімум {MIN_PASSWORD_LENGTH} символів")
+        return v
 
 
 class UserUpdate(BaseModel):
@@ -232,6 +242,13 @@ class UserUpdate(BaseModel):
     role:      Optional[str] = None
     password:  Optional[str] = None
     is_active: Optional[int] = None
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) < MIN_PASSWORD_LENGTH:
+            raise ValueError(f"Пароль має бути мінімум {MIN_PASSWORD_LENGTH} символів")
+        return v
 
 
 # ─── Ендпоінти ───────────────────────────────────────────────────────────────

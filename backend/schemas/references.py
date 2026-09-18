@@ -118,6 +118,17 @@ class RouteCreate(BaseModel):
     sort_order: int = 0
 
 
+class RouteUpdate(BaseModel):
+    """PUT /routes/{id} — на відміну від RouteCreate, має is_active і всі
+    поля Optional: раніше update_route приймав RouteCreate, який фізично не
+    міг встановити is_active (кнопка "Відновити" мовчки нічого не робила),
+    і будь-яке часткове збереження (напр. перейменування) скидало
+    sort_order на 0 (RouteCreate.sort_order за замовчуванням 0)."""
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[int] = None
+
+
 class RouteOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

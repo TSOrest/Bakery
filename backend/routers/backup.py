@@ -213,7 +213,10 @@ def download_backup(filename: str, _: User = Depends(require_admin), db: Session
     """Повертає файл бекапу для збереження користувачем."""
     cfg = _get_settings(db)
     backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
-    path = backup_dir / filename
+    # .name відкидає "../"/шляхові роздільники — без цього filename міг
+    # вказати за межі backup_dir, і перевірка нижче звірялась би лише з
+    # базовим іменем файлу (path.name), не з реальним шляхом.
+    path = backup_dir / Path(filename).name
     if not path.exists() or not path.name.startswith("bakery_") or path.suffix != ".db":
         raise HTTPException(status_code=404, detail="Бекап не знайдений")
     return FileResponse(
@@ -327,7 +330,9 @@ def restore_backup(
     backup_version = meta.get("app_version", "")
 
     backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
-    backup_path = str(backup_dir / filename)
+    # .name — без цього filename міг вказати шлях поза backup_dir; tray.py
+    # передає backup_path напряму в sqlite3 backup API поверх живої bakery.db.
+    backup_path = str(backup_dir / Path(filename).name)
 
     RESTORE_REQUESTED.write_text(
         json.dumps({

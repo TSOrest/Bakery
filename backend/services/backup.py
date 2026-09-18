@@ -162,7 +162,10 @@ def rotate(backup_dir: Path, keep_count: int, max_disk_mb: int = 0) -> int:
 def delete_backup(root: Path, filename: str, custom_dir: str = "") -> bool:
     """Видаляє бекап по імені файлу (і .db і .meta.json). Повертає True якщо успішно."""
     backup_dir = _backup_dir(root, custom_dir)
-    db_file = backup_dir / filename
+    # .name відкидає будь-які "../"/шляхові роздільники — filename завжди мав
+    # бути голим іменем файлу в межах backup_dir, без перевірки можна було
+    # вийти за її межі.
+    db_file = backup_dir / Path(filename).name
     if not db_file.exists():
         return False
     db_file.unlink()
@@ -175,7 +178,7 @@ def delete_backup(root: Path, filename: str, custom_dir: str = "") -> bool:
 def get_backup_meta(root: Path, filename: str, custom_dir: str = "") -> dict:
     """Повертає метадані бекапу {app_version, created_at} або {}."""
     backup_dir = _backup_dir(root, custom_dir)
-    meta_file = (backup_dir / filename).with_suffix(".meta.json")
+    meta_file = (backup_dir / Path(filename).name).with_suffix(".meta.json")
     if not meta_file.exists():
         return {}
     try:
@@ -195,7 +198,7 @@ def restore_backup(root: Path, db_path: Path, filename: str, custom_dir: str = "
     УВАГА: викликати тільки коли сервер зупинений.
     """
     backup_dir = _backup_dir(root, custom_dir)
-    src = backup_dir / filename
+    src = backup_dir / Path(filename).name
     if not src.exists():
         raise FileNotFoundError(f"Бекап не знайдений: {src}")
     # Видаляємо старий WAL/SHM щоб не було конфлікту
