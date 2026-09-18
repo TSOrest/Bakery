@@ -1,6 +1,5 @@
 """GitHub Issues proxy — система звернень клієнтів."""
 import json
-from typing import Optional
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
@@ -10,10 +9,10 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models.settings import Setting
-from backend.routers.auth import get_current_user
+from backend.routers.auth import require_user
 from backend.models.auth import User
 
-router = APIRouter(prefix="/issues", tags=["issues"])
+router = APIRouter(prefix="/issues", tags=["issues"], dependencies=[Depends(require_user)])
 
 _GITHUB_API   = "https://api.github.com"
 _LABEL        = "client-report"
@@ -135,14 +134,14 @@ def list_comments(number: int, db: Session = Depends(get_db)):
 def add_comment(
     number:  int,
     payload: CommentCreate,
-    db:      Session        = Depends(get_db),
-    user:    Optional[User] = Depends(get_current_user),
+    db:      Session = Depends(get_db),
+    user:    User     = Depends(require_user),
 ):
     """Додати коментар до звернення."""
     tok    = _token(db)
     repo   = _repo(db)
     gh_login = _github_login(db)
-    sender   = f"{user.full_name} ({gh_login})" if user else gh_login
+    sender   = f"{user.full_name} ({gh_login})"
     body_with_sender = f"**{sender}:** {payload.body}"
     result = _gh(f"/repos/{repo}/issues/{number}/comments", tok, method="POST", body={"body": body_with_sender})
     return {"id": result["id"], "created_at": result["created_at"]}
@@ -178,8 +177,8 @@ async def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_d
 @router.post("/", status_code=201)
 def create_issue(
     payload: IssueCreate,
-    db:      Session          = Depends(get_db),
-    user:    Optional[User]   = Depends(get_current_user),
+    db:      Session = Depends(get_db),
+    user:    User     = Depends(require_user),
 ):
     """Створити нове звернення на GitHub."""
     tok  = _token(db)
@@ -193,10 +192,7 @@ def create_issue(
 
     # Формуємо підпис: "Марія (BrunkovskaO)"
     gh_login = _github_login(db)
-    if user:
-        sender = f"{user.full_name} ({gh_login})"
-    else:
-        sender = gh_login
+    sender = f"{user.full_name} ({gh_login})"
     full_body = f"**Від:** {sender}\n\n{payload.body}" if payload.body.strip() else f"**Від:** {sender}"
 
     result = _gh(f"/repos/{repo}/issues", tok, method="POST", body={

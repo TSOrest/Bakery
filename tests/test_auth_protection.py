@@ -30,6 +30,11 @@ UNAUTH_MUST_401 = [
     ("get",    "/api/v1/margin-report",            None),
     ("post",   "/api/v1/auth/github/start",        None),
     ("get",    "/api/v1/auth/github/status",       None),
+    # Розділ 5 — "Звернення" (💬) не мали жодної авторизації взагалі.
+    ("get",    "/api/v1/issues/",                  None),
+    ("post",   "/api/v1/issues/",                  {"title": "x", "body": "y"}),
+    ("get",    "/api/v1/issues/1/comments",         None),
+    ("post",   "/api/v1/issues/1/comments",         {"body": "x"}),
 ]
 
 
@@ -132,3 +137,15 @@ def test_github_oauth_status_forbidden_for_operator(app_client, operator_token):
         headers={"Authorization": f"Bearer {operator_token}"},
     )
     assert resp.status_code == 403
+
+
+def test_issues_allowed_for_any_authenticated_role(app_client, operator_token):
+    """Розділ 5: '/issues' (кнопка 💬, усі ролі) — require_user, не
+    require_admin. GitHub не налаштований у тестовій БД, тож бізнес-логіка
+    падає на 503 ("GitHub не авторизовано") — важливо лише що це НЕ 401/403,
+    тобто автентифікований оператор пройшов перевірку доступу."""
+    resp = app_client.get(
+        "/api/v1/issues/",
+        headers={"Authorization": f"Bearer {operator_token}"},
+    )
+    assert resp.status_code == 503
