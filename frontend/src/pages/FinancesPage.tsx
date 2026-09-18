@@ -482,6 +482,14 @@ export default function FinancesPage() {
   const [articles,   setArticles]   = useState<FinanceArticle[]>([])
   const [loadingBal, setLoadingBal] = useState(false)
   const [loadingJrn, setLoadingJrn] = useState(false)
+  const [cashTrackingStart, setCashTrackingStart] = useState('')
+
+  useEffect(() => {
+    api.get<Record<string, { value: string }>>('/settings/')
+      .then(s => setCashTrackingStart(s.cash_tracking_start_date?.value ?? ''))
+      .catch(() => {})
+  }, [])
+  const cashUntracked = !!cashTrackingStart && today < cashTrackingStart
 
   // ── Стан вкладки Звіти ────────────────────────────────────────────────────
   const [dailyDate,   setDailyDate]   = useState(today)
@@ -616,9 +624,19 @@ export default function FinancesPage() {
               зараз, якою можна оплатити з каси або видати виручку власниці. */}
           <div className={`${styles.summaryCard} ${styles.summaryCardFeatured}`}>
             <span className={styles.summaryLabel}>Залишок у касі</span>
-            <span className={`${styles.summaryValue} ${summary.cash_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
-              {summary.cash_balance >= 0 ? '+' : ''}{fmt(summary.cash_balance)} грн
-            </span>
+            {cashUntracked ? (
+              <span
+                className={styles.summaryValue}
+                style={{ fontSize: '0.78rem', fontStyle: 'italic', color: '#888', fontWeight: 400 }}
+                title={`Стара система не вела окремий залишок у касі — дані до ${cashTrackingStart} не відстежувались`}
+              >
+                дані до {cashTrackingStart} не відстежувались
+              </span>
+            ) : (
+              <span className={`${styles.summaryValue} ${summary.cash_balance >= 0 ? styles.creditColor : styles.debtColor}`}>
+                {summary.cash_balance >= 0 ? '+' : ''}{fmt(summary.cash_balance)} грн
+              </span>
+            )}
             <span className={styles.summaryHint}>готівка для оплат і видачі виручки</span>
           </div>
           <div className={styles.summaryCard}>

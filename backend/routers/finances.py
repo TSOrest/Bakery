@@ -343,7 +343,11 @@ def update_finance(
 # ── Видалення ─────────────────────────────────────────────────────────────────
 
 @router.delete("/{finance_id}", status_code=204)
-def delete_finance(finance_id: int, db: Session = Depends(get_db), _=Depends(require_user)):
+def delete_finance(
+    finance_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
     entry = db.get(Finance, finance_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Запис не знайдено")
@@ -353,5 +357,13 @@ def delete_finance(finance_id: int, db: Session = Depends(get_db), _=Depends(req
             status_code=400,
             detail="Автоматичний запис накладної не можна видалити вручну",
         )
+    # На відміну від редагування суми (яке завжди фіксується в audit_log),
+    # видалення раніше не лишало жодного сліду — включно з автозаписами
+    # оплат (created_by='system', finance_type='payment'), які теж можна
+    # видалити тут. Знімок значень перед видаленням, бо після delete запису
+    # вже не існує для подальшого читання.
+    write_audit(db, "finances", entry.id, "deleted",
+                f"amount={entry.amount}, notes={entry.notes}", None,
+                current_user.username)
     db.delete(entry)
     safe_commit(db)

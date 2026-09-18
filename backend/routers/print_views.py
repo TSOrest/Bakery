@@ -1607,18 +1607,37 @@ def _dr_section3(db: Session, date: str) -> str:
     from backend.services.finance import get_cash_balance
     prev_balance = get_cash_balance(db, as_of=date, exclusive=True)
 
+    # ── Позначка "дані каси до дати переходу не відстежувались" ──────────────
+    # Стара Access-система не вела окремий залишок у касі як накопичувану
+    # величину — реальна перевірка на копії продакшн-бази показала, що сума
+    # всіх не-накладних записів (Оплата/Оплата з каси/Виведення з каси тощо)
+    # структурно ~0.00 на БУДЬ-яку дату до переходу (кожен прихід у старому
+    # обліку симетрично гасився видатковим записом). Це властивість вихідних
+    # даних, не баг імпорту — розраховувати нема з чого. cash_tracking_start_date
+    # (налаштування, порожньо = вимкнено) дає видиму позначку замість "0,00",
+    # що виглядало як реальний порахований нуль.
+    cash_start = get_settings(db).get("cash_tracking_start_date", "")
+    cash_untracked = bool(cash_start) and date < cash_start
+
+    def _cash_cell(value: float, bold: bool = False) -> str:
+        if cash_untracked:
+            note = f"дані каси до {ua_date(cash_start)} не відстежувались окремо (перенесено зі старої системи)"
+            return f'<td class="dr-num dr-money" style="color:#888;font-style:italic;font-size:0.85em;">{note}</td>'
+        cls = "dr-income" if value >= 0 else "dr-expense"
+        chr_ = "+" if value >= 0 else "−"
+        body = f"{chr_}&nbsp;{fmt(abs(value))}&nbsp;грн"
+        if bold:
+            body = f"<strong>{body}</strong>"
+        return f'<td class="dr-num dr-money {cls}">{body}</td>'
+
     # ── Записи поточного дня ───────────────────────────────────────────────────
     entries = db.query(Finance).filter(Finance.finance_date == date).all()
 
     if not entries:
-        prev_cls = "dr-income" if prev_balance >= 0 else "dr-expense"
-        prev_chr = "+" if prev_balance >= 0 else "−"
         prev_row = (
-            f'<tr><td>Залишок на початок дня</td>'
-            f'<td class="dr-num {prev_cls} dr-money">{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</td></tr>'
-            f'<tr><td><strong>Залишок в касі</strong></td>'
-            f'<td class="dr-num {prev_cls} dr-money"><strong>{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</strong></td></tr>'
-        ) if prev_balance else ""
+            f'<tr><td>Залишок на початок дня</td>{_cash_cell(prev_balance)}</tr>'
+            f'<tr><td><strong>Залишок в касі</strong></td>{_cash_cell(prev_balance, bold=True)}</tr>'
+        ) if (prev_balance or cash_untracked) else ""
         if prev_row:
             return f'<table class="dr-table dr-fin-total-table"><tbody>{prev_row}</tbody></table>'
         return "<p style='color:#888;font-size:9pt;'>— Фінансових операцій немає —</p>"
@@ -1693,29 +1712,19 @@ def _dr_section3(db: Session, date: str) -> str:
     )
 
     # ── 3.1 Залишок на початок дня ────────────────────────────────────────────
-    prev_cls  = "dr-income" if prev_balance >= 0 else "dr-expense"
-    prev_chr  = "+"         if prev_balance >= 0 else "−"
     prev_block = (
         f'<table class="dr-table dr-fin-total-table" style="margin-bottom:10px;">'
-        f'<tbody>'
-        f'<tr><td>Залишок на початок дня</td>'
-        f'<td class="dr-num dr-money {prev_cls}">{prev_chr}&nbsp;{fmt(abs(prev_balance))}&nbsp;грн</td></tr>'
-        f'</tbody></table>'
+        f'<tbody><tr><td>Залишок на початок дня</td>{_cash_cell(prev_balance)}</tr></tbody></table>'
     )
 
     # ── 3.4 Залишок в касі ────────────────────────────────────────────────────
     # fmt(cash_balance) напряму показував би "-100,00" (звичайний ASCII-дефіс
     # від Python-форматування від'ємних чисел) — не узгоджено зі стилізованим
     # «−» (U+2212), яким показані всі інші суми звіту (prev_block, client/cash
-    # rows). Той самий патерн +/− chr + fmt(abs(...)), що й скрізь у файлі.
-    bal_cls = "dr-income" if cash_balance >= 0 else "dr-expense"
-    bal_chr = "+" if cash_balance >= 0 else "−"
+    # rows). _cash_cell інкапсулює той самий патерн +/− chr + fmt(abs(...)).
     bal_block = (
         f'<table class="dr-table dr-fin-total-table">'
-        f'<tbody>'
-        f'<tr><td><strong>Залишок в касі</strong></td>'
-        f'<td class="dr-num dr-money {bal_cls}"><strong>{bal_chr}&nbsp;{fmt(abs(cash_balance))}&nbsp;грн</strong></td></tr>'
-        f'</tbody></table>'
+        f'<tbody><tr><td><strong>Залишок в касі</strong></td>{_cash_cell(cash_balance, bold=True)}</tr></tbody></table>'
     )
 
     return f"""
