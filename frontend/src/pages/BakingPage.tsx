@@ -63,15 +63,15 @@ interface DiscrepancyPanelProps {
   shopRemovedDone: number      // фактично знято на «Недопечено» (з переміщень)
   underbakedClientId: number | null
   workDate:     string
-  routeReserve: boolean
   onReload:     () => void | Promise<void>   // перечитати дані після зміни
 }
 
 const DiscrepancyPanel = memo(function DiscrepancyPanel({
   task, productName, clients, surplusLines, clientRows, shopRemovedDone, underbakedClientId,
-  workDate, routeReserve, onReload,
+  workDate, onReload,
 }: DiscrepancyPanelProps) {
   const toast = useToast()
+  const confirm = useConfirm()
   const [editQty,     setEditQty]     = useState<Record<string, string>>({})
   const [addClientId, setAddClientId] = useState<number | ''>('')
   const [addQty,      setAddQty]      = useState('')
@@ -171,6 +171,13 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
   }
 
   const handleDeleteSurplus = async (line: SurplusLine) => {
+    const ok = await confirm({
+      title: 'Видалити рядок розподілу?',
+      message: `Розподіл для «${clientName(line.client_id)}» (${line.qty} шт) буде видалено.`,
+      confirmText: 'Видалити',
+      danger: true,
+    })
+    if (!ok) return
     if (line.kind === 'invoice') {
       await api.post('/invoices/set-surplus', {
         shop_client_id: line.client_id, product_id: line.product_id,
@@ -325,7 +332,11 @@ const DiscrepancyPanel = memo(function DiscrepancyPanel({
                 {shopClients.map(renderClientOption)}
                 {rationClients.map(renderClientOption)}
                 {writeoffClients.map(renderClientOption)}
-                {routeReserve && <option value="route">🚚 Маршрут (резерв)</option>}
+                {/* "Маршрут (резерв)" навмисно прихована: обраний targetId='route'
+                    не парситься Number() і мовчки нічого не робить — рух товару
+                    по маршруту ще не реалізований (CLAUDE.md, Фаза 3.5). Сам
+                    перемикач baking_route_reserve лишається в Налаштуваннях
+                    для майбутньої реалізації. */}
               </select>
               <input
                 type="number" min={1} max={surplusRemaining} step={1}
@@ -452,7 +463,6 @@ export default function BakingPage() {
   const [showRec,      setShowRec]      = useState(false)
   const [showEmpty,    setShowEmpty]    = useState(false)   // показати вироби без замовлень
   const [printNotice,  setPrintNotice]  = useState<string | null>(null)
-  const [routeReserve, setRouteReserve] = useState(false)
   const [closingShops, setClosingShops] = useState(false)
 
   // Всі мапи і сети ключовані за product_id (не task.id) — підтримує "віртуальні" рядки
@@ -467,7 +477,7 @@ export default function BakingPage() {
 
   const load = async (date: string) => {
     setLoading(true)
-    const [t, p, cats, c, ord, inv, trf, sett] = await Promise.all([
+    const [t, p, cats, c, ord, inv, trf] = await Promise.all([
       api.get<BakingTask[]>(`/baking/tasks?task_date=${date}`),
       api.get<Product[]>('/products/?active_only=false'),
       api.get<Category[]>('/categories?active_only=false'),
@@ -475,10 +485,8 @@ export default function BakingPage() {
       api.get<Order[]>(`/orders/?order_date=${date}`),               // усі замовлення дати
       api.get<Invoice[]>(`/invoices/?invoice_date=${date}`),
       api.get<TransferByDate[]>(`/invoices/transfers-by-date?date=${date}`),
-      api.get<Record<string, { value: string }>>('/settings/'),
     ])
     setTransfers(trf)
-    setRouteReserve(sett['baking_route_reserve']?.value === '1')
     setTasks(t)
     setProducts(p)
     setCategories(cats)
@@ -1148,7 +1156,6 @@ export default function BakingPage() {
                     shopRemovedDone={calcFor(task.product_id).shopRemoved}
                     underbakedClientId={underbakedClientId}
                     workDate={workDate}
-                    routeReserve={routeReserve}
                     onReload={reloadAll}
                   />
                 ))}

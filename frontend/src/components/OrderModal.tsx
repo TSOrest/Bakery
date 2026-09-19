@@ -5,6 +5,7 @@ import styles from './OrderModal.module.css'
 import PriceTypeBadge, { type PriceSource } from './PriceTypeBadge'
 import HelpTip from './HelpTip'
 import AuditBadge from './AuditBadge'
+import { useConfirm } from './ConfirmDialog'
 
 type EffectivePriceInfo = { price: number; source: PriceSource }
 
@@ -30,6 +31,7 @@ export default function OrderModal({
   client, workDate, products, categories, orders, saving, locked,
   onQtyChange, onOrdersChange, onClose,
 }: Props) {
+  const confirm = useConfirm()
   const [filter,  setFilter]  = useState<'all' | number>('all')
   const [sortBy,  setSortBy]  = useState<'alpha' | 'freq'>('alpha')
   const [freqs,   setFreqs]   = useState<Record<number, number>>({})
@@ -295,6 +297,13 @@ export default function OrderModal({
   }
 
   const handleDeleteExtraLine = async (orderId: number) => {
+    const ok = await confirm({
+      title: 'Видалити рядок?',
+      message: 'Рядок обміну/знижки буде видалено з замовлення.',
+      confirmText: 'Видалити',
+      danger: true,
+    })
+    if (!ok) return
     await api.delete(`/orders/${orderId}`)
     if (orderForDate !== workDate) { fetchOwnOrders() } else { onOrdersChange() }
   }

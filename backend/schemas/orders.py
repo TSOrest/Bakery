@@ -29,7 +29,7 @@ class OrderCreate(BaseModel):
     exchange_qty: float = Field(default=0, example=0)
     exchange_price: Optional[float] = Field(None, example=None)
     exchange_notes: Optional[str] = None
-    price_override: Optional[float] = Field(None, example=None)
+    price_override: Optional[float] = Field(None, example=None, ge=0)
     notes: Optional[str] = Field(None, example=None)
     parent_order_id: Optional[int] = None
     delivered_qty: Optional[float] = None
@@ -52,7 +52,7 @@ class OrderUpdate(BaseModel):
     exchange_qty: Optional[float] = None
     exchange_price: Optional[float] = None
     exchange_notes: Optional[str] = None
-    price_override: Optional[float] = None
+    price_override: Optional[float] = Field(None, ge=0)
     notes: Optional[str] = None
     delivered_qty: Optional[float] = None
 
