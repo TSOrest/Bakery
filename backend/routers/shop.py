@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db, safe_commit
 from backend.models.shop import (
-    ShopCount, OtherStockIn,
     ShopReconciliation, ShopReconciliationLine, ShopReceipt,
     ShopDisposalLine, ShopSale,
 )
@@ -20,8 +19,6 @@ from backend.models.finances import Finance, FinanceArticle
 from backend.models.auth import User
 from backend.routers.auth import require_user
 from backend.schemas.shop import (
-    ShopCountOut, ShopCountUpdate,
-    OtherStockInCreate, OtherStockInOut,
     ShopReconciliationOut, ShopReconciliationHeaderOut, ShopReconciliationCreate,
     ShopReconciliationOpeningCreate,
     ShopReconciliationLineOut, ShopReconciliationLineUpdate,
@@ -150,7 +147,22 @@ def _received_from_receipts_batched(
 
 
 def _received_from_invoices(db: Session, shop_client_id: int, date_from: str, date_to: str) -> dict[int, float]:
-    """Надходження через прийняті накладні (status=accepted) для магазину."""
+    """Надходження через прийняті накладні (status=accepted) для магазину.
+
+    ⚠ Потенційне подвійне рахування (QA-аудит, код-рев'ю, не відтворено
+    живо на реальних даних — нижча впевненість): на відміну від
+    `_shop_invoice_dates()` (яка явно виключає `corrective_for_id IS NOT
+    NULL`), ця функція рахує ВСІ прийняті рядки накладних магазину без
+    такого фільтра. Якщо для однієї дати існує і легасі-коригуюча
+    накладна (`corrective_for_id` заповнений), і звичайна — `Order`-рядки
+    цієї дати вже НЕ потрапляють у `_received_from_bakery` (бо дата є в
+    `_shop_invoice_dates`), а тут коригуюча накладна додає СВОЮ суму
+    поверх звичайної. Новий UI (`create_corrective_invoice`) більше НЕ
+    створює такі накладні (CLAUDE.md) — ризик стосується лише старих
+    імпортованих даних, не поточної роботи. Якщо колись знадобиться
+    торкнутись цієї функції — додати той самий фільтр
+    `Invoice.corrective_for_id.is_(None)`, що вже є в `_shop_invoice_dates`.
+    """
     rows = (
         db.query(InvoiceLine.product_id, func.sum(InvoiceLine.qty).label("total"))
         .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
@@ -1476,67 +1488,18 @@ def delete_receipt(receipt_id: int, db: Session = Depends(get_db)):
 
 
 # ─── Старі ендпоінти (сумісність) ────────────────────────────────────────────
-
-@router.get("/counts", response_model=List[ShopCountOut])
-def list_counts(count_date: str, db: Session = Depends(get_db)):
-    return (
-        db.query(ShopCount)
-        .filter(ShopCount.count_date == count_date)
-        .order_by(ShopCount.product_id)
-        .all()
-    )
-
-
-@router.put("/counts/{count_id}", response_model=ShopCountOut)
-def update_count(count_id: int, body: ShopCountUpdate, db: Session = Depends(get_db)):
-    sc = db.get(ShopCount, count_id)
-    if not sc:
-        raise HTTPException(status_code=404, detail="Рядок звірки не знайдено")
-    if sc.saved:
-        raise HTTPException(status_code=400, detail="Звірку вже підтверджено")
-    if body.entered_balance is not None:
-        sc.entered_balance = body.entered_balance
-    if body.written_off_entered is not None:
-        sc.written_off_entered = body.written_off_entered
-    if body.price is not None:
-        sc.price = body.price
-    if sc.entered_balance is not None:
-        sc.calculated_sold = max(
-            0.0,
-            sc.yesterday_balance + sc.received_today - sc.entered_balance - sc.written_off_entered,
-        )
-    safe_commit(db)
-    db.refresh(sc)
-    return sc
-
+# ShopCount/OtherStockIn ("/counts", "/stock-in") видалені як мертвий код
+# (QA-аудит, повторна перевірка Магазину, низька знахідка) — 0 звернень з
+# фронтенду; зайва непотрібна атакована поверхня. Моделі/таблиці лишені
+# (видалення таблиць — окрема, ризикованіша операція з міграцією, не варта
+# для мертвого коду; вони й так позначені "для сумісності" — див. схему БД
+# в CLAUDE.md). "/other-products" (OtherProduct) НЕ видалено — окрема
+# сутність, не входила в цю знахідку.
 
 @router.get("/other-products")
 def list_other_products(db: Session = Depends(get_db)):
     from backend.models.references import OtherProduct
     return db.query(OtherProduct).filter(OtherProduct.is_active == 1).all()
-
-
-@router.get("/stock-in")
-def list_stock_in(stock_date: str, db: Session = Depends(get_db)):
-    return db.query(OtherStockIn).filter(OtherStockIn.stock_date == stock_date).all()
-
-
-@router.post("/stock-in", response_model=OtherStockInOut, status_code=201)
-def create_stock_in(stock_date: str, data: OtherStockInCreate, db: Session = Depends(get_db)):
-    s = OtherStockIn(**data.model_dump(), stock_date=stock_date, created_at=datetime.now().isoformat())
-    db.add(s)
-    safe_commit(db)
-    db.refresh(s)
-    return s
-
-
-@router.delete("/stock-in/{stock_in_id}", status_code=204)
-def delete_stock_in(stock_in_id: int, db: Session = Depends(get_db)):
-    s = db.get(OtherStockIn, stock_in_id)
-    if not s:
-        raise HTTPException(status_code=404, detail="Не знайдено")
-    db.delete(s)
-    safe_commit(db)
 
 
 # ─── POS-каса ─────────────────────────────────────────────────────────────────
