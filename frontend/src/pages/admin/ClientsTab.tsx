@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import { useToast } from '../../components/Toast'
+import AuditBadge from '../../components/AuditBadge'
 import type { Client, ClientGroup, ClientPriceOverride, Product, Route } from '../../types'
 import {
   addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td,
@@ -118,7 +119,7 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       <Td>{c.full_name}</Td>
       <Td>{c.short_name ?? '—'}</Td>
       <Td>{routeName(c.route_id)}</Td>
-      <Td>{c.discount_pct}</Td>
+      <Td>{c.discount_pct} <AuditBadge entityTable="clients" entityId={c.id} /></Td>
       <Td>{c.phone ?? '—'}</Td>
       <Td>
         <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
