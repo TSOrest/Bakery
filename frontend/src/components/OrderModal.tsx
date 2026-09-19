@@ -311,6 +311,15 @@ export default function OrderModal({
   // ─── Рендер ───────────────────────────────────────────────────────────────
 
   const hasDiscount = (client.discount_pct ?? 0) > 0
+
+  // М'яке попередження (не блокує): ціна рядка підозріло велика порівняно
+  // зі звичайною ціною виробу — ймовірно друкарська помилка (напр. зайве
+  // замість кількості). Від'ємні ціни вже заборонені бекендом (ge=0).
+  const addLineBasePrice = addLine ? prices[addLine.productId]?.price : undefined
+  const addLinePriceSuspicious = !!(
+    addLine && addLine.price !== '' && addLineBasePrice && addLineBasePrice > 0 &&
+    Number(addLine.price) >= addLineBasePrice * 5
+  )
   const isNonWorkDate = orderForDate !== workDate
 
   return (
@@ -585,7 +594,7 @@ export default function OrderModal({
                           <td colSpan={2} className={styles.addLineCell}>
                             <span style={{ fontSize: '0.82rem', color: '#475569' }}>% Знижка — своя ціна</span>
                           </td>
-                          <td className={styles.addLineCell}>
+                          <td className={styles.addLineCell} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <input
                               type="number" min={0} step={0.01}
                               value={addLine!.price}
@@ -593,6 +602,12 @@ export default function OrderModal({
                               className={styles.addLinePriceInput}
                               onChange={e => setAddLine(p => p ? { ...p, price: e.target.value } : null)}
                             />
+                            {addLinePriceSuspicious && (
+                              <span
+                                title={`Підозріло висока ціна — у ${(Number(addLine!.price) / (addLineBasePrice || 1)).toFixed(1)}× більша за звичайну (${addLineBasePrice} грн). Можливо, помилка вводу.`}
+                                style={{ color: '#e67e22', cursor: 'help', fontSize: '1.1rem' }}
+                              >⚠</span>
+                            )}
                           </td>
                           <td className={styles.tdAct}>
                             <button

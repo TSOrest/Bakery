@@ -392,6 +392,16 @@ export default function GridOrderModal({
     }
   }
 
+  // Закриття (backdrop/× /Escape) у коротку мить debounce-вікна (600мс) могло
+  // "втекти" від таймера scheduleFlush — останнє введене значення просто не
+  // встигало піти на сервер. Примусовий flush перед закриттям, якщо є
+  // незбережені зміни в черзі.
+  const handleClose = async () => {
+    if (flushTimer.current) clearTimeout(flushTimer.current)
+    if (pendingRef.current.size > 0) await flush()
+    onClose()
+  }
+
   if (!open) return null
 
   const statsNode = (
@@ -403,13 +413,13 @@ export default function GridOrderModal({
   return (
     <Modal
       fullscreen
-      onClose={onClose}
+      onClose={() => { void handleClose() }}
       title={`❖ Зведений вид замовлень — ${workDate}`}
       headerExtra={statsNode}
     >
       <div
         className={styles.shell}
-        onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
+        onKeyDown={(e) => { if (e.key === 'Escape') void handleClose() }}
       >
         {/* ── Сітка ─────────────────────────────────────────────────────── */}
         <div className={styles.gridWrap}>

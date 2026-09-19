@@ -124,6 +124,7 @@ export default function OrdersPage() {
   const [expandedIds,      setExpandedIds]      = useState<Set<number>>(new Set())
 
 const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
+const pendingQty = useRef<Record<CellKey, { clientId: number; productId: number; qty: number }>>({})
 
   // ─── Завантаження ─────────────────────────────────────────────────────────
 
@@ -183,7 +184,10 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
     })
   }
 
-  useEffect(() => { loadAll(workDate) }, [workDate])
+  // Cleanup спрацьовує ПЕРЕД наступним ефектом (зміна workDate) і при
+  // розмонтуванні сторінки — флашить незбережені debounce-зміни попередньої
+  // дати перш ніж підвантажити дані нової.
+  useEffect(() => { loadAll(workDate); return () => flushAllPending() }, [workDate]) // eslint-disable-line
 
   const loadPending = () => {
     api.get<BotPendingOrder[]>(`/bot/pending-orders?order_date=${workDate}`)
@@ -279,10 +283,60 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
 
   // ─── Збереження з дебаунсом ────────────────────────────────────────────────
 
+  const saveQty = async (key: CellKey, clientId: number, productId: number, qty: number) => {
+    // Знаходимо тільки основне замовлення (не exchange і не price_override рядки)
+    const isMainOrder = (o: Order) =>
+      o.client_id === clientId &&
+      o.product_id === productId &&
+      o.parent_order_id == null &&
+      o.origin_id == null &&
+      o.exchange_type === 'none' &&
+      o.price_override == null
+
+    setSaving(s => ({ ...s, [key]: 'saving' }))
+    try {
+      const existing = orders.find(isMainOrder)
+      if (existing && existing.id !== -1) {
+        if (qty <= 0) {
+          await api.delete(`/orders/${existing.id}`)
+          setOrders(prev => prev.filter(o => o.id !== existing.id))
+        } else {
+          const updated = await api.put<Order>(`/orders/${existing.id}`, { qty })
+          setOrders(prev => prev.map(o => o.id === existing.id ? updated : o))
+        }
+      } else if (qty > 0) {
+        const created = await api.post<Order>('/orders/', {
+          client_id: clientId, product_id: productId, qty, order_date: workDate,
+        })
+        setOrders(prev => prev.map(o =>
+          isMainOrder(o) && o.id === -1 ? created : o
+        ))
+      }
+      setSaving(s => ({ ...s, [key]: 'saved' }))
+      setTimeout(() => setSaving(s => { const n = { ...s }; delete n[key]; return n }), 1500)
+    } catch {
+      setSaving(s => ({ ...s, [key]: 'error' }))
+    }
+  }
+
+  // Примусово зберігає значення, що ще чекає на спрацювання debounce-таймера
+  // (напр. перед закриттям модалки/переходом на іншу дату) — без цього швидкий
+  // вихід у коротку 600мс мить міг "втекти" від автозбереження без сліду.
+  const flushQty = (key: CellKey) => {
+    const pending = pendingQty.current[key]
+    if (!pending) return
+    if (timers.current[key]) { clearTimeout(timers.current[key]); delete timers.current[key] }
+    delete pendingQty.current[key]
+    void saveQty(key, pending.clientId, pending.productId, pending.qty)
+  }
+
+  const flushAllPending = () => {
+    for (const key of Object.keys(pendingQty.current) as CellKey[]) flushQty(key)
+  }
+
   const handleQtyChange = (clientId: number, productId: number, qty: number) => {
     const key: CellKey = `${clientId}-${productId}`
 
-    // Знаходимо тільки основне замовлення (не exchange і не price_override рядки)
     const isMainOrder = (o: Order) =>
       o.client_id === clientId &&
       o.product_id === productId &&
@@ -306,33 +360,12 @@ const timers = useRef<Record<CellKey, ReturnType<typeof setTimeout>>>({})
       } as Order]
     })
 
+    pendingQty.current[key] = { clientId, productId, qty }
     if (timers.current[key]) clearTimeout(timers.current[key])
-
-    timers.current[key] = setTimeout(async () => {
-      setSaving(s => ({ ...s, [key]: 'saving' }))
-      try {
-        const existing = orders.find(isMainOrder)
-        if (existing && existing.id !== -1) {
-          if (qty <= 0) {
-            await api.delete(`/orders/${existing.id}`)
-            setOrders(prev => prev.filter(o => o.id !== existing.id))
-          } else {
-            const updated = await api.put<Order>(`/orders/${existing.id}`, { qty })
-            setOrders(prev => prev.map(o => o.id === existing.id ? updated : o))
-          }
-        } else if (qty > 0) {
-          const created = await api.post<Order>('/orders/', {
-            client_id: clientId, product_id: productId, qty, order_date: workDate,
-          })
-          setOrders(prev => prev.map(o =>
-            isMainOrder(o) && o.id === -1 ? created : o
-          ))
-        }
-        setSaving(s => ({ ...s, [key]: 'saved' }))
-        setTimeout(() => setSaving(s => { const n = { ...s }; delete n[key]; return n }), 1500)
-      } catch {
-        setSaving(s => ({ ...s, [key]: 'error' }))
-      }
+    timers.current[key] = setTimeout(() => {
+      delete timers.current[key]
+      delete pendingQty.current[key]
+      void saveQty(key, clientId, productId, qty)
     }, 600)
   }
 
