@@ -14,6 +14,7 @@ import {
   CartesianGrid, BarChart, Bar, PieChart, Pie, Cell,
 } from 'recharts'
 import { api } from '../api/client'
+import HelpTip from '../components/HelpTip'
 
 interface DailyPoint {
   date: string
@@ -148,7 +149,16 @@ export default function DashboardCharts() {
 
       {/* ── 1. LineChart: виручка і оплати по днях ───────────────────────── */}
       <div style={CARD}>
-        <div style={CARD_TITLE}>📈 Виручка і оплати по днях</div>
+        <div style={{ ...CARD_TITLE, display: 'flex', alignItems: 'center', gap: 6 }}>
+          📈 Виручка і оплати по днях
+          <HelpTip>
+            «Виручка» тут — сума всіх виставлених накладних за день (включно
+            з чернетками і магазинами). Це ІНША цифра, ніж «Виставлено» на
+            головному дашборді — там рахується лише борг прийнятих
+            клієнтських накладних (стаття «Накладна»). Обидві цифри
+            коректні, просто відповідають на різні питання.
+          </HelpTip>
+        </div>
         <ResponsiveContainer width="100%" height={260}>
           <LineChart data={data.daily} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#eee" />

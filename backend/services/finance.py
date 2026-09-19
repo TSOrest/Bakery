@@ -63,6 +63,7 @@ def get_all_balances(
     та решта операцій за ці дати рахуються як завжди.
     """
     from backend.models.references import Route
+    from backend.models.finances import FinanceArticle
 
     clients = (
         db.query(Client)
@@ -73,15 +74,22 @@ def get_all_balances(
 
     routes = {r.id: r.name for r in db.query(Route).all()}
 
+    # Дати "останньої оплати"/"останньої накладної" — за article_id, не
+    # finance_type: та сама ненадійна ознака, що вже виправлена скрізь
+    # (_is_invoice_entry, дашборд-фільтри) — для 99.7% імпортованих
+    # накладних finance_type не збігається з реальним типом операції.
+    payment_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == "Оплата").all()]
+    invoice_ids = [a.id for a in db.query(FinanceArticle).filter(FinanceArticle.name == "Накладна").all()]
+
     # Один агрегований запит для балансів, останніх платежів і накладних
     fin_q = db.query(
         Finance.client_id,
         func.sum(Finance.amount * Finance.sign).label("balance"),
         func.max(
-            case((Finance.finance_type == "payment", Finance.finance_date), else_=None)
+            case((Finance.article_id.in_(payment_ids), Finance.finance_date), else_=None)
         ).label("last_payment"),
         func.max(
-            case((Finance.finance_type == "invoice", Finance.finance_date), else_=None)
+            case((Finance.article_id.in_(invoice_ids), Finance.finance_date), else_=None)
         ).label("last_invoice"),
     ).filter(Finance.client_id.in_(client_ids))
 
