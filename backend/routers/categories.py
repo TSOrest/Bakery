@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Category, Unit
-from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate
+from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate, NameCreate
 from backend.routers.auth import require_admin, require_user
 
 router = APIRouter(tags=["Довідники"])
@@ -20,10 +20,10 @@ def list_categories(active_only: bool = False, db: Session = Depends(get_db), _=
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
-def create_category(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
-    c = Category(name=name)
+def create_category(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    c = Category(name=data.name)
     db.add(c)
-    safe_commit(db, conflict_msg=f"Категорія з назвою «{name}» вже існує")
+    safe_commit(db, conflict_msg=f"Категорія з назвою «{data.name}» вже існує")
     db.refresh(c)
     return c
 
@@ -74,10 +74,10 @@ def list_units(active_only: bool = False, db: Session = Depends(get_db), _=Depen
 
 
 @router.post("/units", response_model=UnitOut, status_code=201)
-def create_unit(name: str, db: Session = Depends(get_db), _=Depends(require_admin)):
-    u = Unit(name=name)
+def create_unit(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    u = Unit(name=data.name)
     db.add(u)
-    safe_commit(db, conflict_msg=f"Одиниця з назвою «{name}» вже існує")
+    safe_commit(db, conflict_msg=f"Одиниця з назвою «{data.name}» вже існує")
     db.refresh(u)
     return u
 

@@ -80,11 +80,30 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
     return p
 
 
-@router.delete("/{product_id}", status_code=204)
+@router.delete("/{product_id}")
 def deactivate_product(product_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
-    """М'яке видалення — ставимо is_active=0."""
+    """М'яке видалення — ставимо is_active=0.
+
+    На відміну від маршрутів (deactivate_route), тут НЕ блокує дію —
+    лише інформаційне попередження в відповіді, якщо виріб замовляли
+    останні 30 днів (бізнес-правило "чи можна деактивувати" тут нечітке
+    — на відміну від маршруту, де "активні клієнти" однозначні).
+    """
+    from datetime import timedelta
+    from backend.models.orders import Order
+
     p = db.get(Product, product_id)
     if not p:
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
     p.is_active = 0
     safe_commit(db)
+
+    cutoff = (dt.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    recent_orders = db.query(Order).filter(
+        Order.product_id == product_id, Order.order_date >= cutoff,
+    ).count()
+    warning = (
+        f"Цей виріб замовляли {recent_orders} раз(ів) за останні 30 днів."
+        if recent_orders else None
+    )
+    return {"deactivated": True, "warning": warning}

@@ -28,13 +28,33 @@ _pending: dict[str, dict] = {}
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _client_creds(db: Session) -> tuple[str, str]:
+    """Client ID/Secret для GitHub OAuth Device Flow.
+
+    client_secret зберігається зашифрованим (Fernet) — раніше зберігався
+    відкритим текстом, на відміну від github_oauth_token поруч. Lazy-
+    міграція: якщо у БД лишився старий plain secret — перешифровує на
+    льоту (той самий підхід, що вже є в issues.py's _token()).
+    """
+    from backend.services.crypto import decrypt_setting, encrypt_setting, is_encrypted
+
     cid = db.get(Setting, "github_client_id")
     sec = db.get(Setting, "github_client_secret")
     if not (cid and cid.value):
         raise HTTPException(503, "github_client_id не налаштовано")
     if not (sec and sec.value):
         raise HTTPException(503, "github_client_secret не налаштовано")
-    return cid.value, sec.value
+
+    secret_value = sec.value
+    if not is_encrypted(secret_value):
+        try:
+            sec.value = encrypt_setting(secret_value)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+    else:
+        secret_value = decrypt_setting(secret_value)
+
+    return cid.value, secret_value
 
 
 def _post_form(url: str, params: dict[str, str]) -> dict[str, Any]:

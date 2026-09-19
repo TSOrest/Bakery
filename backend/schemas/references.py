@@ -5,6 +5,15 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class NameCreate(BaseModel):
+    """Тіло створення для довідників з єдиним полем name (категорії,
+    одиниці виміру). Раніше ці ендпоінти приймали `name` як бар query-
+    параметр — FastAPI трактує таке як query, не JSON-тіло, тож форма
+    "Try it out" у Swagger не мала поля для нього (працювало лише тому,
+    що фронтенд явно збирав query-рядок вручну)."""
+    name: str
+
+
 # --- Units ---
 
 class UnitUpdate(BaseModel):

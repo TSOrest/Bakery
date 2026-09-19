@@ -29,6 +29,18 @@ router = APIRouter(prefix="/settings", tags=["Налаштування"])
 _ALWAYS_STRIP = {"github_client_secret", "github_oauth_token", "github_issues_token"}
 # Секрети, доступні лише адміну (SettingsTab префілить поле токена бота).
 _ADMIN_ONLY = {"telegram_bot_token"}
+# Значення шифруються (Fernet) перед записом у БД — на відміну від
+# github_oauth_token (шифрується явним викликом у auth_github.py в момент
+# отримання через OAuth Device Flow), ці ключі вводяться прямо через форму
+# налаштувань (загальні PUT-ендпоінти нижче), тож шифрування має бути тут.
+_ENCRYPTED_KEYS = {"github_client_secret"}
+
+
+def _maybe_encrypt(key: str, value: str) -> str:
+    if key not in _ENCRYPTED_KEYS or not value:
+        return value
+    from backend.services.crypto import encrypt_setting
+    return encrypt_setting(value)
 
 
 class SettingUpdate(BaseModel):
@@ -54,14 +66,15 @@ def get_settings(user: User = Depends(require_user), db: Session = Depends(get_d
 
 @router.put("/{key}")
 def update_setting(key: str, body: SettingUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+    value = _maybe_encrypt(key, body.value)
     row = db.get(Setting, key)
     if row:
-        row.value = body.value
+        row.value = value
         row.updated_at = datetime.now().isoformat()
         if body.description is not None:
             row.description = body.description
     else:
-        row = Setting(key=key, value=body.value, description=body.description or "", updated_at=datetime.now().isoformat())
+        row = Setting(key=key, value=value, description=body.description or "", updated_at=datetime.now().isoformat())
         db.add(row)
     safe_commit(db)
     return {"key": key, "value": body.value}
@@ -71,12 +84,13 @@ def update_setting(key: str, body: SettingUpdate, _: User = Depends(require_admi
 def update_many_settings(body: dict[str, str], _: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Оновлює кілька налаштувань одночасно."""
     for key, value in body.items():
+        stored_value = _maybe_encrypt(key, value)
         row = db.get(Setting, key)
         if row:
-            row.value = value
+            row.value = stored_value
             row.updated_at = datetime.now().isoformat()
         else:
-            db.add(Setting(key=key, value=value, updated_at=datetime.now().isoformat()))
+            db.add(Setting(key=key, value=stored_value, updated_at=datetime.now().isoformat()))
     safe_commit(db)
     return {"updated": len(body)}
 

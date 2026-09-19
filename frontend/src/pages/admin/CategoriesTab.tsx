@@ -51,7 +51,7 @@ export default function CategoriesTab({ categories, onReload }: { categories: Ca
     setSaving(true)
     setError(null)
     try {
-      await api.post('/categories', null, `name=${encodeURIComponent(name)}`)
+      await api.post('/categories', { name })
       setNewName('')
       onReload()
     } catch (err) {

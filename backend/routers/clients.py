@@ -79,10 +79,25 @@ def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_
     return c
 
 
-@router.delete("/{client_id}", status_code=204)
+@router.delete("/{client_id}")
 def deactivate_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+    """М'яке видалення — ставимо is_active=0.
+
+    Не блокує дію (на відміну від маршрутів) — лише інформаційне
+    попередження в відповіді, якщо у клієнта лишився ненульовий баланс
+    (борг/переплата).
+    """
+    from backend.services.finance import get_client_balance
+
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     c.is_active = 0
     safe_commit(db)
+
+    balance = get_client_balance(db, client_id)
+    warning = None
+    if abs(balance) > 0.005:
+        kind = "переплата" if balance > 0 else "борг"
+        warning = f"У клієнта лишився ненульовий баланс: {kind} {abs(balance):.2f} грн."
+    return {"deactivated": True, "warning": warning}

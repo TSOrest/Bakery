@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, safe_commit
-from backend.models.references import Ingredient, ProductIngredient, Product
+from backend.models.references import Ingredient, ProductIngredient, Product, Unit
 from backend.models.pricing import Price
 from backend.schemas.ingredients import (
     IngredientCreate, IngredientUpdate, IngredientOut,
@@ -29,6 +29,8 @@ def list_ingredients(db: Session = Depends(get_db), _=Depends(require_user)):
 
 @router.post("/ingredients/", response_model=IngredientOut, status_code=201)
 def create_ingredient(data: IngredientCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    if data.unit_id is not None and not db.get(Unit, data.unit_id):
+        raise HTTPException(status_code=404, detail="Одиницю виміру не знайдено")
     ing = Ingredient(**data.model_dump())
     db.add(ing)
     safe_commit(db)

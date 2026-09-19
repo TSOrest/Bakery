@@ -73,11 +73,12 @@ DEFAULT_SETTINGS = {
     "backup_time":           ("02:00",         "Час щоденного бекапу (HH:MM)"),
     "backup_keep_count":     ("7",             "Кількість локальних бекапів"),
     "backup_local_dir":      ("",              "Папка бекапів (порожньо = backups/ поряд з bakery.db)"),
-    "backup_cloud_1_label":  ("",              "Хмара 1: назва (напр. Google Drive)"),
+    # _label-варіанти (backup_cloud_N_label) видалені як мертвий код (QA-аудит,
+    # низька знахідка) — ніде не читаються; BackupTab.tsx показує назви
+    # провайдерів (Google Drive/OneDrive/Dropbox) захардкожено. _path — жива,
+    # робоча функція (backend/routers/backup.py, do_backup cloud_paths).
     "backup_cloud_1_path":   ("",              "Хмара 1: шлях до папки синхронізації"),
-    "backup_cloud_2_label":  ("",              "Хмара 2: назва"),
     "backup_cloud_2_path":   ("",              "Хмара 2: шлях до папки синхронізації"),
-    "backup_cloud_3_label":  ("",              "Хмара 3: назва"),
     "backup_cloud_3_path":   ("",              "Хмара 3: шлях до папки синхронізації"),
 }
 

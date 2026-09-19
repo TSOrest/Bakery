@@ -4,6 +4,7 @@ import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import type { Category, Product, Unit } from '../../types'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
+import { useToast } from '../../components/Toast'
 
 interface ProductFormState {
   name: string
@@ -26,6 +27,7 @@ export default function ProductsTab({
   categories: Category[]
   onReload: () => void
 }) {
+  const toast = useToast()
   const [modal, setModal]         = useState(false)
   const [editing, setEditing]     = useState<Product | null>(null)
   const [form, setForm]           = useState<ProductFormState>(emptyProduct())
@@ -87,7 +89,8 @@ export default function ProductsTab({
 
   const handleDeactivate = async (p: Product) => {
     if (!confirm(`Деактивувати виріб "${p.name}"?`)) return
-    await api.delete(`/products/${p.id}`)
+    const res = await api.delete<{ warning?: string | null }>(`/products/${p.id}`)
+    if (res?.warning) toast.error(res.warning)
     onReload()
   }
 

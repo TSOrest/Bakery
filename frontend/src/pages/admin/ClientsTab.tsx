@@ -103,7 +103,8 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
 
   const handleDeactivate = async (c: Client) => {
     if (!confirm(`Деактивувати клієнта "${c.full_name}"?`)) return
-    await api.delete(`/clients/${c.id}`)
+    const res = await api.delete<{ warning?: string | null }>(`/clients/${c.id}`)
+    if (res?.warning) toast.error(res.warning)
     load()
   }
 

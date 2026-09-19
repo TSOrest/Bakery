@@ -179,7 +179,7 @@ const COLUMN_HINTS: Record<string, Record<string, string>> = {
   },
   finance_articles: {
     direction:  "'income' = надходження, 'expense' = витрата.",
-    is_system:  '1 = системна стаття (не можна видалити, можна лише перейменувати).',
+    is_system:  '1 = системна стаття — не можна видалити ні перейменувати (лише тип/editable).',
   },
   settings: {
     key:         'Унікальний ідентифікатор налаштування.',
@@ -194,22 +194,14 @@ const COLUMN_HINTS: Record<string, Record<string, string>> = {
     phone:         'Телефон з якого була авторизація (отримується від Telegram).',
   },
   users: {
-    role:          "Роль: 'operator', 'accountant', 'admin', 'owner'.",
-    password_hash: 'SHA-256 хеш пароля (salt + password).',
-    salt:          'Рандомна сіль для хешування пароля.',
+    role:          "Роль: 'operator', 'accountant', 'admin', 'owner', 'seller'.",
+    password_hash: 'bcrypt-хеш пароля (cost=12; старі записи — legacy SHA-256, оновлюються при вході).',
+    salt:          'Сіль для legacy SHA-256-хешу (bcrypt має сіль вбудовану в сам хеш).',
     role_label:    'Відображувана назва ролі в інтерфейсі.',
   },
-  auth_sessions: {
-    token:      'Bearer-токен сесії — передається в Authorization заголовку.',
-    expires_at: 'TTL токена. Після цього часу токен більше не прийматиметься.',
-  },
-  cancellation_lines: {
-    disposition:          "'to_shop' (в магазин), 'to_next_day' (перенести), 'writeoff' (списати).",
-    next_day_price_override: 'Знижена ціна при перенесенні товару на наступний день.',
-  },
-  route_cancellations: {
-    cancel_date:  'Дата скасованого рейсу.',
-    cancelled_by: 'Логін оператора що скасував рейс.',
+  user_sessions: {
+    token:        'Bearer-токен сесії — передається в Authorization заголовку.',
+    last_used_at: 'Час останнього запиту з цим токеном. Сесія протухає через 30 днів без активності.',
   },
   other_products: {
     purchase_price: 'Закупівельна ціна — собівартість.',

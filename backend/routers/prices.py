@@ -142,6 +142,8 @@ def list_prices(
 
 @router.post("/", response_model=PriceOut, status_code=201)
 def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    if not db.get(Product, data.product_id):
+        raise HTTPException(status_code=404, detail="Виріб не знайдено")
     # Якщо нова ціна безстрокова — закриваємо попередні відкриті ціни того ж продукту
     if data.valid_to is None:
         prev_day = (date.fromisoformat(data.valid_from) - timedelta(days=1)).isoformat()
@@ -440,6 +442,10 @@ def list_overrides(
 
 @router.post("/overrides", response_model=ClientPriceOverrideOut, status_code=201)
 def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+    if not db.get(Client, data.client_id):
+        raise HTTPException(status_code=404, detail="Клієнта не знайдено")
+    if not db.get(Product, data.product_id):
+        raise HTTPException(status_code=404, detail="Виріб не знайдено")
     o = ClientPriceOverride(**data.model_dump())
     db.add(o)
     try:
