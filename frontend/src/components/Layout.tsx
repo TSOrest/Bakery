@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { api } from '../api/client'
 import styles from './Layout.module.css'
 import IssuesWidget from './IssuesWidget'
+import NotificationBell from './NotificationBell'
 
 function localDateISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -178,6 +179,7 @@ export default function Layout() {
           <span className={styles.logo} ref={logoRef}>🍞 {bakeryName}</span>
           {!navWraps && <nav className={styles.nav}>{tabsContent}</nav>}
           <div className={styles.headerRight} ref={rightRef}>
+            <NotificationBell />
             <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
             <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
               <span>Дата роботи:</span>

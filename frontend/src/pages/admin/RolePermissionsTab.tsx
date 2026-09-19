@@ -17,6 +17,11 @@ const MAIN_PAGE_PERMS = [
 const ADMIN_SUB_PERMS = ADMIN_TAB_GROUPS
   .map(g => ({ key: g.permKey as string, label: g.label }))
 
+// Точкові дозволи, не пов'язані з жодною вкладкою (Система сповіщень)
+const EXTRA_PERMS = [
+  { key: 'can_install_update', label: 'Встановлення оновлень' },
+]
+
 const ALL_ROLES = ['operator', 'accountant', 'admin', 'owner', 'seller'] as const
 const ROLE_LABELS_MAP: Record<string, string> = {
   operator:   'Оператор',
@@ -98,6 +103,7 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
               <th style={{ ...thGroupStyle, textAlign: 'left', background: '#e8eef5' }} rowSpan={2}>Роль</th>
               <th style={{ ...thGroupStyle }} colSpan={MAIN_PAGE_PERMS.length}>Основні розділи</th>
               <th style={{ ...thGroupStyle, borderLeft: '2px solid #c8d6e5' }} colSpan={ADMIN_SUB_PERMS.length}>Довідники</th>
+              <th style={{ ...thGroupStyle, borderLeft: '2px solid #c8d6e5' }} colSpan={EXTRA_PERMS.length}>Додатково</th>
             </tr>
             {/* Рядок конкретних колонок */}
             <tr>
@@ -105,6 +111,11 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
                 <th key={t.key} style={thStyle}>{t.label}</th>
               ))}
               {ADMIN_SUB_PERMS.map((t, i) => (
+                <th key={t.key} style={{ ...thStyle, ...(i === 0 ? { borderLeft: '2px solid #c8d6e5' } : {}) }}>
+                  {t.label}
+                </th>
+              ))}
+              {EXTRA_PERMS.map((t, i) => (
                 <th key={t.key} style={{ ...thStyle, ...(i === 0 ? { borderLeft: '2px solid #c8d6e5' } : {}) }}>
                   {t.label}
                 </th>
@@ -135,6 +146,20 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
                     </td>
                   ))}
                   {ADMIN_SUB_PERMS.map((t, i) => (
+                    <td key={t.key} style={i === 0 ? tdSepStyle : tdStyle}>
+                      {isAdmin ? (
+                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={perms[role]?.has(t.key) ?? false}
+                          onChange={() => toggle(role, t.key)}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      )}
+                    </td>
+                  ))}
+                  {EXTRA_PERMS.map((t, i) => (
                     <td key={t.key} style={i === 0 ? tdSepStyle : tdStyle}>
                       {isAdmin ? (
                         <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>

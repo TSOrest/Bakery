@@ -14,6 +14,7 @@ from backend.models.finances import Finance, FinanceArticle
 from backend.models.settings import Setting
 from backend.models.auth import User, UserSession
 from backend.models.audit import AuditLog
+from backend.models.notifications import Notification
 
 __all__ = [
     "Unit", "Category", "Product", "Ingredient", "ProductIngredient",
@@ -28,4 +29,5 @@ __all__ = [
     "Setting",
     "User", "UserSession",
     "AuditLog",
+    "Notification",
 ]

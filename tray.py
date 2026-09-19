@@ -14,7 +14,9 @@ import webbrowser
 import traceback
 import json
 import ctypes
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from urllib.request import urlopen
 
 # Bootstrap crash log before other imports, so any failure is visible
@@ -116,11 +118,12 @@ INTERNET_INTERVAL = 30    # internet connectivity check, seconds
 UPDATE_INTERVAL   = 3600  # update check, seconds
 BACKUP_INTERVAL   = 60    # scheduled backup check, seconds
 
-# Файли-прапори демо-режиму та відновлення бекапу
+# Файли-прапори демо-режиму, відновлення бекапу та встановлення оновлення
 DEMO_ACTIVE          = DATA_DIR / "DEMO_ACTIVE"
 DEMO_ENTER_REQUESTED = DATA_DIR / "DEMO_ENTER_REQUESTED"
 DEMO_EXIT_REQUESTED  = DATA_DIR / "DEMO_EXIT_REQUESTED"
 RESTORE_REQUESTED    = DATA_DIR / "RESTORE_REQUESTED"
+UPDATE_REQUESTED     = DATA_DIR / "UPDATE_REQUESTED"
 
 # ── Icon drawing ───────────────────────────────────────────────────────────────
 
@@ -277,6 +280,33 @@ def _read_setting(key: str) -> str:
         return row[0] if row and row[0] else ""
     except Exception:
         return ""
+
+
+def _create_notification(ntype: str, title: str, body: str = "", meta: Optional[dict] = None) -> None:
+    """Записує сповіщення (дзвоник у Layout.tsx) напряму в bakery.db.
+
+    НЕ через HTTP: сервер слухає 0.0.0.0 (мережа пекарні), тож незахищений
+    POST-ендпоінт був би доступний будь-якому пристрою в мережі — цей
+    прямий доступ до SQLite має той самий рівень довіри, що вже є для
+    читання налаштувань (_read_setting) вище. Некритично: помилка тут не
+    повинна ламати виклик (перевірка оновлень/бекап важливіші за сам факт
+    сповіщення).
+    """
+    try:
+        con = sqlite3.connect(str(DB_FILE), timeout=5)
+        con.execute("PRAGMA busy_timeout=5000")
+        con.execute(
+            "INSERT INTO notifications (type, title, body, meta, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                ntype, title, body or None,
+                json.dumps(meta, ensure_ascii=False) if meta else None,
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        pass
 
 
 def _backup_dir_path() -> Path:
@@ -621,10 +651,22 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
     _refresh(icon)
 
     if _latest_version:
+        notes = _fetch_release_notes(latest)
+        if _notified_version != latest:
+            # Новий сповіщенням-дзвоник (Layout.tsx) раз на версію — окремо
+            # від balloon нижче, який лишається лише для фонової перевірки.
+            _notified_version = latest
+            _create_notification(
+                "new_version", f"Доступна нова версія {latest}",
+                notes, {"version": latest, "changelog": notes},
+            )
+            if not show_if_none:
+                _notify(icon, "Bakery — оновлення",
+                        f"Доступна нова версія {latest}. Відкрийте меню треї.")
+
         if show_if_none:
             # Ручна перевірка з меню → одразу пропонуємо встановити (Так/Ні),
             # без окремого кроку "відкрийте меню треї".
-            notes = _fetch_release_notes(latest)
             notes_block = f"\n\nЩо нового:\n{notes}" if notes else ""
             if _confirm(
                 "Bakery — оновлення",
@@ -634,11 +676,6 @@ def _do_check_update(icon, show_if_none: bool = False) -> None:
                 f"резервна копія бази даних збережеться автоматично.",
             ):
                 _run_install(icon, current, latest)
-        elif _notified_version != latest:
-            # Фонова перевірка — лише balloon, без діалогу
-            _notified_version = latest
-            _notify(icon, "Bakery — оновлення",
-                    f"Доступна нова версія {latest}. Відкрийте меню треї.")
     elif show_if_none:
         if latest:
             _msgbox("Bakery — оновлення", f"Встановлена остання версія: {current}", 0)
@@ -1021,6 +1058,22 @@ def _poll_flags(icon) -> None:
                     ).start()
                 except Exception:
                     RESTORE_REQUESTED.unlink(missing_ok=True)
+
+            elif UPDATE_REQUESTED.exists():
+                # Записаний POST /settings/request-update (дзвоник сповіщень,
+                # кнопка "Встановити оновлення") — уже підтверджено в
+                # застосунку і, за потреби, вже витримало 60-секундну
+                # затримку-попередження там; тут без діалогу, як action_install_update.
+                try:
+                    req = json.loads(UPDATE_REQUESTED.read_text(encoding="utf-8"))
+                    UPDATE_REQUESTED.unlink(missing_ok=True)
+                    target = req.get("version") or _latest_version or _fetch_latest_tag()
+                    if target:
+                        threading.Thread(
+                            target=_run_install, args=(icon, _read_version(), target), daemon=True,
+                        ).start()
+                except Exception:
+                    UPDATE_REQUESTED.unlink(missing_ok=True)
         except Exception:
             pass
         time.sleep(2)
@@ -1056,6 +1109,8 @@ def _poll_backup(icon) -> None:
                                 except Exception:
                                     pass
                             _notify(icon, "Bakery — бекап", f"Автобекап виконано ✓  {today}")
+                            _create_notification("backup_done", "Автобекап виконано",
+                                                  f"Резервна копія бази створена {today}.", {"date": today})
                     except Exception as e:
                         _notify(icon, "Bakery — бекап", f"Помилка автобекапу: {e}")
 

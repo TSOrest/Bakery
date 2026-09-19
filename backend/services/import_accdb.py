@@ -1631,6 +1631,17 @@ def run_import(accdb_path: str, mapping: ImportMapping) -> None:
                 entities=entities,
                 validation=validation,
             )
+            try:
+                from backend.models.notifications import create_notification
+                create_notification(
+                    db, "import_done", "База імпортована з Access",
+                    f"Імпорт завершено ({datetime.now().strftime('%Y-%m-%d %H:%M')}).",
+                )
+                db.commit()
+            except Exception:
+                # Не критично — не має ламати вже успішно завершений імпорт.
+                db.rollback()
+
             _update_state(running=False, step="Завершено", progress=100,
                           result=report.model_dump())
 

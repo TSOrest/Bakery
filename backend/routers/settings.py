@@ -2,22 +2,38 @@
 
 import json
 import logging
-from datetime import datetime
+import os
+import threading
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import get_db, safe_commit
-from backend.models.auth import User
+from backend.models.auth import User, UserSession
+from backend.models.notifications import create_notification
 from backend.models.settings import Setting
-from backend.routers.auth import require_user, require_admin
+from backend.routers.auth import require_user, require_admin, require_install_update_perm
+from backend.schemas.notifications import RequestUpdateIn
 from backend.services import telegram_bot as tg
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["Налаштування"])
+
+# Прапор для tray.py (те саме "flag-файл" мовлення, що RESTORE_REQUESTED/
+# DEMO_*_REQUESTED, backend/routers/backup.py) — записується ЛИШЕ після
+# перевірки дозволу і активних сесій нижче, tray.py's _poll_flags() виконує
+# фактичне встановлення (той самий шлях, що ручна кнопка в меню треї).
+_ROOT_DIR         = Path(__file__).parent.parent.parent
+_SETTINGS_DATA_DIR = Path(os.environ.get("BAKERY_DATA_DIR", _ROOT_DIR))
+UPDATE_REQUESTED  = _SETTINGS_DATA_DIR / "UPDATE_REQUESTED"
+
+# Активною вважається сесія з last_used_at у межах цього вікна.
+_ACTIVE_SESSION_WINDOW_MIN = 10
 
 # Секрети, які ніколи не віддаються у браузер (їх читає лише backend).
 # ⚠ github_issues_token (виправлено): не було в цьому списку — GET /settings/
@@ -129,6 +145,52 @@ def telegram_authorized(_: User = Depends(require_user), db: Session = Depends(g
     except Exception as exc:
         log.warning("Invalid telegram_authorized_chats JSON: %s", exc)
     return {"chats": [{"chat_id": k, "phone": v} for k, v in chats.items()]}
+
+
+# ── Встановлення оновлення (з дзвоника сповіщень) ───────────────────────────────
+
+@router.post("/request-update")
+def request_update(
+    body: RequestUpdateIn,
+    authorization: Optional[str] = Header(default=None),
+    user: User = Depends(require_install_update_perm),
+    db: Session = Depends(get_db),
+):
+    """Запускає встановлення версії, обраної в сповіщенні "Нова версія".
+
+    Якщо є ІНШІ активні сесії (last_used_at у межах останніх 10 хв, не
+    рахуючи сесію ініціатора) — розсилає попередження і чекає 60 сек
+    перед стартом (щоб встигли завершити зміни); інакше стартує одразу.
+    Фактичне встановлення виконує tray.py (окремий процес) через прапор
+    UPDATE_REQUESTED — той самий міст, що вже є для відновлення бекапу.
+    """
+    my_token = (authorization or "").removeprefix("Bearer ").strip()
+    cutoff = (datetime.now() - timedelta(minutes=_ACTIVE_SESSION_WINDOW_MIN)).isoformat()
+    other_sessions = (
+        db.query(UserSession)
+        .filter(UserSession.token != my_token, UserSession.last_used_at >= cutoff)
+        .count()
+    )
+
+    def _write_flag() -> None:
+        UPDATE_REQUESTED.write_text(
+            json.dumps({"version": body.version, "requested_by": user.username}),
+            encoding="utf-8",
+        )
+
+    if other_sessions > 0:
+        create_notification(
+            db, "update_warning",
+            "Оновлення розпочнеться через 1 хвилину",
+            f"Версія {body.version}. Збережіть незбережені зміни — сервер тимчасово зупиниться.",
+            {"version": body.version},
+        )
+        safe_commit(db)
+        threading.Timer(60.0, _write_flag).start()
+        return {"status": "scheduled", "delayed": True, "other_sessions": other_sessions}
+
+    _write_flag()
+    return {"status": "scheduled", "delayed": False, "other_sessions": 0}
 
 
 # ── Скидання бази даних ───────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ from backend.models.orders import Order
 from backend.models.baking import BakingTask
 from backend.models.invoices import Invoice
 from backend.models.references import Client, Product, ClientBotUser
+from backend.models.notifications import create_notification
 from backend.services.finance import get_all_balances, get_client_balance, get_summary
 from backend.services.prices import get_price, get_price_with_source
 
@@ -820,6 +821,7 @@ def _save_order_item(token: str, chat_id: int, qty: float) -> None:
             Order.placed_by_chat_id == str(chat_id),
         ).first()
 
+        is_new = existing is None
         if existing:
             existing.qty = qty
             existing.created_at = now
@@ -834,6 +836,13 @@ def _save_order_item(token: str, chat_id: int, qty: float) -> None:
                 placed_by_chat_id=str(chat_id),
                 created_at=now,
             ))
+        if is_new:
+            client = db.get(Client, client_id)
+            client_name = client.short_name or client.full_name if client else "?"
+            create_notification(
+                db, "bot_order", "Нове замовлення через бота",
+                f"{client_name}: {product_name} × {qty:.0f} шт на {order_date}.",
+            )
         db.commit()
 
     _send(token, chat_id,
