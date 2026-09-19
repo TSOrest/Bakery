@@ -27,6 +27,7 @@ export default function Layout() {
   const [bakeryName,       setBakeryName]       = useState('Пекарня')
   const [effectiveDate,    setEffectiveDate]    = useState(() => computeEffectiveDate('18:00'))
   const [shopPriceAlert,   setShopPriceAlert]   = useState(false)
+  const [demoActive,       setDemoActive]       = useState(false)
 
   // Для періодичної перевірки переходу дати (нижче) без перестворення
   // таймера при кожній зміні стану.
@@ -48,6 +49,15 @@ export default function Layout() {
       })
       .catch(() => {})
   }, []) // eslint-disable-line
+
+  // Демо-режим раніше показувався лише на LoginPage (до входу) — після
+  // входу в жодному місці Layout не було індикатора, тож персонал,
+  // працюючи з демо-копією бази, не бачив цього на жодній сторінці.
+  useEffect(() => {
+    api.get<{ active: boolean }>('/backup/demo/status')
+      .then(d => setDemoActive(!!d.active))
+      .catch(() => {})
+  }, [])
 
   // Дата роботи мала переходити на завтра сама, коли настає час переходу
   // (work_date_next_day_time) — але раніше це рахувалось ЛИШЕ один раз при
@@ -198,6 +208,17 @@ export default function Layout() {
         </div>
         {navWraps && <nav className={`${styles.nav} ${styles.navWrapped}`}>{tabsContent}</nav>}
       </header>
+
+      {demoActive && (
+        <div
+          style={{
+            background: '#fff3cd', color: '#856404', borderBottom: '1px solid #ffe69c',
+            padding: '6px 16px', fontSize: '0.85rem', fontWeight: 600, textAlign: 'center',
+          }}
+        >
+          ⚠ ДЕМО-РЕЖИМ — це не жива продакшн-база, зміни тут не впливають на реальні дані
+        </div>
+      )}
 
       <main className={styles.main}>
         <Outlet />
