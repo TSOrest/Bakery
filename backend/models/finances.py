@@ -25,6 +25,7 @@ class Finance(Base):
     client_id    = Column(Integer, ForeignKey("clients.id"))
     finance_type = Column(Text, nullable=False)   # залишається для сумісності
     article_id   = Column(Integer, ForeignKey("finance_articles.id"))
+    invoice_id   = Column(Integer, ForeignKey("invoices.id"))  # NULL для старих/не-накладних записів
     amount       = Column(Float, nullable=False)
     sign         = Column(Integer, nullable=False)  # +1 або -1
     notes        = Column(Text)

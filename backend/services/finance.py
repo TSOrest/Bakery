@@ -202,19 +202,30 @@ def create_payment_finance_entry(db: Session, invoice: Invoice, amount: float) -
 def _find_invoice_finance_entry(db: Session, invoice: Invoice):
     """Знаходить існуючий борговий запис цієї накладної.
 
-    Основний пошук — за notes == invoice_number (працює для записів,
-    створених самим застосунком). Для 99.7% імпортованих зі старої бази
-    накладних notes містить вільний текст замість номера — без цього
-    fallback-у recompute_invoice_finance() не знаходила б існуючий запис
-    при корекції такої накладної і мовчки створювала б ДРУГИЙ, дублюючи
-    борг клієнта. Fallback: (client_id, finance_date) — та сама пара, за
-    якою й сам імпорт групував замовлення в накладні, тож застосовується
-    ЛИШЕ коли для цієї пари існує рівно одна накладна (уникаємо ризику
-    зачепити чужий запис, якщо клієнт мав кілька накладних тієї ж дати).
-    Міграція 045 backfill-ить notes для однозначних випадків — цей
-    fallback лишається додатковим захистом від дублювання для решти
-    (напр. якщо backfill з якоїсь причини не охопив рядок).
+    Пріоритет 1 — invoice_id (справжній FK, міграція 047): надійний і
+    однозначний для всіх записів, створених після цієї міграції (і для
+    історичних, які встигли backfill-итись). Пріоритет 2 — notes ==
+    invoice_number (працює для старіших записів без invoice_id, створених
+    самим застосунком). Для 99.7% імпортованих зі старої бази накладних
+    notes містить вільний текст замість номера — без наступного fallback-у
+    recompute_invoice_finance() не знаходила б існуючий запис при корекції
+    такої накладної і мовчки створювала б ДРУГИЙ, дублюючи борг клієнта.
+    Fallback 3: (client_id, finance_date) — та сама пара, за якою й сам
+    імпорт групував замовлення в накладні, тож застосовується ЛИШЕ коли
+    для цієї пари існує рівно одна накладна (уникаємо ризику зачепити
+    чужий запис, якщо клієнт мав кілька накладних тієї ж дати). Міграції
+    045/047 backfill-ять notes/invoice_id для однозначних випадків — ці
+    fallback-и лишаються додатковим захистом для решти.
     """
+    if invoice.id is not None:
+        existing = (
+            db.query(Finance)
+            .filter(Finance.invoice_id == invoice.id, Finance.finance_type == "invoice")
+            .first()
+        )
+        if existing:
+            return existing
+
     existing = (
         db.query(Finance)
         .filter(
@@ -283,6 +294,7 @@ def create_invoice_finance_entry(db: Session, invoice: Invoice) -> None:
         client_id    = invoice.client_id,
         finance_type = "invoice",
         article_id   = article.id if article else None,
+        invoice_id   = invoice.id,
         amount       = round(invoice.total_sum, 2),
         sign         = -1,
         notes        = invoice.invoice_number,
@@ -317,5 +329,7 @@ def recompute_invoice_finance(db: Session, invoice: Invoice) -> None:
 
     if existing:
         existing.amount = round(invoice.total_sum, 2)
+        if existing.invoice_id is None:
+            existing.invoice_id = invoice.id  # самозагоєння: знайдено через fallback — закріпити FK
     else:
         create_invoice_finance_entry(db, invoice)
