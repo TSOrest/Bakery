@@ -165,7 +165,78 @@ def _seed_initial_data() -> None:
             )
 
 
+def _migrate_role_permissions_granular() -> None:
+    """Одноразова (ідемпотентна) міграція `role_permissions` на гранульовані
+    права (Гранульовані права ролей). Два незалежні випадки:
+
+    1. Старі "групові" прапорці (`admin_goods`, `admin_clients`,
+       `admin_prices`, `admin_org`, `admin_system`) контролювали ЛИШЕ
+       видимість вкладки — усі мутації в цих розділах були жорстко
+       прив'язані до `require_admin` незалежно від `role_permissions`.
+       Заміна старого прапорця на `"<група>.view"` (а НЕ на всі 4
+       CRUD-дії) нічого не змінює по факту: create/edit/delete для
+       non-admin ролей ніколи не працювали раніше — лише знімає
+       оманливий вигляд "нібито дозволено" в матриці.
+    2. Фінанси (`create_finance`/`update_finance`/`delete_finance`) —
+       навпаки, завжди перевіряли лише `require_user`: БУДЬ-ЯКА роль з
+       видимістю сторінки Фінанси (буквальний ключ `"finances"`, або
+       `"reports"`/`"dashboard"` — та сама OR-логіка видимості, що в
+       `Layout.tsx`) могла реально мутувати. Щоб оновлення НІЧОГО не
+       зламало в перший день, міграція зберігає статус-кво: усі три
+       джерела видимості отримують `finances.create/edit/delete=true`
+       (підтверджено користувачем — включно з роллю `owner`, яка
+       зберігає можливість редагувати фінанси одразу після оновлення;
+       адміністратор звужує вручну через нову матрицю, коли буде готовий).
+
+    Ідемпотентно: другий запуск нічого не робить, бо старих плоских
+    прапорців (пункт 1) вже нема, а фінансові ключі (пункт 2) вже
+    виставлені.
+    """
+    import json
+    from sqlalchemy.orm import Session as OrmSession
+    from backend.models.settings import Setting
+
+    GROUP_KEYS = ("admin_goods", "admin_clients", "admin_prices", "admin_org", "admin_system")
+    FINANCE_VISIBILITY_KEYS = {"finances", "reports", "dashboard"}
+
+    with OrmSession(engine) as db:
+        row = db.get(Setting, "role_permissions")
+        if not row or not row.value:
+            return
+        try:
+            perms: dict = json.loads(row.value)
+        except (ValueError, TypeError):
+            return
+
+        changed = False
+        for role, keys in perms.items():
+            if not isinstance(keys, list):
+                continue
+            keys_set = set(keys)
+            new_keys = set(keys)
+
+            for group in GROUP_KEYS:
+                if group in keys_set:
+                    new_keys.discard(group)
+                    new_keys.add(f"{group}.view")
+                    changed = True
+
+            if keys_set & FINANCE_VISIBILITY_KEYS:
+                for action in ("create", "edit", "delete"):
+                    fin_key = f"finances.{action}"
+                    if fin_key not in new_keys:
+                        new_keys.add(fin_key)
+                        changed = True
+
+            perms[role] = sorted(new_keys)
+
+        if changed:
+            row.value = json.dumps(perms, ensure_ascii=False)
+            db.commit()
+
+
 _seed_initial_data()
+_migrate_role_permissions_granular()
 
 # Запускаємо Telegram-бота якщо токен задано в налаштуваннях
 from backend.services.telegram_bot import init_bot_from_settings

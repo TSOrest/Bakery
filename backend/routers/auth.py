@@ -185,42 +185,39 @@ def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
-def require_system_perm(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-) -> User:
-    """Дозволяє доступ адміну або будь-якій ролі з дозволом admin_system."""
-    if user.role == "admin":
-        return user
-    setting = db.get(Setting, "role_permissions")
-    if setting and setting.value:
-        try:
-            perms: dict = json.loads(setting.value)
-            if "admin_system" in perms.get(user.role, []):
-                return user
-        except (ValueError, TypeError):
-            pass
-    raise HTTPException(status_code=403, detail="Потрібні права адміністратора або дозвіл admin_system")
+def require_perm(key: str):
+    """Фабрика dependency: дозволяє доступ адміну або будь-якій ролі, що
+    має рядок `key` у своєму списку `role_permissions` (JSON-налаштування,
+    редактор — RolePermissionsTab.tsx). `key` може бути як плоским
+    (`"can_install_update"`), так і CRUD-ключем групи (`"admin_clients.edit"`)
+    — сама перевірка не розрізняє формат, лише звіряє рядок буквально.
+
+    Консолідує патерн, що раніше був продубльований окремо для
+    `require_system_perm`/`require_install_update_perm` (обидва тепер —
+    тонкі аліаси цієї фабрики, нижче) — Гранульовані права ролей
+    розширюють той самий підхід на весь адмінський CRUD-поверхню.
+    """
+    def _dependency(
+        user: User = Depends(require_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        if user.role == "admin":
+            return user
+        setting = db.get(Setting, "role_permissions")
+        if setting and setting.value:
+            try:
+                perms: dict = json.loads(setting.value)
+                if key in perms.get(user.role, []):
+                    return user
+            except (ValueError, TypeError):
+                pass
+        raise HTTPException(status_code=403, detail=f"Потрібен дозвіл: {key}")
+    return _dependency
 
 
-def require_install_update_perm(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-) -> User:
-    """Дозволяє встановлення оновлень адміну або будь-якій ролі з дозволом
-    can_install_update (та сама модель, що admin_system вище — новий
-    чекбокс у RolePermissionsTab.tsx, не пов'язаний з жодною вкладкою)."""
-    if user.role == "admin":
-        return user
-    setting = db.get(Setting, "role_permissions")
-    if setting and setting.value:
-        try:
-            perms: dict = json.loads(setting.value)
-            if "can_install_update" in perms.get(user.role, []):
-                return user
-        except (ValueError, TypeError):
-            pass
-    raise HTTPException(status_code=403, detail="Потрібен дозвіл на встановлення оновлень")
+# Аліаси на вже усталені виклики (не змінюємо call sites у settings.py/auth.py).
+require_system_perm        = require_perm("admin_system.view")
+require_install_update_perm = require_perm("can_install_update")
 
 
 # ─── Схеми ───────────────────────────────────────────────────────────────────
