@@ -176,7 +176,7 @@ def _bot_qr_html(cfg: dict) -> str:
         return ""
     return f'''
   <div class="bot-qr">
-    <img src="{uri}" width="56" height="56" alt="QR">
+    <img src="{uri}" width="52" height="52" alt="QR">
     <div>Замовляйте<br>через бот</div>
   </div>'''
 
@@ -322,12 +322,15 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
   </div>
   <div class="inv-title">Накладна №&nbsp;<span class="inv-num">{inv.invoice_number}</span></div>
 
-  <table class="meta-tbl">
-    <tr><td class="ml">Від кого:</td><td class="mv"><b>{bakery_name}</b></td></tr>
-    <tr><td class="ml">Кому:</td>    <td class="mv"><b>{client_name}</b></td></tr>
-    <tr><td class="ml">Через:</td>   <td class="mv">{client_addr}</td></tr>
-    <tr><td class="ml">Довіреність №:</td><td class="mv">____________&nbsp; від &nbsp;____________</td></tr>
-  </table>
+  <div class="meta-row">
+    <table class="meta-tbl">
+      <tr><td class="ml">Від кого:</td><td class="mv"><b>{bakery_name}</b></td></tr>
+      <tr><td class="ml">Кому:</td>    <td class="mv"><b>{client_name}</b></td></tr>
+      <tr><td class="ml">Через:</td>   <td class="mv">{client_addr}</td></tr>
+      <tr><td class="ml">Довіреність №:</td><td class="mv">____________&nbsp; від &nbsp;____________</td></tr>
+    </table>
+    {_bot_qr_html(cfg)}
+  </div>
 
   <table class="lines-tbl">
     <thead>
@@ -358,7 +361,6 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     <div>Прийняв:&nbsp;________________</div>
     <div>Відпускає:&nbsp;<i>Диспетчер</i></div>
   </div>
-  {_bot_qr_html(cfg)}
 </div>"""
 
 
@@ -398,7 +400,9 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
 .inv-num { border-bottom: 1px solid #000; min-width: 30mm; display: inline-block; }
 
 /* ── Мета-поля ── */
-.meta-tbl { width: 100%; border: none; margin-bottom: 1.5mm; }
+.meta-row { display: flex; align-items: flex-start; gap: 3mm; margin-bottom: 1.5mm; }
+.meta-tbl { width: 100%; border: none; }
+.meta-row .meta-tbl { flex: 1; margin-bottom: 0; }
 .meta-tbl td { border: none; padding: 0.5mm 0; font-size: 9.5pt; }
 .ml { width: 28mm; color: #333; white-space: nowrap; }
 .mv { border-bottom: 1px solid #000; }
@@ -439,8 +443,9 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
   border-top: 1px solid #bbb; padding-top: 1mm;
 }
 .bot-qr {
-  display: flex; align-items: center; gap: 2mm;
-  margin-top: 1.5mm; font-size: 7pt; color: #555;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.5mm; font-size: 6.5pt; color: #555; text-align: center;
+  flex-shrink: 0; width: 18mm; line-height: 1.15;
 }
 
 /* ── Бейкінг ── */
@@ -613,7 +618,28 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     story.append(HRFlowable(width=W, thickness=1.5, color=colors.black))
     story.append(Spacer(1, 1.5*mm))
 
+    # ── QR бота (якщо увімкнено) — рендериться першим, щоб знати скільки
+    #    ширини лишається для мета-таблиці поруч (той самий рядок, справа) ──
+    bot_username = _bot_qr_enabled_username(cfg)
+    qr_cell = None
+    QR_COL_W = 17 * mm
+    if bot_username:
+        try:
+            qr_img = Image(BytesIO(_bot_qr_png_bytes(bot_username)), width=13 * mm, height=13 * mm)
+            qr_cell = Table(
+                [[qr_img], [S("Замовляйте<br/>через бот", size=6.5, align=TA_CENTER, color=colors.HexColor("#555555"))]],
+                colWidths=[QR_COL_W],
+            )
+            qr_cell.setStyle(TableStyle([
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 0.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]))
+        except Exception:
+            qr_cell = None
+
     # ── Мета ─────────────────────────────────────────────────────────────────
+    meta_w = W - QR_COL_W - 2 * mm if qr_cell else W
     meta_data = [
         [S("Від кого:", size=FS, color=LBL), S(f"<b>{bakery_name}</b>", font=FONT_BOLD, size=FS)],
         [S("Кому:",     size=FS, color=LBL), S(f"<b>{c_name}</b>",      font=FONT_BOLD, size=FS)],
@@ -621,7 +647,7 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
         [S("Дов. №:",   size=FS, color=LBL), S("__________  від  __________", size=FS)],
     ]
     # Права колонка = тільки скільки потрібно тексту (решта ширина сторінки)
-    meta_tbl = Table(meta_data, colWidths=[20*mm, W - 20*mm])
+    meta_tbl = Table(meta_data, colWidths=[20*mm, meta_w - 20*mm])
     meta_tbl.setStyle(TableStyle([
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8),
         ("TOPPADDING",    (0, 0), (-1, -1), 0.8),
@@ -632,7 +658,17 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
         ("INNERGRID", (0, 0), (-1, -1), 0, colors.white),    # без вертикальних ліній
         ("BOX",       (0, 0), (-1, -1), 0, colors.white),    # без рамки
     ]))
-    story.append(meta_tbl)
+
+    if qr_cell:
+        meta_row = Table([[meta_tbl, qr_cell]], colWidths=[meta_w, QR_COL_W])
+        meta_row.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(meta_row)
+    else:
+        story.append(meta_tbl)
     story.append(Spacer(1, 1.5*mm))
 
     # ── Таблиця товарів ───────────────────────────────────────────────────────
@@ -817,18 +853,6 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     ]], colWidths=[W * 0.5, W * 0.5])
     sigs2.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1)]))
     story.append(sigs2)
-
-    bot_username = _bot_qr_enabled_username(cfg)
-    if bot_username:
-        try:
-            qr_img = Image(BytesIO(_bot_qr_png_bytes(bot_username)), width=14*mm, height=14*mm)
-            qr_row = Table([[qr_img, S("Замовляйте<br/>через бот", size=FS, color=colors.HexColor("#555555"))]],
-                            colWidths=[16*mm, W - 16*mm])
-            qr_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
-            story.append(Spacer(1, 1*mm))
-            story.append(qr_row)
-        except Exception:
-            pass
 
     doc.build(story)
     return buf.getvalue()
