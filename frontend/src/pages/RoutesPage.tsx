@@ -701,6 +701,11 @@ export default function RoutesPage() {
   const [sendingDrafts,    setSendingDrafts]    = useState(false)
   const [paymentAmounts,   setPaymentAmounts]   = useState<Record<number, number>>({})
   const [acceptingBulk,    setAcceptingBulk]    = useState(false)
+  // Клієнти без замовлень (no_activity) типово приховані — у списку "Всі
+  // клієнти" таких переважна більшість, і вони лише додають прокрутку без
+  // жодної корисної дії. Розгортаються за клацанням, скидається при зміні
+  // фільтра маршруту (щоб не лишався розгорнутим неочікувано на іншому рейсі).
+  const [showInactive,     setShowInactive]     = useState(false)
 
   // ── Resizable split ───────────────────────────────────────────────────────────
   const [leftWidth, setLeftWidth] = useState(50)
@@ -915,6 +920,14 @@ export default function RoutesPage() {
     return sa - sb
   }), [listClients, invoices, orders])
 
+  // Клієнти без замовлень (no_activity) — приховані типово (showInactive),
+  // щоб не займати екран рядками без жодної дії. shownClients — те, що
+  // реально рендериться; inactiveClients — приховані, для лічильника кнопки.
+  const inactiveClients = sortedClients.filter((c) => clientState(c.id) === 'no_activity')
+  const shownClients = showInactive
+    ? sortedClients
+    : sortedClients.filter((c) => clientState(c.id) !== 'no_activity')
+
   // ── Checkbox-логіка ───────────────────────────────────────────────────────────
 
   // Накладні для масових операцій (друк/відправка/прийняття) — БЕЗ магазинів
@@ -1125,7 +1138,7 @@ export default function RoutesPage() {
             <div
               key={card.routeId ?? 'all'}
               className={`${styles.kpiCard} ${isActive ? styles.kpiCardActive : ''}`}
-              onClick={() => { setActiveRouteId(card.routeId); setSelectedClient(null) }}
+              onClick={() => { setActiveRouteId(card.routeId); setSelectedClient(null); setShowInactive(false) }}
             >
               {/* Заголовок з фоном і смугою статусів */}
               <div className={styles.kpiCardHeader}>
@@ -1228,7 +1241,7 @@ export default function RoutesPage() {
           </div>
 
           <div className={styles.listScroll}>
-            {sortedClients.map((client) => {
+            {shownClients.map((client) => {
               const inv = clientInvoice(client.id)
               const state = clientState(client.id)
               const isActive = selectedClient?.id === client.id
@@ -1328,6 +1341,25 @@ export default function RoutesPage() {
                 </div>
               )
             })}
+
+            {!showInactive && inactiveClients.length > 0 && (
+              <button
+                type="button"
+                className={styles.showInactiveBtn}
+                onClick={() => setShowInactive(true)}
+              >
+                ▾ Показати без замовлень ({inactiveClients.length})
+              </button>
+            )}
+            {showInactive && inactiveClients.length > 0 && (
+              <button
+                type="button"
+                className={styles.showInactiveBtn}
+                onClick={() => setShowInactive(false)}
+              >
+                ▴ Сховати без замовлень ({inactiveClients.length})
+              </button>
+            )}
 
             {sortedClients.length === 0 && (
               <div style={{ padding: '1rem', color: '#aaa', fontSize: '0.88rem' }}>

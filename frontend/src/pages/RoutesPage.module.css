@@ -297,6 +297,23 @@
   cursor: default;
 }
 
+.showInactiveBtn {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  border-top: 1px dashed #e0e0e0;
+  background: #fafafa;
+  color: #888;
+  font-size: 0.78rem;
+  text-align: center;
+  cursor: pointer;
+}
+.showInactiveBtn:hover {
+  background: #f0f0f0;
+  color: #555;
+}
+
 /* Amber: є замовлення але немає накладної */
 .invoiceRowVirtualDraft {
   display: flex;
