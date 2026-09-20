@@ -68,10 +68,19 @@ const ACTION_LABELS: Record<string, string> = {
   view: 'Перегляд', create: 'Створення', edit: 'Редагування', delete: 'Видалення',
 }
 
-// Точкові дозволи, не пов'язані з жодним розділом
-const EXTRA_PERMS = [
-  { key: 'can_install_update', label: 'Встановлення оновлень' },
-]
+// "Додатково" — точкові дозволи, не пов'язані з жодним CRUD-розділом.
+// Оформлені як ще один блок (actions: []) — так само перемикається
+// підменю, як і решта.
+const EXTRA_BLOCK: CrudBlock = {
+  key: 'extra', label: 'Додатково',
+  hint: 'Точкові дозволи, не пов\'язані з жодним розділом',
+  actions: [],
+  extra: [
+    { key: 'can_install_update', label: 'Встановлення оновлень' },
+  ],
+}
+
+const ALL_BLOCKS: CrudBlock[] = [...CRUD_BLOCKS, EXTRA_BLOCK]
 
 const ALL_ROLES = ['operator', 'accountant', 'admin', 'owner', 'seller'] as const
 const ROLE_LABELS_MAP: Record<string, string> = {
@@ -86,6 +95,7 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
   const [perms,  setPerms]  = useState<Record<string, Set<string>>>({})
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
+  const [activeBlock, setActiveBlock] = useState<string>(ALL_BLOCKS[0].key)
 
   const load = () =>
     api.get<Record<string, { value: string }>>('/settings/').then((data) => {
@@ -187,13 +197,34 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
       </div>
 
       <h3 style={{ marginBottom: '0.25rem' }}>Детальні права в Довідниках і Фінансах</h3>
-      <p style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1.25rem' }}>
+      <p style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1rem' }}>
         Хто може лише переглядати розділ, а хто — ще й створювати, редагувати
         чи видаляти записи. Заміняє колишній єдиний прапорець "видно вкладку"
         на окремі дозволи на кожну дію.
       </p>
 
-      {CRUD_BLOCKS.map(block => (
+      {/* ── Підменю розділів ── */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+        {ALL_BLOCKS.map(block => {
+          const isActive = activeBlock === block.key
+          return (
+            <button
+              key={block.key}
+              onClick={() => setActiveBlock(block.key)}
+              style={{
+                padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
+                background: isActive ? '#1565c0' : '#e8eef5',
+                color: isActive ? '#fff' : '#333',
+                borderRadius: 6, fontWeight: isActive ? 600 : 400,
+              }}
+            >
+              {block.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {ALL_BLOCKS.filter(block => block.key === activeBlock).map(block => (
         <div key={block.key} style={{ marginBottom: '1.75rem' }}>
           <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1a3a5c' }}>{block.label}</div>
           <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: '0.5rem' }}>{block.hint}</div>
@@ -206,7 +237,7 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
                     <th key={a} style={thStyle}>{ACTION_LABELS[a]}</th>
                   ))}
                   {(block.extra ?? []).map((e, i) => (
-                    <th key={e.key} style={i === 0 ? thSepStyle : thStyle}>{e.label}</th>
+                    <th key={e.key} style={i === 0 && block.actions.length > 0 ? thSepStyle : thStyle}>{e.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -222,7 +253,7 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
                         <CheckCell key={a} role={role} permKey={`${block.key}.${a}`} />
                       ))}
                       {(block.extra ?? []).map((e, i) => (
-                        <CheckCell key={e.key} role={role} permKey={e.key} sep={i === 0} />
+                        <CheckCell key={e.key} role={role} permKey={e.key} sep={i === 0 && block.actions.length > 0} />
                       ))}
                     </tr>
                   )
@@ -232,34 +263,6 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
           </div>
         </div>
       ))}
-
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1a3a5c', marginBottom: '0.5rem' }}>Додатково</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ ...tableStyle, width: 'auto' }}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
-                {EXTRA_PERMS.map(t => (
-                  <th key={t.key} style={thStyle}>{t.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ALL_ROLES.map(role => (
-                <tr key={role} style={role === 'admin' ? { background: '#f0f4f8' } : undefined}>
-                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                    {ROLE_LABELS_MAP[role]}
-                  </td>
-                  {EXTRA_PERMS.map(t => (
-                    <CheckCell key={t.key} role={role} permKey={t.key} />
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1rem' }}>
         <button onClick={handleSave} disabled={saving} style={addBtnStyle}>
