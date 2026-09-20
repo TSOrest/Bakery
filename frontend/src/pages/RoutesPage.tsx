@@ -89,6 +89,36 @@ function abbreviateRouteLabel(name: string, count: number, maxWidth: number): st
   return `${name.charAt(0)}.${suffix}`
 }
 
+// ─── Об'єднання рядків для відображення (як на друку) ─────────────────────────
+
+/** Об'єднує рядки одного виробу за однаковою ефективною ціною в один — ЛИШЕ
+ * для показу на екрані (дзеркалить `_merge_lines_for_display()` з друку,
+ * `backend/routers/print_views.py`). У базі рядки лишаються окремими: той
+ * самий виріб міг потрапити в накладну кількома окремими рядками (власне
+ * замовлення + переміщення від інших клієнтів, надлишок тощо) — без цього
+ * об'єднання оператор бачив би виріб кілька разів за тією самою ціною, і
+ * анотацію переміщення (transfersFor фільтрує лише за product_id) —
+ * продубльовану під кожним із них. Панель корекції (нижче) навмисно працює
+ * з "сирими" рядками — переміщення й так діє на рівні product_id, не
+ * конкретного рядка. */
+function mergeInvoiceLinesForDisplay(lines: InvoiceLine[]): InvoiceLine[] {
+  const merged: Record<string, InvoiceLine> = {}
+  const order: string[] = []
+  for (const line of lines) {
+    const effPrice = line.price_override ?? line.price
+    const key = `${line.product_id}:${effPrice}`
+    const existing = merged[key]
+    if (existing) {
+      existing.qty += line.qty
+      existing.sum += line.sum
+    } else {
+      merged[key] = { ...line }
+      order.push(key)
+    }
+  }
+  return order.map((k) => merged[k])
+}
+
 // ─── Форматування дати ─────────────────────────────────────────────────────────
 
 function formatDate(d: string) {
@@ -264,9 +294,14 @@ function InvoiceDetailPanel({
   const mainLines = invoice.lines.filter((l) => l.line_kind !== 'exchange')
   const exchLines = invoice.lines.filter((l) => l.line_kind === 'exchange')
 
+  // Для показу (таблиця + секція обміну) — об'єднані рядки, як на друку.
+  // Панель корекції нижче свідомо продовжує використовувати "сирі" mainLines.
+  const displayMainLines = mergeInvoiceLinesForDisplay(mainLines)
+  const displayExchLines = mergeInvoiceLinesForDisplay(exchLines)
+
   const groups: Record<string, InvoiceLine[]> = {}
   const catOrder: (number | null)[] = []
-  for (const line of mainLines) {
+  for (const line of displayMainLines) {
     const p = products.find((p) => p.id === line.product_id)
     const cid = p?.category_id ?? null
     const key = String(cid)
@@ -285,7 +320,7 @@ function InvoiceDetailPanel({
   const routeName = invoice.route_id
     ? (routes.find((r) => r.id === invoice.route_id)?.name ?? '')
     : ''
-  const totalNames = mainLines.length
+  const totalNames = displayMainLines.length
   const totalQty   = mainLines.reduce((s, l) => s + l.qty, 0)
 
   return (
@@ -564,7 +599,7 @@ function InvoiceDetailPanel({
         </table>
 
         {/* Секція обміну */}
-        {exchLines.length > 0 && (
+        {displayExchLines.length > 0 && (
           <div className={styles.exchSection}>
             <div className={styles.exchTitle}>Обмін</div>
             <table className={styles.paperTable}>
@@ -577,7 +612,7 @@ function InvoiceDetailPanel({
                 </tr>
               </thead>
               <tbody>
-                {exchLines.map((line: InvoiceLine) => (
+                {displayExchLines.map((line: InvoiceLine) => (
                   <React.Fragment key={line.id}>
                     <tr>
                       <td>{productName(line.product_id)}</td>
