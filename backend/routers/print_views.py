@@ -215,7 +215,7 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
         exch_by_product = _apply_inline_exchange(main_lines, exch_lines)
         exch_lines = []
     get_obmin = _obmin_getter(exch_by_product) if obmin_active else (lambda pid: 0.0)
-    obmin_th = '<th class="c" style="width:26px">Обм.</th>' if obmin_active else ""
+    obmin_th = '<th class="c" style="width:32px">Обм.</th>' if obmin_active else ""
 
     # Групуємо основні рядки по категорії виробу (відділу)
     # cat_id → [(line, product)]
@@ -295,10 +295,10 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
       <thead>
         <tr>
           <th>Назва</th>
-          <th class="c" style="width:38px">Кільк.</th>
-          <th class="c" style="width:32px">Од.</th>
-          <th class="r" style="width:54px">Ціна</th>
-          <th class="r" style="width:60px">Сума</th>
+          <th class="c" style="width:44px">Кільк.</th>
+          <th class="c" style="width:38px">Од.</th>
+          <th class="r" style="width:68px">Ціна</th>
+          <th class="r" style="width:88px">Сума</th>
         </tr>
       </thead>
       <tbody>{exch_rows}</tbody>
@@ -336,11 +336,11 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     <thead>
       <tr>
         <th>Назва</th>
-        <th class="c" style="width:38px">Кільк.</th>
+        <th class="c" style="width:44px">Кільк.</th>
         {obmin_th}
-        <th class="c" style="width:32px">Од.</th>
-        <th class="r" style="width:54px">Ціна</th>
-        <th class="r" style="width:60px">Сума</th>
+        <th class="c" style="width:38px">Од.</th>
+        <th class="r" style="width:68px">Ціна</th>
+        <th class="r" style="width:88px">Сума</th>
       </tr>
     </thead>
     <tbody>{rows_html}</tbody>
@@ -371,31 +371,36 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
 /* ── Дві накладні поряд ── */
 .page-pair {
   display: flex;
-  gap: 5mm;
-  padding: 3mm 5mm;
+  gap: 4mm;
+  padding: 2mm 3mm;
   page-break-after: always;
 }
 .inv-block {
   flex: 1;
   border: 1px solid #aaa;
-  padding: 4mm 3mm;
+  padding: 3mm 2mm;
   min-width: 0;
   position: relative;
 }
 
 /* ── Шапка ── */
-.inv-top { display: flex; justify-content: space-between; font-size: 9pt; margin-bottom: 1mm; position: relative; }
-.city { font-size: 9.5pt; }
-.inv-date { font-size: 9.5pt; font-style: italic; }
+/* Крупніший шрифт (у бакерні є клієнти й персонал похилого віку, яким
+   дрібний друк важко читати) — значення підібрані так, щоб дві копії
+   накладної й далі вміщувались поряд на A4 landscape; довгі назви
+   виробів переносяться на 2 рядки (дозволено, див. .n нижче), ширші
+   числові колонки (нижче) не дають ціні/сумі самим переноситись. */
+.inv-top { display: flex; justify-content: space-between; font-size: 10pt; margin-bottom: 1mm; position: relative; }
+.city { font-size: 11pt; }
+.inv-date { font-size: 11pt; font-style: italic; }
 .copy-label {
   position: absolute; left: 50%; top: 0; transform: translateX(-50%);
-  font-size: 9pt; color: #555;
+  font-size: 10pt; color: #555;
 }
 .inv-title {
-  font-size: 14pt; font-weight: bold; text-align: center;
-  margin: 1.5mm 0 2mm;
+  font-size: 17pt; font-weight: bold; text-align: center;
+  margin: 2mm 0 2.5mm;
   border-bottom: 2px solid #000;
-  padding-bottom: 1.5mm;
+  padding-bottom: 2mm;
 }
 .inv-num { border-bottom: 1px solid #000; min-width: 30mm; display: inline-block; }
 
@@ -403,48 +408,48 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
 .meta-row { display: flex; align-items: flex-start; gap: 3mm; margin-bottom: 1.5mm; }
 .meta-tbl { width: 100%; border: none; }
 .meta-row .meta-tbl { flex: 1; margin-bottom: 0; }
-.meta-tbl td { border: none; padding: 0.5mm 0; font-size: 9.5pt; }
-.ml { width: 28mm; color: #333; white-space: nowrap; }
+.meta-tbl td { border: none; padding: 0.7mm 0; font-size: 11.5pt; }
+.ml { width: 30mm; color: #333; white-space: nowrap; }
 .mv { border-bottom: 1px solid #000; }
 
 /* ── Таблиця товарів ── */
-.lines-tbl { width: 100%; border-collapse: collapse; margin-bottom: 1.5mm; font-size: 9.5pt; }
+.lines-tbl { width: 100%; border-collapse: collapse; margin-bottom: 1.5mm; font-size: 11.5pt; }
 .lines-tbl th {
   background: #d8d8d8; border: 1px solid #777;
-  padding: 1mm 1mm; font-size: 9pt; font-weight: bold;
+  padding: 1.2mm 1.3mm; font-size: 10.5pt; font-weight: bold;
 }
-.lines-tbl td { border: 1px solid #aaa; padding: 0.7mm 1mm; }
+.lines-tbl td { border: 1px solid #aaa; padding: 1mm 1.3mm; }
 .lines-tbl tr.subtotal td { background: #f0f0f0; border-top: 1px solid #888; }
 .c { text-align: center; }
 .r { text-align: right; }
-.n { }
+.n { overflow-wrap: break-word; }
 
 /* ── Секція обміну ── */
 .exch-section { margin-top: 1.5mm; }
 .exch-title {
-  font-size: 9pt; font-weight: bold; text-transform: uppercase; color: #555;
+  font-size: 10pt; font-weight: bold; text-transform: uppercase; color: #555;
   border-top: 1px dashed #aaa; padding-top: 1mm; margin-bottom: 1mm;
 }
 
 /* ── Підсумок ── */
 .total-line {
-  font-size: 9.5pt; margin: 1.5mm 0 0.5mm;
+  font-size: 11pt; margin: 1.5mm 0 0.5mm;
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 1mm;
 }
 .total-box {
-  font-size: 13pt; font-weight: bold;
-  border: 2px solid #000; padding: 0.5mm 3mm;
+  font-size: 16pt; font-weight: bold;
+  border: 2px solid #000; padding: 0.8mm 3.5mm;
   margin-left: 2mm;
 }
 /* ── Підписи ── */
 .sigs {
   display: grid; grid-template-columns: 1fr 1fr;
-  font-size: 9pt; margin-top: 1.5mm;
+  font-size: 10pt; margin-top: 1.5mm;
   border-top: 1px solid #bbb; padding-top: 1mm;
 }
 .bot-qr {
   display: flex; flex-direction: column; align-items: center;
-  gap: 0.5mm; font-size: 6.5pt; color: #555; text-align: center;
+  gap: 0.5mm; font-size: 7pt; color: #555; text-align: center;
   flex-shrink: 0; width: 18mm; line-height: 1.15;
 }
 
