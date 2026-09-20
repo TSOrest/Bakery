@@ -4,6 +4,7 @@ import {
   startDeviceFlow, pollDeviceFlow, getGitHubStatus, githubLogout, type GitHubStatus,
 } from '../../api/auth_github'
 import { addBtnStyle, delBtnStyle, editBtnStyle } from './shared'
+import { useAuth } from '../../context/AuthContext'
 
 // ─── Налаштування ─────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ const SETTINGS_LABELS: Record<string, string> = {
 export type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
 
 export default function SettingsTab({ section }: { section: SettingsSection }) {
+  const { can } = useAuth()
   const [settings, setSettings] = useState<SettingsMap>({})
   const [form,     setForm]     = useState<Record<string, string>>({})
   const [saving,   setSaving]   = useState(false)
@@ -149,15 +151,18 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
               </div>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
-            <button type="submit" disabled={saving} style={addBtnStyle}>
-              {saving ? 'Збереження...' : 'Зберегти'}
-            </button>
-            {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
-          </div>
+          {can('admin_org.settings') && (
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
+              <button type="submit" disabled={saving} style={addBtnStyle}>
+                {saving ? 'Збереження...' : 'Зберегти'}
+              </button>
+              {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
+            </div>
+          )}
         </form>
 
         {/* ── Додаткові функції (окремі перемикачі) ── */}
+        {can('admin_org.settings') && (
         <div style={{ marginTop: '2rem', borderTop: '1px solid #e8eef5', paddingTop: '1.25rem' }}>
           <div style={{ fontWeight: 600, color: '#1a3a5c', marginBottom: '0.75rem', fontSize: '0.9rem' }}>
             Додаткові функції
@@ -242,6 +247,7 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
             </span>
           </label>
         </div>
+        )}
 
       </>}
 
@@ -257,7 +263,7 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
               background: tgRunning ? '#27ae60' : '#e74c3c', display: 'inline-block',
             }} />
             <span style={{ fontWeight: 600 }}>{tgRunning ? 'Бот запущено' : 'Бот зупинено'}</span>
-            {tgRunning && (
+            {tgRunning && can('admin_org.settings') && (
               <button onClick={stopBot} style={{ ...delBtnStyle, marginLeft: 'auto' }}>Зупинити</button>
             )}
           </div>
@@ -292,16 +298,18 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
             <span style={{ fontSize: 12, color: '#888' }}>Через кому. Формат: +380XXXXXXXXX</span>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={saveTgSettings} disabled={tgSaving} style={addBtnStyle}>
-              {tgSaving ? 'Збереження...' : 'Зберегти і перезапустити'}
-            </button>
-            {tgMsg && (
-              <span style={{ fontSize: 13, color: tgMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
-                {tgMsg}
-              </span>
-            )}
-          </div>
+          {can('admin_org.settings') && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={saveTgSettings} disabled={tgSaving} style={addBtnStyle}>
+                {tgSaving ? 'Збереження...' : 'Зберегти і перезапустити'}
+              </button>
+              {tgMsg && (
+                <span style={{ fontSize: 13, color: tgMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>
+                  {tgMsg}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Авторизовані користувачі */}
           {tgChats.length > 0 && (
@@ -321,8 +329,10 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
                       <td style={{ padding: '5px 8px', fontFamily: 'monospace' }}>{c.chat_id}</td>
                       <td style={{ padding: '5px 8px' }}>{c.phone}</td>
                       <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                        <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
-                          title="Відкликати доступ" aria-label="Відкликати доступ">✕</button>
+                        {can('admin_org.settings') && (
+                          <button onClick={() => revokeChat(c.chat_id)} style={delBtnStyle}
+                            title="Відкликати доступ" aria-label="Відкликати доступ">✕</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -391,6 +401,7 @@ function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, label
   labelStyle: React.CSSProperties
   addBtnStyle: React.CSSProperties
 }) {
+  const { can } = useAuth()
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -430,12 +441,14 @@ function BotTemplatesSection({ settings, onReload, inputStyle, fieldStyle, label
             <span style={{ fontSize: 11, color: '#888' }}>{hint}</span>
           </div>
         ))}
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
-          <button type="submit" disabled={saving} style={addBtnStyle}>
-            {saving ? 'Збереження...' : 'Зберегти шаблони'}
-          </button>
-          {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
-        </div>
+        {can('admin_org.settings') && (
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
+            <button type="submit" disabled={saving} style={addBtnStyle}>
+              {saving ? 'Збереження...' : 'Зберегти шаблони'}
+            </button>
+            {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
+          </div>
+        )}
       </form>
     </>
   )
@@ -452,6 +465,7 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
   labelStyle:  React.CSSProperties
   addBtnStyle: React.CSSProperties
 }) {
+  const { can } = useAuth()
   const [repo,      setRepo]      = useState(settings['github_repo']?.value ?? 'TSOrest/Bakery')
   const [repoMsg,   setRepoMsg]   = useState('')
   const [ghStatus,  setGhStatus]  = useState<GitHubStatus | null>(null)
@@ -550,9 +564,11 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
               <div style={{ fontSize: 12, color: '#6e7781' }}>@{ghStatus.login}</div>
             </div>
             <span style={{ marginLeft: 'auto', fontSize: 12, color: '#27ae60', fontWeight: 600 }}>✓ Авторизовано</span>
-            <button onClick={logout} style={{ ...addBtnStyle, background: '#6c757d', fontSize: 12 }}>
-              Вийти
-            </button>
+            {can('admin_system.github') && (
+              <button onClick={logout} style={{ ...addBtnStyle, background: '#6c757d', fontSize: 12 }}>
+                Вийти
+              </button>
+            )}
           </div>
         ) : flowState === 'waiting' ? (
           <div style={{ marginBottom: 14, padding: '12px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 6 }}>
@@ -594,9 +610,11 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
             <div style={{ fontSize: 12, color: '#888', marginTop: 4, marginBottom: 10 }}>
               Авторизуйте GitHub-акаунт пекарні — від його імені будуть надсилатись звернення та завантажуватись оновлення.
             </div>
-            <button onClick={startFlow} style={addBtnStyle}>
-              Авторизуватись через GitHub
-            </button>
+            {can('admin_system.github') && (
+              <button onClick={startFlow} style={addBtnStyle}>
+                Авторизуватись через GitHub
+              </button>
+            )}
           </div>
         )}
 
@@ -616,9 +634,11 @@ function IssuesSettingsSection({ settings, inputStyle, fieldStyle, labelStyle, a
               onChange={e => setRepo(e.target.value)}
               placeholder="owner/repo"
             />
-            <button onClick={saveRepo} style={{ ...addBtnStyle, whiteSpace: 'nowrap' }}>
-              Зберегти
-            </button>
+            {can('admin_org.settings') && (
+              <button onClick={saveRepo} style={{ ...addBtnStyle, whiteSpace: 'nowrap' }}>
+                Зберегти
+              </button>
+            )}
           </div>
           {repoMsg && <span style={{ fontSize: 12, color: repoMsg.startsWith('✓') ? '#27ae60' : '#e74c3c' }}>{repoMsg}</span>}
           <span style={{ fontSize: 12, color: '#888' }}>Формат: owner/repo (напр. TSOrest/Bakery)</span>

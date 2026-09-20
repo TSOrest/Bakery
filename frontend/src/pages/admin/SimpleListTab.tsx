@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td, type SimpleItem } from './shared'
+import { useAuth } from '../../context/AuthContext'
 
 /**
  * Універсальна вкладка для простих довідників (одиниці виміру).
@@ -15,6 +16,7 @@ export default function SimpleListTab({
   onAdd: (name: string) => Promise<unknown>
   onUpdate: (id: number, patch: { name?: string; is_active?: number }) => Promise<unknown>
 }) {
+  const { can } = useAuth()
   const [newName, setNewName]       = useState('')
   const [saving,  setSaving]        = useState(false)
   const [editItem, setEditItem]     = useState<SimpleItem | null>(null)
@@ -69,15 +71,17 @@ export default function SimpleListTab({
         )}
       </Td>
       <Td>
-        {editItem?.id !== item.id && (
+        {editItem?.id !== item.id && can('admin_goods.edit') && (
           <button onClick={() => openEdit(item)} style={editBtnStyle}>Перейменувати</button>
         )}
-        <button
-          onClick={() => handleToggleActive(item)}
-          style={item.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}
-        >
-          {item.is_active ? 'Приховати' : 'Відновити'}
-        </button>
+        {can('admin_goods.edit') && (
+          <button
+            onClick={() => handleToggleActive(item)}
+            style={item.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}
+          >
+            {item.is_active ? 'Приховати' : 'Відновити'}
+          </button>
+        )}
       </Td>
     </tr>
   )
@@ -97,9 +101,11 @@ export default function SimpleListTab({
           placeholder={placeholder}
           style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1, maxWidth: '260px' }}
         />
-        <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>
-          {addLabel}
-        </button>
+        {can('admin_goods.create') && (
+          <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>
+            {addLabel}
+          </button>
+        )}
       </div>
 
       <table style={tableStyle}>

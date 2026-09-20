@@ -3,8 +3,10 @@ import {
   fetchFinanceArticles, createFinanceArticle, updateFinanceArticle, deleteFinanceArticle,
 } from '../../api/financeArticles'
 import type { FinanceArticle } from '../../types'
+import { useAuth } from '../../context/AuthContext'
 
 export default function FinanceArticlesTab() {
+  const { can } = useAuth()
   const [articles,        setArticles]       = useState<FinanceArticle[]>([])
   const [loading,         setLoading]        = useState(true)
   const [editId,          setEditId]         = useState<number | null>(null)
@@ -144,8 +146,10 @@ export default function FinanceArticlesTab() {
                   </>
                 ) : (
                   <>
-                    <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client); setEditEditable(a.editable) }} aria-label="Редагувати" title="Редагувати">✎</button>
-                    {!a.is_system && (
+                    {can('admin_org.edit') && (
+                      <button style={{ ...btnS, marginRight: 4 }} onClick={() => { setEditId(a.id); setEditName(a.name); setEditNeedsClient(a.needs_client); setEditEditable(a.editable) }} aria-label="Редагувати" title="Редагувати">✎</button>
+                    )}
+                    {!a.is_system && can('admin_org.delete') && (
                       <button style={{ ...btnS, color: '#e74c3c', borderColor: '#fca5a5' }} onClick={() => handleDelete(a.id)} aria-label="Видалити" title="Видалити">×</button>
                     )}
                   </>
@@ -156,6 +160,8 @@ export default function FinanceArticlesTab() {
         </tbody>
       </table>
 
+      {can('admin_org.create') && (
+      <>
       <h4 style={{ ...s, marginBottom: '0.5rem' }}>Додати статтю</h4>
       <form onSubmit={handleAdd} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <input
@@ -192,6 +198,8 @@ export default function FinanceArticlesTab() {
           + Додати
         </button>
       </form>
+      </>
+      )}
     </div>
   )
 }

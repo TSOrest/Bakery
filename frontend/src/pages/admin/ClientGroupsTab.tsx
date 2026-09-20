@@ -4,6 +4,7 @@ import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import { useToast } from '../../components/Toast'
 import { useConfirm } from '../../components/ConfirmDialog'
+import { useAuth } from '../../context/AuthContext'
 import type { Client, ClientGroup, Route } from '../../types'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
 
@@ -16,6 +17,7 @@ interface GroupFormState {
 export default function ClientGroupsTab({ routes }: { routes: Route[] }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const { can } = useAuth()
 
   const [groups, setGroups]     = useState<ClientGroup[]>([])
   const [clients, setClients]   = useState<Client[]>([])
@@ -177,7 +179,9 @@ export default function ClientGroupsTab({ routes }: { routes: Route[] }) {
             ))}
           </select>
         </label>
-        <button style={addBtnStyle} onClick={openNew} disabled={!selectedRouteId}>+ Нова група</button>
+        {can('admin_clients.create') && (
+          <button style={addBtnStyle} onClick={openNew} disabled={!selectedRouteId}>+ Нова група</button>
+        )}
         {loading && <span style={{ fontSize: 13, color: '#888' }}>Завантаження…</span>}
       </div>
 
@@ -197,9 +201,9 @@ export default function ClientGroupsTab({ routes }: { routes: Route[] }) {
               <Td>{g.sort_order}</Td>
               <Td>{g.member_count}</Td>
               <Td>
-                <button style={editBtnStyle} onClick={() => openMembers(g)}>Клієнти групи</button>
-                <button style={editBtnStyle} onClick={() => openEdit(g)}>Редагувати</button>
-                <button style={delBtnStyle} onClick={() => handleDelete(g)}>Видалити</button>
+                {can('admin_clients.edit') && <button style={editBtnStyle} onClick={() => openMembers(g)}>Клієнти групи</button>}
+                {can('admin_clients.edit') && <button style={editBtnStyle} onClick={() => openEdit(g)}>Редагувати</button>}
+                {can('admin_clients.delete') && <button style={delBtnStyle} onClick={() => handleDelete(g)}>Видалити</button>}
               </Td>
             </tr>
           ))}

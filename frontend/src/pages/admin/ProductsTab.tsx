@@ -5,6 +5,7 @@ import formStyles from '../../components/Form.module.css'
 import type { Category, Product, Unit } from '../../types'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
 import { useToast } from '../../components/Toast'
+import { useAuth } from '../../context/AuthContext'
 
 interface ProductFormState {
   name: string
@@ -28,6 +29,7 @@ export default function ProductsTab({
   onReload: () => void
 }) {
   const toast = useToast()
+  const { can } = useAuth()
   const [modal, setModal]         = useState(false)
   const [editing, setEditing]     = useState<Product | null>(null)
   const [form, setForm]           = useState<ProductFormState>(emptyProduct())
@@ -104,11 +106,11 @@ export default function ProductsTab({
       <Td>{categories.find((c) => c.id === p.category_id)?.name ?? '—'}</Td>
       <Td>{p.weight ?? '—'}</Td>
       <Td>
-        <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>
+        {can('admin_goods.edit') && <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>}
         {p.is_active === 1 ? (
-          <button onClick={() => handleDeactivate(p)} style={delBtnStyle}>Деактивувати</button>
+          can('admin_goods.delete') && <button onClick={() => handleDeactivate(p)} style={delBtnStyle}>Деактивувати</button>
         ) : (
-          <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+          can('admin_goods.edit') && <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
         )}
       </Td>
     </tr>
@@ -119,7 +121,7 @@ export default function ProductsTab({
       <div ref={controlsRef} style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white', paddingBottom: 6, marginBottom: 2 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
           <strong>Вироби ({activeProducts.length})</strong>
-          <button onClick={openNew} style={addBtnStyle}>+ Додати виріб</button>
+          {can('admin_goods.create') && <button onClick={openNew} style={addBtnStyle}>+ Додати виріб</button>}
         </div>
       </div>
 
@@ -154,8 +156,8 @@ export default function ProductsTab({
               <Td>{categories.find((c) => c.id === p.category_id)?.name ?? '—'}</Td>
               <Td>{p.weight ?? '—'}</Td>
               <Td>
-                <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>
-                <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+                {can('admin_goods.edit') && <button onClick={() => openEdit(p)} style={editBtnStyle}>Редагувати</button>}
+                {can('admin_goods.edit') && <button onClick={async () => { await api.put(`/products/${p.id}`, { is_active: 1 }); onReload() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>}
               </Td>
             </tr>
           ))}

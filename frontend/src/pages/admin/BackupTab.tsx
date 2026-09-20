@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import { useToast } from '../../components/Toast'
 import ImportPage from '../ImportPage'
 import ResetDbSection from './ResetDbSection'
+import { useAuth } from '../../context/AuthContext'
 
 // ─── Вкладка Бекапи ──────────────────────────────────────────────────────────
 
@@ -12,6 +13,7 @@ type DemoStatus = { active: boolean; since: string | null; demo_db_exists: boole
 
 export default function BackupTab() {
   const toast = useToast()
+  const { can } = useAuth()
   const [form, setForm]                   = useState<Record<string, string>>({})
   const [savingSettings, setSavingSettings] = useState(false)
   const [savedSettings, setSavedSettings]   = useState(false)
@@ -262,12 +264,14 @@ export default function BackupTab() {
               </div>
             ))}
           </div>
-          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button type="submit" style={btnS} disabled={savingSettings}>
-              {savingSettings ? 'Збереження...' : 'Зберегти'}
-            </button>
-            {savedSettings && <span style={{ color: '#27ae60', fontSize: '0.82rem' }}>✓ Збережено</span>}
-          </div>
+          {can('admin_org.settings') && (
+            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <button type="submit" style={btnS} disabled={savingSettings}>
+                {savingSettings ? 'Збереження...' : 'Зберегти'}
+              </button>
+              {savedSettings && <span style={{ color: '#27ae60', fontSize: '0.82rem' }}>✓ Збережено</span>}
+            </div>
+          )}
         </form>
       </div>
 
@@ -314,21 +318,25 @@ export default function BackupTab() {
               )}
               {currentPath && (
                 <>
-                  <button
-                    style={{ ...btnS, background: '#3b82f6', padding: '0.2rem 0.6rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                    onClick={() => handleTestCloud(p.key, currentPath)}
-                    disabled={testingCloud === p.key}
-                    title="Перевірити доступність папки"
-                  >
-                    {testingCloud === p.key ? '...' : '🔍 Перевірити'}
-                  </button>
-                  <button
-                    style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.6rem', fontSize: '0.8rem' }}
-                    onClick={() => setForm(f => ({ ...f, [p.key]: '' }))}
-                    title="Вимкнути синхронізацію"
-                  >
-                    ✕
-                  </button>
+                  {can('admin_system.backup') && (
+                    <button
+                      style={{ ...btnS, background: '#3b82f6', padding: '0.2rem 0.6rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                      onClick={() => handleTestCloud(p.key, currentPath)}
+                      disabled={testingCloud === p.key}
+                      title="Перевірити доступність папки"
+                    >
+                      {testingCloud === p.key ? '...' : '🔍 Перевірити'}
+                    </button>
+                  )}
+                  {can('admin_org.settings') && (
+                    <button
+                      style={{ ...btnS, background: '#e74c3c', padding: '0.2rem 0.6rem', fontSize: '0.8rem' }}
+                      onClick={() => setForm(f => ({ ...f, [p.key]: '' }))}
+                      title="Вимкнути синхронізацію"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -344,25 +352,33 @@ export default function BackupTab() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
           <h3 style={{ ...h3S, margin: 0 }}>Резервні копії</h3>
           <div style={{ display: 'flex', gap: 8 }}>
-            <label style={{ ...btnS, background: '#27ae60', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
-              📂 Імпортувати
-              <input type="file" accept=".db" style={{ display: 'none' }} onChange={handleImportBackup} />
-            </label>
-            <button style={btnS} onClick={handleBackupNow} disabled={backingUp}>
-              {backingUp ? 'Зберігання...' : '+ Зробити бекап зараз'}
-            </button>
-            <button
-              style={{ ...btnS, background: '#7c3aed' }}
-              onClick={() => setShowImportWizard(true)}
-            >
-              📥 Імпорт з Access
-            </button>
+            {can('admin_system.backup') && (
+              <>
+                <label style={{ ...btnS, background: '#27ae60', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                  📂 Імпортувати
+                  <input type="file" accept=".db" style={{ display: 'none' }} onChange={handleImportBackup} />
+                </label>
+                <button style={btnS} onClick={handleBackupNow} disabled={backingUp}>
+                  {backingUp ? 'Зберігання...' : '+ Зробити бекап зараз'}
+                </button>
+              </>
+            )}
+            {can('admin_system.import') && (
+              <button
+                style={{ ...btnS, background: '#7c3aed' }}
+                onClick={() => setShowImportWizard(true)}
+              >
+                📥 Імпорт з Access
+              </button>
+            )}
           </div>
         </div>
-        {backups.length === 0 && (
+        {!can('admin_system.backup') ? (
+          <div style={{ ...s, color: '#aaa' }}>Немає дозволу переглядати список бекапів</div>
+        ) : backups.length === 0 ? (
           <div style={{ ...s, color: '#aaa' }}>Бекапів ще немає</div>
-        )}
-        {backups.length > 0 && (
+        ) : null}
+        {can('admin_system.backup') && backups.length > 0 && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #dce6f0' }}>
@@ -418,6 +434,7 @@ export default function BackupTab() {
       </div>
 
       {/* ── 3. Демо режим ── */}
+      {can('admin_system.backup') && (
       <div style={sectionS}>
         <h3 style={h3S}>Демо режим</h3>
         {demoStatus?.active ? (
@@ -447,8 +464,10 @@ export default function BackupTab() {
           </div>
         )}
       </div>
+      )}
 
       {/* ── 4. Архівування ── */}
+      {can('admin_system.backup') && (
       <div style={sectionS}>
         <h3 style={h3S}>Архівування старих даних</h3>
         <p style={{ ...s, color: '#666', marginBottom: '0.75rem', lineHeight: 1.5 }}>
@@ -495,9 +514,10 @@ export default function BackupTab() {
           </div>
         )}
       </div>
+      )}
 
       {/* ── 5. Скидання бази даних ── */}
-      <ResetDbSection />
+      {can('admin_system.reset_db') && <ResetDbSection />}
 
       {/* ── Майстер імпорту з Access (full-screen modal) ── */}
       {showImportWizard && (

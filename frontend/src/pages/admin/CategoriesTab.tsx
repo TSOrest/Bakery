@@ -4,11 +4,13 @@ import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import type { Category } from '../../types'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
+import { useAuth } from '../../context/AuthContext'
 
 interface CategoryFormState { name: string; is_baked: boolean; reserve_pct: string; sort_order: string }
 const emptyCategoryForm = (): CategoryFormState => ({ name: '', is_baked: true, reserve_pct: '5', sort_order: '0' })
 
 export default function CategoriesTab({ categories, onReload }: { categories: Category[]; onReload: () => void }) {
+  const { can } = useAuth()
   const [modal,   setModal]   = useState(false)
   const [editing, setEditing] = useState<Category | null>(null)
   const [form,    setForm]    = useState<CategoryFormState>(emptyCategoryForm())
@@ -78,10 +80,12 @@ export default function CategoriesTab({ categories, onReload }: { categories: Ca
       <Td>{c.is_baked ? '✓ Випікається' : '—'}</Td>
       <Td>{c.is_baked ? `${c.reserve_pct}%` : '—'}</Td>
       <Td>
-        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
-        <button onClick={() => handleToggle(c)} style={c.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}>
-          {c.is_active ? 'Приховати' : 'Відновити'}
-        </button>
+        {can('admin_goods.edit') && <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>}
+        {can('admin_goods.edit') && (
+          <button onClick={() => handleToggle(c)} style={c.is_active ? delBtnStyle : { ...editBtnStyle, color: '#080' }}>
+            {c.is_active ? 'Приховати' : 'Відновити'}
+          </button>
+        )}
       </Td>
     </tr>
   )
@@ -94,7 +98,9 @@ export default function CategoriesTab({ categories, onReload }: { categories: Ca
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
           placeholder="напр. Хліб, Булки, Магазин"
           style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1, maxWidth: '260px' }} />
-        <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>+ Додати категорію</button>
+        {can('admin_goods.create') && (
+          <button onClick={handleAdd} disabled={saving || !newName.trim()} style={addBtnStyle}>+ Додати категорію</button>
+        )}
         {error && !modal && <span style={{ color: '#c00', fontSize: '0.85rem', alignSelf: 'center' }}>⚠ {error}</span>}
       </div>
       <table style={tableStyle}>

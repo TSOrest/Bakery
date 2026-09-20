@@ -4,6 +4,7 @@ import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import { useToast } from '../../components/Toast'
 import AuditBadge from '../../components/AuditBadge'
+import { useAuth } from '../../context/AuthContext'
 import type { Client, ClientGroup, ClientPriceOverride, Product, Route } from '../../types'
 import {
   addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td,
@@ -17,6 +18,7 @@ interface BotUser {
 
 export default function ClientsTab({ routes, products }: { routes: Route[]; products: Product[] }) {
   const toast = useToast()
+  const { can } = useAuth()
   const today    = new Date().toISOString().slice(0, 10)
   const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
   const [clients, setClients]   = useState<Client[]>([])
@@ -122,10 +124,10 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       <Td>{c.discount_pct} <AuditBadge entityTable="clients" entityId={c.id} /></Td>
       <Td>{c.phone ?? '—'}</Td>
       <Td>
-        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+        {can('admin_clients.edit') && <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>}
         {c.is_active === 1
-          ? <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
-          : <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+          ? can('admin_clients.delete') && <button onClick={() => handleDeactivate(c)} style={delBtnStyle}>Деактивувати</button>
+          : can('admin_clients.edit') && <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
         }
       </Td>
     </tr>
@@ -141,7 +143,7 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
       <div ref={controlsRef} style={{ position: 'sticky', top: 0, zIndex: 10, background: 'white', paddingBottom: 6, marginBottom: 2 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
           <strong>Клієнти ({activeClients.length})</strong>
-          <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>
+          {can('admin_clients.create') && <button onClick={openNew} style={addBtnStyle}>+ Додати клієнта</button>}
         </div>
       </div>
 
@@ -324,11 +326,13 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Індивідуальні ціни</div>
-                    <button type="button" onClick={() => setOverrideAdding(!overrideAdding)}
-                      style={{ fontSize: 12, padding: '2px 10px', border: '1px solid #3b82f6', borderRadius: 6,
-                        background: overrideAdding ? '#eff6ff' : '#fff', color: '#3b82f6', cursor: 'pointer' }}>
-                      {overrideAdding ? 'Скасувати' : '+ Додати'}
-                    </button>
+                    {can('admin_prices.create') && (
+                      <button type="button" onClick={() => setOverrideAdding(!overrideAdding)}
+                        style={{ fontSize: 12, padding: '2px 10px', border: '1px solid #3b82f6', borderRadius: 6,
+                          background: overrideAdding ? '#eff6ff' : '#fff', color: '#3b82f6', cursor: 'pointer' }}>
+                        {overrideAdding ? 'Скасувати' : '+ Додати'}
+                      </button>
+                    )}
                   </div>
 
                   {overrideAdding && (
@@ -428,18 +432,20 @@ export default function ClientsTab({ routes, products }: { routes: Route[]; prod
                                   :            <span style={{ color: '#f59e0b' }}>майбутня</span>}
                                 </td>
                                 <td style={{ padding: '0.2rem 0.3rem' }}>
-                                  <button type="button" disabled={!canDelete}
-                                    title={canDelete ? 'Видалити' : 'Не можна видалити поточну/минулу ціну'}
-                                    onClick={async () => {
-                                      if (!editing) return
-                                      if (!confirm('Видалити індивідуальну ціну?')) return
-                                      await api.delete(`/prices/overrides/${o.id}`)
-                                      await loadClientOverrides(editing.id)
-                                    }}
-                                    style={{ background: 'none', border: 'none', cursor: canDelete ? 'pointer' : 'default',
-                                      color: canDelete ? '#ef4444' : '#cbd5e1', fontSize: '1rem' }}>
-                                    ×
-                                  </button>
+                                  {can('admin_prices.delete') && (
+                                    <button type="button" disabled={!canDelete}
+                                      title={canDelete ? 'Видалити' : 'Не можна видалити поточну/минулу ціну'}
+                                      onClick={async () => {
+                                        if (!editing) return
+                                        if (!confirm('Видалити індивідуальну ціну?')) return
+                                        await api.delete(`/prices/overrides/${o.id}`)
+                                        await loadClientOverrides(editing.id)
+                                      }}
+                                      style={{ background: 'none', border: 'none', cursor: canDelete ? 'pointer' : 'default',
+                                        color: canDelete ? '#ef4444' : '#cbd5e1', fontSize: '1rem' }}>
+                                      ×
+                                    </button>
+                                  )}
                                 </td>
                               </tr>
                             )

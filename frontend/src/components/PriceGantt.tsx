@@ -24,8 +24,8 @@ interface PriceGanttProps {
   timeFrom:  string   // YYYY-MM-DD
   timeTo:    string   // YYYY-MM-DD
   today:     string   // YYYY-MM-DD
-  onEdit:    (priceId: number) => void
-  onDelete:  (priceId: number) => void
+  onEdit?:   (priceId: number) => void
+  onDelete?: (priceId: number) => void
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -294,26 +294,30 @@ const PriceGantt: React.FC<PriceGanttProps> = ({
               )
               if (futureSeg) return (
                 <React.Fragment key={futureSeg.price_id}>
-                  <button
-                    className={styles.actionBtn}
-                    onClick={() => onEdit(futureSeg.price_id)}
-                    title="Редагувати"
-                  >✎</button>
-                  <button
-                    className={`${styles.actionBtn} ${styles.deleteBtn}`}
-                    onClick={() => onDelete(futureSeg.price_id)}
-                    title="Видалити"
-                  >×</button>
+                  {onEdit && (
+                    <button
+                      className={styles.actionBtn}
+                      onClick={() => onEdit(futureSeg.price_id)}
+                      title="Редагувати"
+                    >✎</button>
+                  )}
+                  {onDelete && (
+                    <button
+                      className={`${styles.actionBtn} ${styles.deleteBtn}`}
+                      onClick={() => onDelete(futureSeg.price_id)}
+                      title="Видалити"
+                    >×</button>
+                  )}
                 </React.Fragment>
               )
-              if (currentSeg) return (
+              if (currentSeg) return onEdit ? (
                 <button
                   key={currentSeg.price_id}
                   className={styles.actionBtn}
                   onClick={() => onEdit(currentSeg.price_id)}
                   title="Запланувати зміну ціни"
                 >✎</button>
-              )
+              ) : null
               return null
             })()}
           </div>

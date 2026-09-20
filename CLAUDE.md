@@ -2399,13 +2399,56 @@ happy-path тесту тут — лише 403-заборона (уже покр�
   (більше не потрібен тут — `tabConfig.ts` і сам експорт лишаються,
   використовуються в `AdminPage.tsx` для сайдбару).
 
-**Наступні кроки** (Крок 5): дії-рівневе блокування кнопок у admin-
-компонентах (`ProductsTab.tsx`, `CategoriesTab.tsx`, `ClientsTab.tsx`,
-`RoutesTab.tsx`, `ClientGroupsTab.tsx`, `SystemClientsTab.tsx`,
-`PricesTab.tsx`, `IngredientsTab.tsx`, `FinanceArticlesTab.tsx`,
-`UsersTab.tsx`, `BackupTab.tsx`, `SettingsTab.tsx`, `AdminPage.tsx`) і
-`FinancesPage.tsx` через новий `can()`; закриття структурної шпарини
-`db-editor`-маршруту на фронтенді (зараз рятує лише бекенд-403).
+**Крок 5 — дії-рівневе блокування кнопок (фінальний крок):** кожна
+кнопка/поле, що мутує дані через уже гранульовані ендпоінти, тепер
+перевіряє `can('<ключ>')` перед рендером (той самий патерн скрізь:
+`{can('group.action') && <button>...}`, підібраний за РЕАЛЬНИМ
+backend-викликом кнопки, не за візуальним групуванням вкладки):
+
+- `ProductsTab.tsx`, `CategoriesTab.tsx` (категорії + одиниці),
+  `SimpleListTab.tsx` (одиниці виміру) → `admin_goods.{create,edit,delete}`.
+- `ClientsTab.tsx`, `RoutesTab.tsx`, `ClientGroupsTab.tsx`,
+  `SystemClientsTab.tsx` → `admin_clients.{create,edit,delete}`
+  (`SystemClientsTab` теж — бо мутує через `clients.py`, попри візуальне
+  розміщення вкладки під "Організація" в `tabConfig.ts`). У `ClientsTab.tsx`
+  індивідуальні ціни клієнта (`POST/DELETE /prices/overrides`) гейтяться
+  окремо як `admin_prices.{create,delete}` — інша група, інший роутер.
+- `PricesTab.tsx`, `IngredientsTab.tsx` → `admin_prices.{create,edit,delete}`.
+  `PriceGantt.tsx`'s `onEdit`/`onDelete` пропси стали опціональними
+  (`?:`) — компонент ховає кнопку "✎"/"×" сам, коли пропс не передано
+  (`can(...) ? handler : undefined`), замість дублювання перевірки в
+  розмітці Ganttа.
+- `FinanceArticlesTab.tsx` → `admin_org.{create,edit,delete}`.
+- `UsersTab.tsx` → `admin_system.{create,edit}` + дзеркало backend
+  hard-rule: `ROLE_OPTIONS` приховує "Адміністратор" для не-true-admin
+  (`roleOptionsFor()`), кнопки "Редагувати"/"Вимкнути" ховаються на рядку
+  вже-адмінського користувача, якщо дивишся не з-під справжнього admin.
+- `BackupTab.tsx` — три різні дозволи в одному файлі: `admin_org.settings`
+  (форма автобекапу/хмарних шляхів — generic `/settings/` запис),
+  `admin_system.backup` (список/бекап зараз/відновити/видалити/демо/
+  архівування — усі дії `backup.py`), `admin_system.import` (кнопка
+  "Імпорт з Access", окремо від решти — інший роутер), `admin_system.reset_db`
+  (`<ResetDbSection />`, гейт на виклику компонента).
+- `SettingsTab.tsx` — той самий поділ: усі форми параметрів
+  пекарні/бота/шаблонів/`github_repo` → `admin_org.settings`; GitHub
+  Device Flow (авторизуватись/вийти) у `IssuesSettingsSection` →
+  `admin_system.github` (окремо від збереження самого поля репозиторію).
+- `AdminPage.tsx` + `App.tsx` — посилання "⚠️ Редактор БД" і сам маршрут
+  `/db-editor` тепер перевіряють `can('admin_system.db_editor')` замість
+  жорсткого `isAdmin`/відсутності перевірки (`Navigate` на `/` для
+  невповноважених — раніше рятував лише бекенд-403, без UX-редиректу).
+- `FinancesPage.tsx` — кнопки "+ Оплата"/"+ Операція" →
+  `finances.create`; кнопка "✎ Редагувати суму" (обидва місця: панель
+  клієнта і загальний журнал) → існуюча умова `canEditFinance()`
+  (дата/стаття/editable) ТА `can('finances.edit')` — обидві мають
+  збігтися. `deleteFinance()` (`api/finances.ts`) лишається мертвим
+  кодом на фронтенді (жодної кнопки виклику ніде не було й раніше) —
+  без гейту, бо нема що гейтити.
+- `AuthContext.tsx`, `NotificationBell.tsx`, `RolePermissionsTab.tsx` —
+  див. Крок 4 вище.
+
+Цим закрито гранульовані права ролей повністю: backend (Кроки 1-3) +
+frontend (Кроки 4-5). Найчастіше відкладена позиція цієї сесії — закрита.
 
 ## Аудит-фікси v0.9.36-v1.0.4
 

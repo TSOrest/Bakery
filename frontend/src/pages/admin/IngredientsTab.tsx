@@ -8,9 +8,11 @@ import {
   fetchProductIngredients, addProductIngredient, removeProductIngredient,
 } from '../../api/ingredients'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
+import { useAuth } from '../../context/AuthContext'
 
 export default function IngredientsTab({ units, products }: { units: Unit[]; products: Product[] }) {
   const toast = useToast()
+  const { can } = useAuth()
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [editIng, setEditIng]         = useState<Ingredient | null>(null)
   const [addModal, setAddModal]       = useState(false)
@@ -102,7 +104,7 @@ export default function IngredientsTab({ units, products }: { units: Unit[]; pro
         <div style={{ flex: '1 1 420px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
             <h3 style={{ margin: 0 }}>Інгредієнти / Сировина</h3>
-            <button onClick={() => setAddModal(true)} style={addBtnStyle}>+ Додати</button>
+            {can('admin_prices.create') && <button onClick={() => setAddModal(true)} style={addBtnStyle}>+ Додати</button>}
           </div>
 
           <table style={tableStyle}>
@@ -119,8 +121,12 @@ export default function IngredientsTab({ units, products }: { units: Unit[]; pro
                   <Td><strong>{ing.price_per_unit.toFixed(2)}</strong></Td>
                   <Td><span style={{ fontSize: 12, color: '#888' }}>{ing.price_updated_at?.slice(0, 10) ?? '—'}</span></Td>
                   <Td>
-                    <button onClick={() => { setEditIng(ing); setEditForm({ name: ing.name, unit_id: String(ing.unit_id ?? ''), price_per_unit: String(ing.price_per_unit) }) }} style={{ ...editBtnStyle, marginRight: 4 }} aria-label="Редагувати" title="Редагувати">✎</button>
-                    <button onClick={() => handleDelete(ing.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
+                    {can('admin_prices.edit') && (
+                      <button onClick={() => { setEditIng(ing); setEditForm({ name: ing.name, unit_id: String(ing.unit_id ?? ''), price_per_unit: String(ing.price_per_unit) }) }} style={{ ...editBtnStyle, marginRight: 4 }} aria-label="Редагувати" title="Редагувати">✎</button>
+                    )}
+                    {can('admin_prices.delete') && (
+                      <button onClick={() => handleDelete(ing.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
+                    )}
                   </Td>
                 </tr>
               ))}
@@ -167,7 +173,9 @@ export default function IngredientsTab({ units, products }: { units: Unit[]; pro
                       <Td>{r.price_per_unit.toFixed(2)}</Td>
                       <Td><strong>{r.line_cost.toFixed(4)}</strong></Td>
                       <Td>
-                        <button onClick={() => handleRemoveComp(r.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
+                        {can('admin_prices.delete') && (
+                          <button onClick={() => handleRemoveComp(r.id)} style={delBtnStyle} aria-label="Видалити" title="Видалити">✕</button>
+                        )}
                       </Td>
                     </tr>
                   ))}
@@ -184,21 +192,23 @@ export default function IngredientsTab({ units, products }: { units: Unit[]; pro
                 </tbody>
               </table>
 
-              <form onSubmit={submitAddComp} style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <select required value={compForm.ingredient_id}
-                  onChange={e => setCompForm({ ...compForm, ingredient_id: e.target.value })}
-                  style={{ flex: 2, padding: '5px 8px', border: '1px solid #ccc', borderRadius: 4, minWidth: 140 }}>
-                  <option value="">— інгредієнт —</option>
-                  {ingredients
-                    .filter(i => !composition.find(c => c.ingredient_id === i.id))
-                    .map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                </select>
-                <input required type="number" step="any" min="0.0001"
-                  placeholder="К-сть" value={compForm.qty_per_unit}
-                  onChange={e => setCompForm({ ...compForm, qty_per_unit: e.target.value })}
-                  style={{ flex: 1, padding: '5px 8px', border: '1px solid #ccc', borderRadius: 4, minWidth: 80 }} />
-                <button type="submit" disabled={saving} style={addBtnStyle}>+ Додати</button>
-              </form>
+              {can('admin_prices.create') && (
+                <form onSubmit={submitAddComp} style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <select required value={compForm.ingredient_id}
+                    onChange={e => setCompForm({ ...compForm, ingredient_id: e.target.value })}
+                    style={{ flex: 2, padding: '5px 8px', border: '1px solid #ccc', borderRadius: 4, minWidth: 140 }}>
+                    <option value="">— інгредієнт —</option>
+                    {ingredients
+                      .filter(i => !composition.find(c => c.ingredient_id === i.id))
+                      .map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  </select>
+                  <input required type="number" step="any" min="0.0001"
+                    placeholder="К-сть" value={compForm.qty_per_unit}
+                    onChange={e => setCompForm({ ...compForm, qty_per_unit: e.target.value })}
+                    style={{ flex: 1, padding: '5px 8px', border: '1px solid #ccc', borderRadius: 4, minWidth: 80 }} />
+                  <button type="submit" disabled={saving} style={addBtnStyle}>+ Додати</button>
+                </form>
+              )}
               {error && <p style={{ color: '#c0392b', marginTop: 6, fontSize: 13 }}>{error}</p>}
             </>
           )}

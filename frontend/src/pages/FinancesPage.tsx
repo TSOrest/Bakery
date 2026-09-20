@@ -12,6 +12,7 @@ import { useWorkDate } from '../context/DateContext'
 import { useToast } from '../components/Toast'
 import { IconButton } from '../components/IconButton'
 import AuditBadge from '../components/AuditBadge'
+import { useAuth } from '../context/AuthContext'
 import styles from './FinancesPage.module.css'
 
 // ── Константи ─────────────────────────────────────────────────────────────────
@@ -326,6 +327,7 @@ interface ClientPanelProps {
 }
 
 function ClientPanel({ balance, workDate, articles, onChanged, onClose }: ClientPanelProps) {
+  const { can } = useAuth()
   const [history,  setHistory]  = useState<Finance[]>([])
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -377,9 +379,11 @@ function ClientPanel({ balance, workDate, articles, onChanged, onClose }: Client
           )}
         </div>
         <div className={styles.clientPanelActions}>
-          <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
-            + Оплата
-          </button>
+          {can('finances.create') && (
+            <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
+              + Оплата
+            </button>
+          )}
           <IconButton className={styles.closeBtn} onClick={onClose} label="Закрити">✕</IconButton>
         </div>
       </div>
@@ -414,7 +418,7 @@ function ClientPanel({ balance, workDate, articles, onChanged, onClose }: Client
                 {e.sign === 1 ? '+' : '−'}{fmt(e.amount)} грн
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                {canEditFinance(e) && (
+                {canEditFinance(e) && can('finances.edit') && (
                   <button
                     className={styles.editBtn}
                     title="Редагувати суму"
@@ -458,6 +462,7 @@ function ClientPanel({ balance, workDate, articles, onChanged, onClose }: Client
 // ── Головна сторінка ──────────────────────────────────────────────────────────
 
 export default function FinancesPage() {
+  const { can } = useAuth()
   const { workDate } = useWorkDate()
   const today = workDate ?? new Date().toISOString().slice(0, 10)
 
@@ -612,9 +617,11 @@ export default function FinancesPage() {
             </span>
           )}
         </h2>
-        <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
-          + Операція
-        </button>
+        {can('finances.create') && (
+          <button className={styles.btnPrimary} onClick={() => setShowForm(true)}>
+            + Операція
+          </button>
+        )}
       </div>
 
       {/* Зведення + KPI внутрішніх клієнтів — один рядок */}
@@ -899,7 +906,7 @@ export default function FinancesPage() {
                     {e.sign === 1 ? '+' : '−'}{fmt(e.amount)}
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {canEditFinance(e) && (
+                    {canEditFinance(e) && can('finances.edit') && (
                       <button
                         className={styles.editBtn}
                         title="Редагувати суму"

@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import type { Client, Route } from '../../types'
+import { useAuth } from '../../context/AuthContext'
 import {
   addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td,
   CLIENT_KIND_LABELS, SYSTEM_KINDS, PROTECTED_KINDS,
@@ -10,6 +11,7 @@ import {
 } from './shared'
 
 export default function SystemClientsTab({ routes }: { routes: Route[] }) {
+  const { can } = useAuth()
   const [clients, setClients]   = useState<Client[]>([])
   const [modal, setModal]       = useState(false)
   const [editing, setEditing]   = useState<Client | null>(null)
@@ -87,13 +89,13 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
       <Td>{CLIENT_KIND_LABELS[c.client_kind] ?? c.client_kind}</Td>
       <Td>{routeName(c.route_id)}</Td>
       <Td>
-        <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>
+        {can('admin_clients.edit') && <button onClick={() => openEdit(c)} style={editBtnStyle}>Редагувати</button>}
         {c.is_active === 1 ? (
-          PROTECTED_KINDS.has(c.client_kind)
+          !can('admin_clients.delete') ? null : PROTECTED_KINDS.has(c.client_kind)
             ? <button disabled title="Системний клієнт — не можна деактивувати" style={{ ...delBtnStyle, opacity: 0.35, cursor: 'not-allowed' }}>Деактивувати</button>
             : <button onClick={async () => { if (!confirm(`Деактивувати "${c.full_name}"?`)) return; await api.delete(`/clients/${c.id}`); load() }} style={delBtnStyle}>Деактивувати</button>
         ) : (
-          <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+          can('admin_clients.edit') && <button onClick={async () => { await api.put(`/clients/${c.id}`, { is_active: 1 }); load() }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
         )}
       </Td>
     </tr>
@@ -103,12 +105,14 @@ export default function SystemClientsTab({ routes }: { routes: Route[] }) {
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
         <strong>Системні клієнти ({activeClients.length})</strong>
-        <button
-          onClick={openNew}
-          disabled={availableKinds.length === 0}
-          title={availableKinds.length === 0 ? 'Усі типи системних клієнтів вже існують' : undefined}
-          style={availableKinds.length === 0 ? { ...addBtnStyle, opacity: 0.4, cursor: 'not-allowed' } : addBtnStyle}
-        >+ Додати</button>
+        {can('admin_clients.create') && (
+          <button
+            onClick={openNew}
+            disabled={availableKinds.length === 0}
+            title={availableKinds.length === 0 ? 'Усі типи системних клієнтів вже існують' : undefined}
+            style={availableKinds.length === 0 ? { ...addBtnStyle, opacity: 0.4, cursor: 'not-allowed' } : addBtnStyle}
+          >+ Додати</button>
+        )}
       </div>
 
       <table style={tableStyle}>

@@ -130,7 +130,7 @@ function ServerConnectionOverlay() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function AppRoutes() {
-  const { user, loading } = useAuth()
+  const { user, loading, can } = useAuth()
 
   if (loading) {
     return (
@@ -155,7 +155,7 @@ function AppRoutes() {
   return (
     <DateProvider>
       <Routes>
-        <Route path="db-editor" element={<DbEditorPage />} />
+        <Route path="db-editor" element={can('admin_system.db_editor') ? <DbEditorPage /> : <Navigate to="/" replace />} />
         <Route path="pos" element={<PosPage />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<DefaultRedirect />} />

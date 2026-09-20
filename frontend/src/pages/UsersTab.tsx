@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
 const ROLE_OPTIONS = [
   { value: 'operator',   label: 'Оператор' },
@@ -30,6 +31,12 @@ const inpStyle: React.CSSProperties = {
 }
 
 export default function UsersTab() {
+  const { user, can } = useAuth()
+  const isTrueAdmin = user?.role === 'admin'
+  // Гранульовані права ролей: делегований admin_system.create/.edit НЕ дає
+  // призначити роль admin чи керувати вже-адмінським акаунтом — дзеркалить
+  // hard-rule на бекенді (auth.py, create_user/update_user).
+  const roleOptionsFor = () => isTrueAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter(r => r.value !== 'admin')
   const [users,    setUsers]    = useState<UserRow[]>([])
   const [form,     setForm]     = useState({ username: '', password: '', full_name: '', role: 'operator' })
   const [editId,   setEditId]   = useState<number | null>(null)
@@ -103,7 +110,7 @@ export default function UsersTab() {
                 <td style={td}>
                   <select value={editData.role} onChange={(e) => setEditData((d) => ({ ...d, role: e.target.value }))}
                     style={{ ...inpStyle }}>
-                    {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    {roleOptionsFor().map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 </td>
                 <td style={td}>
@@ -137,14 +144,18 @@ export default function UsersTab() {
                   </span>
                 </td>
                 <td style={{ ...td, display: 'flex', gap: '0.35rem' }}>
-                  <button onClick={() => startEdit(u)}
-                    style={{ background: '#fff', border: '1px solid #1a3a5c', color: '#1a3a5c', padding: '0.2rem 0.5rem', borderRadius: 3, cursor: 'pointer', fontSize: '0.8rem' }}>
-                    Редагувати
-                  </button>
-                  <button onClick={() => toggleActive(u)}
-                    style={{ background: '#fff', border: `1px solid ${u.is_active ? '#e67e22' : '#27ae60'}`, color: u.is_active ? '#e67e22' : '#27ae60', padding: '0.2rem 0.5rem', borderRadius: 3, cursor: 'pointer', fontSize: '0.8rem' }}>
-                    {u.is_active ? 'Вимкнути' : 'Увімкнути'}
-                  </button>
+                  {can('admin_system.edit') && (isTrueAdmin || u.role !== 'admin') && (
+                    <>
+                      <button onClick={() => startEdit(u)}
+                        style={{ background: '#fff', border: '1px solid #1a3a5c', color: '#1a3a5c', padding: '0.2rem 0.5rem', borderRadius: 3, cursor: 'pointer', fontSize: '0.8rem' }}>
+                        Редагувати
+                      </button>
+                      <button onClick={() => toggleActive(u)}
+                        style={{ background: '#fff', border: `1px solid ${u.is_active ? '#e67e22' : '#27ae60'}`, color: u.is_active ? '#e67e22' : '#27ae60', padding: '0.2rem 0.5rem', borderRadius: 3, cursor: 'pointer', fontSize: '0.8rem' }}>
+                        {u.is_active ? 'Вимкнути' : 'Увімкнути'}
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             )
@@ -152,6 +163,8 @@ export default function UsersTab() {
         </tbody>
       </table>
 
+      {can('admin_system.create') && (
+      <>
       <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.95rem', color: '#1a3a5c' }}>Додати користувача</h4>
       <form onSubmit={handleCreate} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
         {([['username', 'Логін', 'text'], ['full_name', "Ім'я", 'text'], ['password', 'Пароль', 'password']] as [keyof typeof form, string, string][]).map(([key, label, type]) => (
@@ -166,7 +179,7 @@ export default function UsersTab() {
           Роль
           <select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
             style={{ padding: '0.35rem 0.5rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.88rem' }}>
-            {ROLE_OPTIONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            {roleOptionsFor().map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </label>
         <button type="submit"
@@ -174,6 +187,8 @@ export default function UsersTab() {
           + Додати
         </button>
       </form>
+      </>
+      )}
     </section>
   )
 }

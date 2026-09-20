@@ -3,6 +3,7 @@ import { api } from '../../api/client'
 import Modal from '../../components/Modal'
 import formStyles from '../../components/Form.module.css'
 import { useToast } from '../../components/Toast'
+import { useAuth } from '../../context/AuthContext'
 import type { Route } from '../../types'
 import { addBtnStyle, delBtnStyle, editBtnStyle, tableStyle, Th, Td } from './shared'
 
@@ -10,6 +11,7 @@ interface RouteFormState { name: string; sort_order: string }
 
 export default function RoutesTab({ routes, onReload }: { routes: Route[]; onReload: () => void }) {
   const toast = useToast()
+  const { can } = useAuth()
   const [modal, setModal]     = useState(false)
   const [editing, setEditing] = useState<Route | null>(null)
   const [form, setForm]       = useState<RouteFormState>({ name: '', sort_order: '0' })
@@ -91,7 +93,7 @@ export default function RoutesTab({ routes, onReload }: { routes: Route[]; onRel
     <section>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
         <strong>Маршрути ({activeRoutes.length})</strong>
-        <button onClick={openNew} style={addBtnStyle}>+ Додати маршрут</button>
+        {can('admin_clients.create') && <button onClick={openNew} style={addBtnStyle}>+ Додати маршрут</button>}
       </div>
 
       <table style={tableStyle}>
@@ -106,8 +108,8 @@ export default function RoutesTab({ routes, onReload }: { routes: Route[]; onRel
               <Td>{r.name}</Td>
               <Td>{r.sort_order}</Td>
               <Td>
-                <button onClick={() => openEdit(r)} style={editBtnStyle}>Редагувати</button>
-                <button onClick={() => openDeactivate(r)} style={delBtnStyle}>Деактивувати</button>
+                {can('admin_clients.edit') && <button onClick={() => openEdit(r)} style={editBtnStyle}>Редагувати</button>}
+                {can('admin_clients.delete') && <button onClick={() => openDeactivate(r)} style={delBtnStyle}>Деактивувати</button>}
               </Td>
             </tr>
           ))}
@@ -128,10 +130,12 @@ export default function RoutesTab({ routes, onReload }: { routes: Route[]; onRel
               <Td>{r.name}</Td>
               <Td>{r.sort_order}</Td>
               <Td>
-                <button onClick={async () => {
-                  await api.put(`/routes/${r.id}`, { name: r.name, sort_order: r.sort_order, is_active: 1 })
-                  onReload()
-                }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+                {can('admin_clients.edit') && (
+                  <button onClick={async () => {
+                    await api.put(`/routes/${r.id}`, { name: r.name, sort_order: r.sort_order, is_active: 1 })
+                    onReload()
+                  }} style={{ ...editBtnStyle, color: '#080' }}>Відновити</button>
+                )}
               </Td>
             </tr>
           ))}

@@ -27,7 +27,7 @@ import { ADMIN_TAB_GROUPS, type Tab } from './admin/tabConfig'
 // ─── Головний компонент ──────────────────────────────────────────────────────
 
 export default function AdminPage() {
-  const { user, permissions, reloadPermissions } = useAuth()
+  const { user, permissions, reloadPermissions, can } = useAuth()
   const role    = user?.role ?? 'operator'
   const isAdmin = role === 'admin'
   const userPerms: string[] = isAdmin ? [] : (permissions[role] ?? [])
@@ -116,8 +116,8 @@ export default function AdminPage() {
           </div>
         ))}
 
-        {/* ── База даних (тільки адмін) ──────────────────────────────────────── */}
-        {isAdmin && (
+        {/* ── База даних (гранульований дозвіл admin_system.db_editor) ────────── */}
+        {can('admin_system.db_editor') && (
           <div style={{ marginBottom: '1.1rem' }}>
             <div style={{
               fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase',

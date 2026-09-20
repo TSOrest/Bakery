@@ -6,6 +6,7 @@ import { useToast } from '../../components/Toast'
 import PriceGantt, { type GanttRow, type GanttPriceSegment } from '../../components/PriceGantt'
 import type { Category, Client, ClientPriceOverride, Price, Product } from '../../types'
 import { addBtnStyle, tableStyle } from './shared'
+import { useAuth } from '../../context/AuthContext'
 
 interface BulkPreviewItem {
   product_id:     number
@@ -44,6 +45,7 @@ export default function PricesTab({ products, clients, categories }: {
   categories: Category[]
 }) {
   const toast = useToast()
+  const { can } = useAuth()
   const today    = new Date().toISOString().slice(0, 10)
   const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10) })()
 
@@ -555,13 +557,17 @@ export default function PricesTab({ products, clients, categories }: {
                 )}
               </strong>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setBulkModal(true); setError('') }}
-                  style={{ ...addBtnStyle, background: '#e67e22' }}>
-                  % Масова зміна
-                </button>
-                <button onClick={() => { setNewModal(true); setError('') }} style={addBtnStyle}>
-                  + Нова ціна
-                </button>
+                {can('admin_prices.edit') && (
+                  <button onClick={() => { setBulkModal(true); setError('') }}
+                    style={{ ...addBtnStyle, background: '#e67e22' }}>
+                    % Масова зміна
+                  </button>
+                )}
+                {can('admin_prices.create') && (
+                  <button onClick={() => { setNewModal(true); setError('') }} style={addBtnStyle}>
+                    + Нова ціна
+                  </button>
+                )}
               </div>
             </div>
 
@@ -570,7 +576,7 @@ export default function PricesTab({ products, clients, categories }: {
         )}
 
         {/* ── Індивідуальні ціни — контролери ── */}
-        {innerTab === 'overrides' && (
+        {innerTab === 'overrides' && can('admin_prices.create') && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
             <button onClick={() => openOverrideModal()} style={addBtnStyle}>
               + Встановити індивідуальні ціни
@@ -587,8 +593,8 @@ export default function PricesTab({ products, clients, categories }: {
             timeFrom={timeFrom}
             timeTo={timeTo}
             today={today}
-            onEdit={openEdit}
-            onDelete={deactivate}
+            onEdit={can('admin_prices.edit') ? openEdit : undefined}
+            onDelete={can('admin_prices.delete') ? deactivate : undefined}
           />
 
           {/* Модал редагування */}
@@ -995,10 +1001,12 @@ export default function PricesTab({ products, clients, categories }: {
                         активних: {activeOvs.length} · {activeSum.toFixed(2)} ₴
                       </span>
                     )}
-                    <button
-                      onClick={e => { e.stopPropagation(); openOverrideModal(String(clientId)) }}
-                      style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #3b82f6', borderRadius: 6, background: 'white', color: '#2563eb', cursor: 'pointer' }}
-                    >+ Ціни</button>
+                    {can('admin_prices.create') && (
+                      <button
+                        onClick={e => { e.stopPropagation(); openOverrideModal(String(clientId)) }}
+                        style={{ fontSize: 12, padding: '3px 10px', border: '1px solid #3b82f6', borderRadius: 6, background: 'white', color: '#2563eb', cursor: 'pointer' }}
+                      >+ Ціни</button>
+                    )}
                   </div>
                   {isExpanded && (
                     <div style={{ padding: '8px 0 4px' }}>
@@ -1008,8 +1016,8 @@ export default function PricesTab({ products, clients, categories }: {
                         timeFrom={ovTimeFrom}
                         timeTo={ovTimeTo}
                         today={today}
-                        onEdit={(id) => openOvEdit(id)}
-                        onDelete={(id) => deleteOverride(id)}
+                        onEdit={can('admin_prices.create') && can('admin_prices.delete') ? (id) => openOvEdit(id) : undefined}
+                        onDelete={can('admin_prices.delete') ? (id) => deleteOverride(id) : undefined}
                       />
                     </div>
                   )}
