@@ -1,9 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { api } from '../../api/client'
-import { ADMIN_TAB_GROUPS } from './tabConfig'
 import { addBtnStyle, tableStyle } from './shared'
 
-// Основні вкладки (не Довідники)
+// Основні вкладки (сторінковий доступ — не чіпається гранульованими правами)
 const MAIN_PAGE_PERMS = [
   { key: 'orders',    label: 'Замовлення' },
   { key: 'baking',    label: 'Випічка' },
@@ -13,11 +12,63 @@ const MAIN_PAGE_PERMS = [
   { key: 'pos',       label: 'POS-каса' },
 ]
 
-// Підрозділи Довідників (всі конфігуруються)
-const ADMIN_SUB_PERMS = ADMIN_TAB_GROUPS
-  .map(g => ({ key: g.permKey as string, label: g.label }))
+// Гранульовані CRUD-блоки (Гранульовані права ролей). Ключ блоку = префікс
+// дозволу (`<key>.<дія>`, напр. "admin_clients.edit"), крім "finances" —
+// там дозволи вже прямо на цьому ключі без .view (перегляд журналу вже
+// покритий сторінковим "Фінанси" вище — окрема .view колонка була б
+// дублем). `extra` — некрудні точкові прапорці цього ж розділу (форми
+// налаштувань, разові небезпечні дії), не вкладаються в CRUD.
+interface ExtraPerm { key: string; label: string }
+interface CrudBlock { key: string; label: string; hint: string; actions: string[]; extra?: ExtraPerm[] }
 
-// Точкові дозволи, не пов'язані з жодною вкладкою (Система сповіщень)
+const CRUD_BLOCKS: CrudBlock[] = [
+  {
+    key: 'admin_goods', label: 'Виробництво',
+    hint: 'Вироби, Категорії, Одиниці виміру',
+    actions: ['view', 'create', 'edit', 'delete'],
+  },
+  {
+    key: 'admin_clients', label: 'Клієнти',
+    hint: 'Клієнти, Маршрути, Групи клієнтів, Системні клієнти',
+    actions: ['view', 'create', 'edit', 'delete'],
+  },
+  {
+    key: 'admin_prices', label: 'Ціни та собівартість',
+    hint: 'Ціни, Інгредієнти (перегляд Маржі — тим самим "Перегляд")',
+    actions: ['view', 'create', 'edit', 'delete'],
+  },
+  {
+    key: 'admin_org', label: 'Організація',
+    hint: 'CRUD стосується Фінансових статей; форми налаштувань — окремим прапорцем праворуч',
+    actions: ['view', 'create', 'edit', 'delete'],
+    extra: [
+      { key: 'admin_org.settings', label: 'Редагування налаштувань (Параметри пекарні, Бот, Шаблони, Звернення)' },
+    ],
+  },
+  {
+    key: 'admin_system', label: 'Система',
+    hint: 'CRUD стосується Користувачів; решта — точкові прапорці праворуч',
+    actions: ['view', 'create', 'edit', 'delete'],
+    extra: [
+      { key: 'admin_system.backup',    label: 'Бекапи та відновлення' },
+      { key: 'admin_system.reset_db',  label: 'Скидання бази даних' },
+      { key: 'admin_system.import',    label: 'Імпорт з Access' },
+      { key: 'admin_system.github',    label: 'GitHub-інтеграція' },
+      { key: 'admin_system.db_editor', label: 'Редактор БД' },
+    ],
+  },
+  {
+    key: 'finances', label: 'Фінанси — Журнал операцій',
+    hint: 'Перегляд журналу вже дає вкладка «Фінанси» вище — тут лише дії',
+    actions: ['create', 'edit', 'delete'],
+  },
+]
+
+const ACTION_LABELS: Record<string, string> = {
+  view: 'Перегляд', create: 'Створення', edit: 'Редагування', delete: 'Видалення',
+}
+
+// Точкові дозволи, не пов'язані з жодним розділом
 const EXTRA_PERMS = [
   { key: 'can_install_update', label: 'Встановлення оновлень' },
 ]
@@ -76,11 +127,6 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
     padding: '0.5rem 0.75rem', textAlign: 'center', fontWeight: 600,
     fontSize: '0.8rem', background: '#e8eef5', whiteSpace: 'nowrap',
   }
-  const thGroupStyle: CSSProperties = {
-    padding: '0.3rem 0.75rem', textAlign: 'center', fontWeight: 700,
-    fontSize: '0.68rem', background: '#dde6f0', color: '#555',
-    textTransform: 'uppercase', letterSpacing: '0.05em',
-  }
   const tdStyle: CSSProperties = {
     padding: '0.45rem 0.75rem', textAlign: 'center',
     borderBottom: '1px solid #f0f0f0',
@@ -88,6 +134,22 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
   const tdSepStyle: CSSProperties = {
     ...tdStyle, borderLeft: '2px solid #c8d6e5', background: '#f7f9fc',
   }
+  const thSepStyle: CSSProperties = { ...thStyle, borderLeft: '2px solid #c8d6e5' }
+
+  const CheckCell = ({ role, permKey, sep }: { role: string; permKey: string; sep?: boolean }) => (
+    <td style={sep ? tdSepStyle : tdStyle}>
+      {role === 'admin' ? (
+        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
+      ) : (
+        <input
+          type="checkbox"
+          checked={perms[role]?.has(permKey) ?? false}
+          onChange={() => toggle(role, permKey)}
+          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+        />
+      )}
+    </td>
+  )
 
   return (
     <section>
@@ -95,30 +157,13 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
       <p style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1rem' }}>
         Оператори та бухгалтери бачать лише дозволені розділи. Адміністратор завжди має повний доступ.
       </p>
-      <div style={{ overflowX: 'auto' }}>
+      <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
         <table style={{ ...tableStyle, width: 'auto' }}>
           <thead>
-            {/* Рядок групових заголовків */}
             <tr>
-              <th style={{ ...thGroupStyle, textAlign: 'left', background: '#e8eef5' }} rowSpan={2}>Роль</th>
-              <th style={{ ...thGroupStyle }} colSpan={MAIN_PAGE_PERMS.length}>Основні розділи</th>
-              <th style={{ ...thGroupStyle, borderLeft: '2px solid #c8d6e5' }} colSpan={ADMIN_SUB_PERMS.length}>Довідники</th>
-              <th style={{ ...thGroupStyle, borderLeft: '2px solid #c8d6e5' }} colSpan={EXTRA_PERMS.length}>Додатково</th>
-            </tr>
-            {/* Рядок конкретних колонок */}
-            <tr>
+              <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
               {MAIN_PAGE_PERMS.map(t => (
                 <th key={t.key} style={thStyle}>{t.label}</th>
-              ))}
-              {ADMIN_SUB_PERMS.map((t, i) => (
-                <th key={t.key} style={{ ...thStyle, ...(i === 0 ? { borderLeft: '2px solid #c8d6e5' } : {}) }}>
-                  {t.label}
-                </th>
-              ))}
-              {EXTRA_PERMS.map((t, i) => (
-                <th key={t.key} style={{ ...thStyle, ...(i === 0 ? { borderLeft: '2px solid #c8d6e5' } : {}) }}>
-                  {t.label}
-                </th>
               ))}
             </tr>
           </thead>
@@ -132,46 +177,7 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
                     {isAdmin && <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>(завжди всі)</span>}
                   </td>
                   {MAIN_PAGE_PERMS.map(t => (
-                    <td key={t.key} style={tdStyle}>
-                      {isAdmin ? (
-                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={perms[role]?.has(t.key) ?? false}
-                          onChange={() => toggle(role, t.key)}
-                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                      )}
-                    </td>
-                  ))}
-                  {ADMIN_SUB_PERMS.map((t, i) => (
-                    <td key={t.key} style={i === 0 ? tdSepStyle : tdStyle}>
-                      {isAdmin ? (
-                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={perms[role]?.has(t.key) ?? false}
-                          onChange={() => toggle(role, t.key)}
-                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                      )}
-                    </td>
-                  ))}
-                  {EXTRA_PERMS.map((t, i) => (
-                    <td key={t.key} style={i === 0 ? tdSepStyle : tdStyle}>
-                      {isAdmin ? (
-                        <span style={{ color: '#27ae60', fontSize: 16 }}>✓</span>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={perms[role]?.has(t.key) ?? false}
-                          onChange={() => toggle(role, t.key)}
-                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                      )}
-                    </td>
+                    <CheckCell key={t.key} role={role} permKey={t.key} />
                   ))}
                 </tr>
               )
@@ -179,6 +185,82 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
           </tbody>
         </table>
       </div>
+
+      <h3 style={{ marginBottom: '0.25rem' }}>Детальні права в Довідниках і Фінансах</h3>
+      <p style={{ fontSize: '0.82rem', color: '#666', marginBottom: '1.25rem' }}>
+        Хто може лише переглядати розділ, а хто — ще й створювати, редагувати
+        чи видаляти записи. Заміняє колишній єдиний прапорець "видно вкладку"
+        на окремі дозволи на кожну дію.
+      </p>
+
+      {CRUD_BLOCKS.map(block => (
+        <div key={block.key} style={{ marginBottom: '1.75rem' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1a3a5c' }}>{block.label}</div>
+          <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: '0.5rem' }}>{block.hint}</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ ...tableStyle, width: 'auto' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
+                  {block.actions.map(a => (
+                    <th key={a} style={thStyle}>{ACTION_LABELS[a]}</th>
+                  ))}
+                  {(block.extra ?? []).map((e, i) => (
+                    <th key={e.key} style={i === 0 ? thSepStyle : thStyle}>{e.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ALL_ROLES.map(role => {
+                  const isAdmin = role === 'admin'
+                  return (
+                    <tr key={role} style={isAdmin ? { background: '#f0f4f8' } : undefined}>
+                      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                        {ROLE_LABELS_MAP[role]}
+                      </td>
+                      {block.actions.map(a => (
+                        <CheckCell key={a} role={role} permKey={`${block.key}.${a}`} />
+                      ))}
+                      {(block.extra ?? []).map((e, i) => (
+                        <CheckCell key={e.key} role={role} permKey={e.key} sep={i === 0} />
+                      ))}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      <div style={{ marginBottom: '1.5rem' }}>
+        <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1a3a5c', marginBottom: '0.5rem' }}>Додатково</div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ ...tableStyle, width: 'auto' }}>
+            <thead>
+              <tr>
+                <th style={{ ...thStyle, textAlign: 'left' }}>Роль</th>
+                {EXTRA_PERMS.map(t => (
+                  <th key={t.key} style={thStyle}>{t.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ALL_ROLES.map(role => (
+                <tr key={role} style={role === 'admin' ? { background: '#f0f4f8' } : undefined}>
+                  <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {ROLE_LABELS_MAP[role]}
+                  </td>
+                  {EXTRA_PERMS.map(t => (
+                    <CheckCell key={t.key} role={role} permKey={t.key} />
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '1rem' }}>
         <button onClick={handleSave} disabled={saving} style={addBtnStyle}>
           {saving ? 'Збереження...' : 'Зберегти права'}
@@ -186,7 +268,9 @@ export default function RolePermissionsTab({ onSaved }: { onSaved: () => Promise
         {saved && <span style={{ color: '#2e7d32', fontSize: '0.9rem' }}>✓ Збережено</span>}
       </div>
       <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.75rem' }}>
-        Зміни набудуть чинності після наступного входу в систему.
+        Зміни набудуть чинності після наступного входу в систему. Права ролей
+        редагує лише адміністратор — цей розділ недоступний навіть за
+        делегованим дозволом на налаштування.
       </p>
     </section>
   )

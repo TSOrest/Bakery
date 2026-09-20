@@ -43,7 +43,7 @@ function parseMeta(raw?: string | null): Record<string, string> {
 }
 
 export default function NotificationBell() {
-  const { user, permissions } = useAuth()
+  const { can } = useAuth()
   const toast = useToast()
   const [items, setItems]   = useState<AppNotification[]>([])
   const [unread, setUnread] = useState(0)
@@ -53,8 +53,7 @@ export default function NotificationBell() {
   const firstLoad = useRef(true)
   const rootRef   = useRef<HTMLDivElement>(null)
 
-  const role = user?.role ?? 'operator'
-  const canInstallUpdate = role === 'admin' || (permissions[role] ?? []).includes('can_install_update')
+  const canInstallUpdate = can('can_install_update')
 
   const poll = useCallback(async () => {
     try {

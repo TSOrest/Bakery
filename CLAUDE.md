@@ -2376,9 +2376,35 @@ happy-path тесту тут — лише 403-заборона (уже покр�
 щасливий шлях лишається в ізольованому `test_zz_reset_db.py` (навмисно
 останній за алфавітом — знищує робочі дані спільної тестової БД).
 
-**Наступні кроки** (Крок 4+): нова CRUD-матриця в `RolePermissionsTab.tsx`
-+ `AuthContext.can()`; дії-рівневе блокування кнопок у ~14
-admin-компонентах і `FinancesPage.tsx`; закриття структурної шпарини
+**Крок 4 — фронтенд, модель прав:**
+
+- **`AuthContext.tsx`**: новий обчислюваний `can(key: string): boolean`
+  (`user?.role === 'admin' || (permissions[role] ?? []).includes(key)`) —
+  єдина точка перевірки дії-рівневого дозволу, дзеркалить backend'ний
+  `require_perm()`. `NotificationBell.tsx`'s `canInstallUpdate` переведено
+  на `can('can_install_update')` (прибрано дублікат виразу).
+- **`RolePermissionsTab.tsx` — повністю переписано**: верхня таблиця
+  сторінкового доступу (`MAIN_PAGE_PERMS`) лишилась як була. Стару єдину
+  таблицю з одним прапорцем на весь розділ Довідників (`ADMIN_SUB_PERMS`
+  з `tabConfig.ts`) замінено на 6 окремих CRUD-блоків
+  (`CRUD_BLOCKS`) — по одному на `admin_goods`/`admin_clients`/
+  `admin_prices`/`admin_org`/`admin_system` (Перегляд/Створення/
+  Редагування/Видалення) і окремо `finances` (лише 3 дії, без Перегляду —
+  вже покрито сторінковим "Фінанси" вище). `admin_org` і `admin_system`
+  мають додаткові колонки-прапорці для точкових небезпечних дій
+  (`admin_org.settings`; `admin_system.backup/reset_db/import/github/db_editor`).
+  Спільний `<CheckCell>` (роль=admin → нередагований "✓", інакше
+  чекбокс) використовується всюди — той самий підхід, що вже був.
+  `import { ADMIN_TAB_GROUPS } from './tabConfig'` прибрано з цього файлу
+  (більше не потрібен тут — `tabConfig.ts` і сам експорт лишаються,
+  використовуються в `AdminPage.tsx` для сайдбару).
+
+**Наступні кроки** (Крок 5): дії-рівневе блокування кнопок у admin-
+компонентах (`ProductsTab.tsx`, `CategoriesTab.tsx`, `ClientsTab.tsx`,
+`RoutesTab.tsx`, `ClientGroupsTab.tsx`, `SystemClientsTab.tsx`,
+`PricesTab.tsx`, `IngredientsTab.tsx`, `FinanceArticlesTab.tsx`,
+`UsersTab.tsx`, `BackupTab.tsx`, `SettingsTab.tsx`, `AdminPage.tsx`) і
+`FinancesPage.tsx` через новий `can()`; закриття структурної шпарини
 `db-editor`-маршруту на фронтенді (зараз рятує лише бекенд-403).
 
 ## Аудит-фікси v0.9.36-v1.0.4

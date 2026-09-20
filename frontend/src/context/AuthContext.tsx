@@ -15,6 +15,7 @@ interface AuthContextValue {
   user:        AuthUser | null
   token:       string | null
   permissions: RolePermissions
+  can:         (key: string) => boolean
   login:       (username: string, password: string) => Promise<void>
   logout:      () => Promise<void>
   reloadPermissions: () => Promise<void>
@@ -104,8 +105,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (t) await fetchPermissions(t)
   }
 
+  // Гранульовані права ролей: єдина точка перевірки дії-рівневого дозволу
+  // (сторінкового чи CRUD-ключа групи, напр. "admin_clients.edit") —
+  // дзеркалить backend'ний require_perm(). Раніше цей самий вираз
+  // дублювався в NotificationBell.tsx (canInstallUpdate) окремо.
+  const can = (key: string): boolean =>
+    user?.role === 'admin' || (permissions[user?.role ?? ''] ?? []).includes(key)
+
   return (
-    <AuthContext.Provider value={{ user, token, permissions, login, logout, reloadPermissions, loading }}>
+    <AuthContext.Provider value={{ user, token, permissions, can, login, logout, reloadPermissions, loading }}>
       {children}
     </AuthContext.Provider>
   )
