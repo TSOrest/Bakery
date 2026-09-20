@@ -600,7 +600,7 @@ function AddReceiptModal({
           </div>
           <div>
             <label style={labelStyle}>Кількість</label>
-            <input type="number" min="0" step="0.001" placeholder="0"
+            <input type="number" min="0" step="1" placeholder="0"
               value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })}
               style={inputStyle} />
           </div>
@@ -724,7 +724,7 @@ function OpeningRecModal({ shopId, products, workDate, onClose, onSaved }: {
                 <tr key={p.id}>
                   <td style={miniTd}>{p.name}</td>
                   <td style={{ ...miniTd, textAlign: 'right' }}>
-                    <input type="number" min="0" step="0.001" placeholder="0"
+                    <input type="number" min="0" step="1" placeholder="0"
                       ref={(el) => { inputRefs.current[idx] = el }}
                       value={qtys[p.id] ?? ''}
                       onChange={(e) => setQtys((prev) => ({ ...prev, [p.id]: e.target.value }))}
@@ -1807,7 +1807,7 @@ function ReconciliationTable({
 
                         <span style={{ fontSize: '0.8rem', color: '#555', fontWeight: 600 }}>Кількість:</span>
                         <input
-                          type="number" min="0.001" step="0.001" value={dispQty}
+                          type="number" min="1" step="1" value={dispQty}
                           onChange={(e) => setDispQty(e.target.value)}
                           placeholder="0"
                           style={{ ...inputStyle, width: '80px', padding: '0.2rem 0.4rem' }}
@@ -1861,7 +1861,7 @@ const StreamInput = forwardRef<
     onCommit: (v: string) => void
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void
   }
->(({ value, disabled, placeholder, step = '0.001', error, onCommit, onKeyDown }, ref) => {
+>(({ value, disabled, placeholder, step = '1', error, onCommit, onKeyDown }, ref) => {
   const [local, setLocal] = useState(value.toString())
   useEffect(() => setLocal(value.toString()), [value])
   return (
