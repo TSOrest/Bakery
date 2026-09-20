@@ -2845,6 +2845,13 @@ body {
   display: flex; justify-content: space-between; align-items: baseline;
   padding-bottom: 1.5mm; margin-bottom: 3mm;
   border-bottom: 2px solid #1a3a5c;
+  /* Без цього шапка (заголовок+підсумок) лишалась сама на сторінці, коли
+     перший .group-block (page-break-inside: avoid) не вміщався в решту
+     місця під нею — рушій друку переносив ЛИШЕ блок групи на наступну
+     сторінку, а шапку лишав самотньою. break-after забороняє розрив
+     одразу після шапки — тепер шапка переноситься РАЗОМ із вмістом. */
+  break-after: avoid;
+  page-break-after: avoid;
 }
 .doc-title {
   font-size: 14pt; font-weight: 700; color: #1a3a5c; line-height: 1.1;
@@ -3089,6 +3096,13 @@ body {
   display: flex; justify-content: space-between; align-items: baseline;
   padding-bottom: 1.5mm; margin-bottom: 3mm;
   border-bottom: 2px solid #1a3a5c;
+  /* Без цього шапка (заголовок+підсумок) лишалась сама на сторінці, коли
+     перший .group-block (page-break-inside: avoid) не вміщався в решту
+     місця під нею — рушій друку переносив ЛИШЕ блок групи на наступну
+     сторінку, а шапку лишав самотньою. break-after забороняє розрив
+     одразу після шапки — тепер шапка переноситься РАЗОМ із вмістом. */
+  break-after: avoid;
+  page-break-after: avoid;
 }
 .doc-title { font-size: 14pt; font-weight: 700; color: #1a3a5c; line-height: 1.1; }
 .meta-line { font-size: 9.5pt; color: #555; display: flex; gap: 2mm; align-items: baseline; }
