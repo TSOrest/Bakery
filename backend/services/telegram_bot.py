@@ -553,7 +553,9 @@ CLIENT_HELP = """\
 📦 <b>Накладна сьогодні</b> — накладна і баланс за сьогодні
 
 Замовлення, подані через бота, потребують підтвердження оператора. \
-Ви отримаєте повідомлення після перевірки.
+Ви отримаєте повідомлення після перевірки. Поки замовлення ще очікує \
+підтвердження (⏳) — під переліком «Моє замовлення» є кнопка \
+🗑 <b>Скасувати</b>.
 """
 
 BOT_COMMANDS = [
@@ -628,6 +630,53 @@ def _client_orders_text(db: Session, client: Client, order_date: str) -> str:
 
     lines.append(f"\n💰 <b>Разом: {total:.2f} грн</b>")
     return "\n".join(lines)
+
+
+def _try_cancel_own_order(db: Session, chat_id: int, order_id: int) -> Optional[tuple]:
+    """Скасовує (видаляє) pending bot-замовлення, якщо воно дійсно належить
+    клієнту цього chat_id і ще не опрацьоване оператором. Повертає
+    (назва_виробу, кількість) при успіху, інакше None (не знайдено, чуже,
+    вже підтверджене/відхилене оператором — verify_order() ще не торкався
+    pending, тож жодних побічних ефектів на оператора немає)."""
+    order = db.get(Order, order_id)
+    cl = _get_client_by_chat(db, chat_id)
+    if (not order or not cl or order.client_id != cl.id
+            or order.source != "bot" or order.bot_status != "pending"):
+        return None
+    product = db.get(Product, order.product_id)
+    product_name = product.name if product else f"#{order.product_id}"
+    qty = order.qty
+    db.delete(order)
+    db.commit()
+    return product_name, qty
+
+
+def _pending_orders_keyboard(db: Session, client_id: int, order_date: str) -> Optional[dict]:
+    """Inline-кнопки «🗑 Скасувати» під переліком «Моє замовлення» —
+    пропозиція з QA-аудиту. Лише для позицій, поданих через бота і ще НЕ
+    опрацьованих оператором (bot_status='pending') — підтверджені/
+    відхилені/змінені оператором вже зафіксовані, клієнту їх скасовувати
+    пізно (оператор уже бачив і відреагував)."""
+    pending = (
+        db.query(Order)
+        .filter(
+            Order.client_id == client_id,
+            Order.order_date == order_date,
+            Order.source == "bot",
+            Order.bot_status == "pending",
+            Order.qty > 0,
+        )
+        .all()
+    )
+    if not pending:
+        return None
+    products = {p.id: p.name for p in db.query(Product).all()}
+    rows = [
+        [{"text": f"🗑 Скасувати: {products.get(o.product_id, '?')} ({o.qty:.0f} шт)",
+          "callback_data": f"cancelorder:{o.id}"}]
+        for o in pending
+    ]
+    return {"inline_keyboard": rows}
 
 
 def _client_invoice_text(db: Session, client: Client, delivery_date: str) -> str:
@@ -1029,7 +1078,11 @@ def _handle_update(token: str, update: dict) -> None:
             with SessionLocal() as db:
                 cl = db.get(Client, client.id)
                 resp = _client_orders_text(db, cl, tomorrow)
-            _send(token, chat_id, resp, _client_keyboard())
+                cancel_kb = _pending_orders_keyboard(db, cl.id, tomorrow)
+            # inline-кнопки скасування (якщо є pending) додаються ПІД цим
+            # повідомленням, не замінюючи постійну reply-клавіатуру знизу
+            # (reply_markup лише для inline_kb — omit при None лишає її як є).
+            _send(token, chat_id, resp, cancel_kb)
 
         elif text == "📦 Накладна сьогодні":
             today = date.today().isoformat()
@@ -1080,6 +1133,20 @@ def _handle_callback(token: str, callback: dict) -> None:
 
     # Спершу відповідаємо на callback щоб прибрати "годинник" на кнопці
     _answer_callback(token, cb_id)
+
+    # ── Скасування власного pending bot-замовлення ── (не пов'язано з
+    # _client_state — кнопка під переліком "Моє замовлення", поза flow
+    # додавання товару, тож перевіряється ДО гейту на state нижче).
+    if data.startswith("cancelorder:"):
+        order_id = int(data.split(":", 1)[1])
+        with SessionLocal() as db:
+            cancelled = _try_cancel_own_order(db, chat_id, order_id)
+        if cancelled:
+            product_name, qty = cancelled
+            _send(token, chat_id, f"🗑 Скасовано: {product_name} × {qty:.0f} шт.")
+        else:
+            _answer_callback(token, cb_id, "Це замовлення вже неактуальне.")
+        return
 
     with _state_lock:
         state = _client_state.get(chat_id)
