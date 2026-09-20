@@ -106,16 +106,22 @@ export default function GridOrderModal({
   }, [products, bakedCats])
 
   // ── Клієнти по рейсах ─────────────────────────────────────────────────────
-  // Тільки звичайні customer-и, не системні (writeoff/ration/underbaked)
-  const activeRoutes = useMemo(
-    () => routes.filter(r => r.is_active === 1).sort((a, b) => a.sort_order - b.sort_order),
-    [routes],
-  )
+  // Звичайні customer-и + магазини (не системні writeoff/ration/underbaked) —
+  // магазин замовляє так само, як і клієнт на маршруті, і його кількості
+  // мають потрапляти в загальні підсумки (Σ по виробу, загальний підсумок),
+  // а не губитись мовчки. Без route_id (типово для власного магазину — не
+  // доставляється рейсом) потрапляє в сентинел-бакет 0, який рендериться
+  // як окрема вкладка «Внутрішні» (той самий термін і сентинел, що вже
+  // використовується для "клієнтів без маршруту" в RoutesPage.tsx).
+  const activeRoutes = useMemo(() => {
+    const real = routes.filter(r => r.is_active === 1).sort((a, b) => a.sort_order - b.sort_order)
+    return [...real, { id: 0, name: 'Внутрішні', sort_order: Number.MAX_SAFE_INTEGER, is_active: 1 }]
+  }, [routes])
 
   const clientsByRoute = useMemo(() => {
     const m: Record<number, Client[]> = {}
     for (const c of clients) {
-      if (c.client_kind !== 'customer') continue
+      if (c.client_kind !== 'customer' && c.client_kind !== 'shop') continue
       if (c.is_active !== 1) continue
       const rid = c.route_id ?? 0
       if (!m[rid]) m[rid] = []
@@ -127,9 +133,10 @@ export default function GridOrderModal({
     return m
   }, [clients])
 
-  // ── Усі клієнти-замовники (усі рейси разом) — для загальних підсумків ─────
+  // ── Усі клієнти-замовники (усі рейси разом, включно з магазинами) — для
+  // загальних підсумків ──────────────────────────────────────────────────
   const allCustomerClients = useMemo(
-    () => clients.filter(c => c.client_kind === 'customer' && c.is_active === 1),
+    () => clients.filter(c => (c.client_kind === 'customer' || c.client_kind === 'shop') && c.is_active === 1),
     [clients],
   )
 
