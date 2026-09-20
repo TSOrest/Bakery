@@ -10,9 +10,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.routers.auth import get_current_user
+from backend.routers.auth import require_perm
 
-router = APIRouter(prefix="/db-editor", tags=["db-editor"])
+router = APIRouter(
+    prefix="/db-editor", tags=["db-editor"],
+    dependencies=[Depends(require_perm("admin_system.db_editor"))],
+)
 
 # ⚠ Баг (виправлено): ці поля віддавались у відповіді GET .../data у
 # відкритому, повністю робочому вигляді — user_sessions.token (буквальний
@@ -33,13 +36,6 @@ def _mask_row(table: str, row: dict) -> dict:
         return row
     return {k: (_MASKED if k in sensitive and v is not None else v) for k, v in row.items()}
 
-
-# ── Auth ────────────────────────────────────────────────────────────────────
-
-def _require_admin(user=Depends(get_current_user)):
-    if not user or user.role != "admin":
-        raise HTTPException(403, "Доступ лише для адміністратора")
-    return user
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -71,7 +67,7 @@ def _get_column_names(db: Session, table: str) -> set[str]:
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/tables")
-def list_tables(db: Session = Depends(get_db), _=Depends(_require_admin)):
+def list_tables(db: Session = Depends(get_db)):
     """Список всіх таблиць з кількістю рядків."""
     rows = db.execute(text(
         "SELECT name FROM sqlite_master WHERE type='table' "
@@ -88,7 +84,6 @@ def list_tables(db: Session = Depends(get_db), _=Depends(_require_admin)):
 def get_table_schema(
     table: str,
     db: Session = Depends(get_db),
-    _=Depends(_require_admin)
 ):
     """Схема таблиці: колонки, типи, FK, індекси, DDL."""
     _validate_table(db, table)
@@ -151,7 +146,6 @@ def get_table_data(
     sort_dir: str = Query("asc"),
     filters: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    _=Depends(_require_admin),
 ):
     """Дані таблиці з пагінацією, сортуванням і фільтрацією."""
     _validate_table(db, table)
@@ -213,7 +207,6 @@ def get_distinct_values(
     table: str,
     column: str,
     db: Session = Depends(get_db),
-    _=Depends(_require_admin),
 ):
     """Унікальні значення колонки для фільтра (макс 500)."""
     _validate_table(db, table)
@@ -245,7 +238,6 @@ def get_fk_options(
     table: str,
     column: str,
     db: Session = Depends(get_db),
-    _=Depends(_require_admin),
 ):
     """Опції для dropdown FK поля — список значень з referenced таблиці."""
     _validate_table(db, table)
@@ -288,7 +280,6 @@ def update_row(
     pk_value: str,
     body: dict = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(_require_admin),
 ):
     """Оновити рядок таблиці за PK."""
     _validate_table(db, table)
@@ -338,7 +329,6 @@ def delete_row(
     table: str,
     pk_value: str,
     db: Session = Depends(get_db),
-    _=Depends(_require_admin),
 ):
     """Видалити рядок таблиці за PK."""
     _validate_table(db, table)

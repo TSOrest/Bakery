@@ -100,6 +100,23 @@ def test_recalculate_ingredients_costs_denied_then_allowed(app_client):
     assert r.status_code == 200, r.text
 
 
+def test_create_finance_denied_then_allowed(app_client):
+    """finances.create (Крок 3) — не прив'язано до жодного admin_* розділу,
+    окрема сторінка (`finances.py`, не tabConfig.ts)."""
+    role = "тест_wiring_finances"
+    _set_role_keys(role, [])
+    token = _mk_user_token(app_client, role, "тест-wiring-finances-user")
+    headers = {"Authorization": f"Bearer {token}"}
+    body = {"finance_date": "2027-01-01", "finance_type": "deposit", "amount": 10.0, "sign": 1}
+
+    r = app_client.post("/api/v1/finances/", json=body, headers=headers)
+    assert r.status_code == 403
+
+    _set_role_keys(role, ["finances.create"])
+    r = app_client.post("/api/v1/finances/", json=body, headers=headers)
+    assert r.status_code == 201, r.text
+
+
 def test_admin_system_create_cannot_escalate_to_admin_role(app_client):
     """Роль з делегованим admin_system.create МОЖЕ створювати звичайних
     користувачів, але НЕ може призначити комусь роль admin."""

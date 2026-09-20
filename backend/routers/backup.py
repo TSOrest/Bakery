@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.auth import User
 from backend.models.settings import Setting
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_perm
 from backend.services import backup as backup_svc
 from backend.services import archive as archive_svc
 from backend.schemas.api_responses import (
@@ -68,7 +68,7 @@ def _cloud_paths(cfg: dict) -> list:
 # ── Список бекапів ─────────────────────────────────────────────────────────────
 
 @router.get("/list")
-def list_backups(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+def list_backups(_: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     return backup_svc.list_backups(DATA_DIR, cfg.get("backup_local_dir", ""))
 
@@ -76,7 +76,7 @@ def list_backups(_: User = Depends(require_admin), db: Session = Depends(get_db)
 # ── Бекап зараз ────────────────────────────────────────────────────────────────
 
 @router.post("/now")
-def backup_now(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+def backup_now(_: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     try:
         result = backup_svc.do_backup(
@@ -97,7 +97,7 @@ def backup_now(_: User = Depends(require_admin), db: Session = Depends(get_db)):
 # ── Видалити бекап ─────────────────────────────────────────────────────────────
 
 @router.delete("/{filename}", response_model=DeleteResult)
-def delete_backup(filename: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def delete_backup(filename: str, _: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     ok = backup_svc.delete_backup(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
     if not ok:
@@ -158,13 +158,13 @@ def _detect_sync_folders() -> dict:
 
 
 @router.get("/cloud/detect", response_model=CloudFolders)
-def cloud_detect(_: User = Depends(require_admin)):
+def cloud_detect(_: User = Depends(require_perm("admin_system.backup"))):
     """Повертає автоматично виявлені папки синхронізації хмарних провайдерів."""
     return _detect_sync_folders()
 
 
 @router.post("/cloud/test", response_model=StatusDetail)
-def cloud_test(body: dict, _: User = Depends(require_admin)):
+def cloud_test(body: dict, _: User = Depends(require_perm("admin_system.backup"))):
     """
     Перевіряє чи папка хмарної синхронізації доступна для запису.
 
@@ -209,7 +209,7 @@ def cloud_test(body: dict, _: User = Depends(require_admin)):
 # ── Завантажити файл бекапу (SaveFile) ────────────────────────────────────────
 
 @router.get("/download/{filename}")
-def download_backup(filename: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def download_backup(filename: str, _: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     """Повертає файл бекапу для збереження користувачем."""
     cfg = _get_settings(db)
     backup_dir = backup_svc._backup_dir(DATA_DIR, cfg.get("backup_local_dir", ""))
@@ -229,7 +229,7 @@ def download_backup(filename: str, _: User = Depends(require_admin), db: Session
 # ── Імпортувати файл бекапу (OpenFile) ─────────────────────────────────────────
 
 @router.post("/upload", response_model=UploadBackupResult)
-async def upload_backup(file: UploadFile = File(...), _: User = Depends(require_admin), db: Session = Depends(get_db)):
+async def upload_backup(file: UploadFile = File(...), _: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     """Приймає .db файл і зберігає його в папку бекапів."""
     if not file.filename or not file.filename.endswith(".db"):
         raise HTTPException(status_code=400, detail="Файл має мати розширення .db")
@@ -284,7 +284,7 @@ async def upload_backup(file: UploadFile = File(...), _: User = Depends(require_
 # ── Перевірка сумісності бекапу з поточною версією ────────────────────────────
 
 @router.get("/restore/{filename}/check", response_model=RestoreCheckResult)
-def check_restore(filename: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def check_restore(filename: str, _: User = Depends(require_perm("admin_system.backup")), db: Session = Depends(get_db)):
     cfg = _get_settings(db)
     meta = backup_svc.get_backup_meta(DATA_DIR, filename, cfg.get("backup_local_dir", ""))
     backup_version = meta.get("app_version", "")
@@ -318,7 +318,7 @@ def check_restore(filename: str, _: User = Depends(require_admin), db: Session =
 def restore_backup(
     filename: str,
     rollback_first: bool = Query(default=False),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_perm("admin_system.backup")),
     db: Session = Depends(get_db),
 ):
     """
@@ -362,7 +362,7 @@ def demo_status():
 
 
 @router.post("/demo/enter", response_model=DemoActionResult)
-def demo_enter(_: User = Depends(require_admin)):
+def demo_enter(_: User = Depends(require_perm("admin_system.backup"))):
     if not (DATA_DIR / "demo.db").exists():
         raise HTTPException(status_code=404, detail="demo.db не знайдено. Спочатку згенеруйте демо базу.")
     if DEMO_ACTIVE.exists():
@@ -376,7 +376,7 @@ def demo_enter(_: User = Depends(require_admin)):
 
 
 @router.post("/demo/exit", response_model=DemoActionResult)
-def demo_exit(_: User = Depends(require_admin)):
+def demo_exit(_: User = Depends(require_perm("admin_system.backup"))):
     if not DEMO_ACTIVE.exists():
         raise HTTPException(status_code=400, detail="Демо режим не активний")
     from datetime import datetime
@@ -392,7 +392,7 @@ def demo_exit(_: User = Depends(require_admin)):
 @router.get("/archive/preview")
 def archive_preview(
     cutoff_date: str = Query(..., description="YYYY-MM-DD"),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_perm("admin_system.backup")),
     db: Session = Depends(get_db),
 ):
     try:
@@ -414,7 +414,7 @@ def archive_preview(
 @router.post("/archive")
 def run_archive(
     cutoff_date: str = Query(..., description="YYYY-MM-DD"),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_perm("admin_system.backup")),
     db: Session = Depends(get_db),
 ):
     try:

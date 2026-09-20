@@ -2331,12 +2331,55 @@ backend-примусу на самих даних (та сама поведін�
 на кожну з 4 представницьких груп — 403 без ключа → 201/200 з ключем;
 обидва боки hard-rule ескалації Users).
 
-**Наступні кроки** (Крок 3+): підключення Фінансів (`finances.py`) і
-"точкових" небезпечних дій (backup/reset-db/import/github/db-editor,
-`admin_org.settings`) — з тим самим уроком Кроку 2 в уваги (перевіряти,
-чи ендпоінт справді адмін-специфічний, а не спільна операційна
-інфраструктура, перед додаванням гейту); нова CRUD-матриця в
-`RolePermissionsTab.tsx`; дії-рівневе блокування кнопок у admin-компонентах.
+**Крок 3 — Фінанси + точкові прапорці небезпечних дій:**
+
+- **`finances.py`**: `create_finance`/`update_finance`/`delete_finance`
+  тепер `require_perm("finances.create"/"finances.edit"/"finances.delete")`
+  замість `require_user`. Це і є пряме усунення прикладу з аудиту — за
+  замовчуванням (див. Крок 1, міграція) `accountant` зберігає всі три
+  дії, `owner` теж (статус-кво на день оновлення), решта — без змін.
+  Перевірено, що `ImportPage.tsx`'s корекція балансу при .accdb-імпорті
+  (окремий `POST /finances/`, для виправлення розбіжностей Access) теж
+  підпадає під `finances.create` — узгоджено як прийнятне: хто виконує
+  імпорт (`admin_system.import`), тому варто дати і `finances.create`.
+- **`backup.py`** (13 ендпоінтів) → `require_perm("admin_system.backup")`
+  на кожному окремо (НЕ router-level dependency — `GET /backup/demo/status`
+  у тому самому роутері навмисно без будь-якої авторизації, для
+  до-логінного банера на `LoginPage.tsx`; router-level гейт зламав би це).
+- **`auth_github.py`**, **`import_accdb.py`** — router-level
+  `dependencies=[Depends(require_perm("admin_system.github"/"admin_system.import"))]`
+  (тут можна — усі ендпоінти цих роутерів однаково чутливі, винятків нема).
+- **`db_editor.py`** — власна паралельна `_require_admin()` (дублікат
+  `auth.require_admin` з трохи іншою поведінкою — 403 замість 401 на
+  неавторизований запит) видалена; замінена на router-level
+  `require_perm("admin_system.db_editor")`.
+- **`settings.py`**: generic `PUT /settings/{key}` і `PUT /settings/`
+  (bulk) → `require_perm("admin_org.settings")`; `telegram/restart`,
+  `telegram/stop`, `telegram/authorized/{chat_id}` DELETE — той самий
+  ключ (Telegram Бот — підрозділ "Організація"). `POST /settings/reset-db`
+  → окремий `admin_system.reset_db` (найкатастрofічніша дія, не
+  бандлиться з рештою).
+  **Hard-rule**: ключ `role_permissions` у ЦИХ ДВОХ generic-ендпоінтах
+  редагується ЛИШЕ буквальним `user.role == "admin"`, незалежно від
+  `admin_org.settings` — перевірка `key == "role_permissions"` (для
+  одиничного PUT) і `"role_permissions" in body` (для масового) — інакше
+  роль з делегованим `admin_org.settings` могла б сама собі дописати
+  будь-який інший дозвіл через цей самий generic-запис.
+
+Тести: `tests/test_danger_zone_perm_wiring.py` (по одному смоук-тесту на
+кожен прапорець — backup/db_editor/github/import/admin_org.settings,
+403→200; окремо — role_permissions hard-rule через обидва
+generic-ендпоінти, з підтвердженням що ІНШІ ключі того самого масового
+запиту проходять нормально); `finances.create` додано до
+`tests/test_admin_groups_perm_wiring.py`. `reset_db` навмисно НЕ отримав
+happy-path тесту тут — лише 403-заборона (уже покрита `test_auth_protection.py`);
+щасливий шлях лишається в ізольованому `test_zz_reset_db.py` (навмисно
+останній за алфавітом — знищує робочі дані спільної тестової БД).
+
+**Наступні кроки** (Крок 4+): нова CRUD-матриця в `RolePermissionsTab.tsx`
++ `AuthContext.can()`; дії-рівневе блокування кнопок у ~14
+admin-компонентах і `FinancesPage.tsx`; закриття структурної шпарини
+`db-editor`-маршруту на фронтенді (зараз рятує лише бекенд-403).
 
 ## Аудит-фікси v0.9.36-v1.0.4
 

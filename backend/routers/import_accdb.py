@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.routers.auth import require_admin
+from backend.routers.auth import require_perm
 from backend.models.finances import Finance
 from backend.models.orders import Order
 from backend.models.pricing import ClientPriceOverride, Price
@@ -27,7 +27,7 @@ from backend.schemas.api_responses import (
 from backend.services import import_accdb as svc
 
 # Імпорт .accdb повністю перезаписує БД — доступ лише адміну (на рівні роутера).
-router = APIRouter(prefix="/import", tags=["import"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/import", tags=["import"], dependencies=[Depends(require_perm("admin_system.import"))])
 
 ROOT     = Path(__file__).parent.parent.parent
 DATA_DIR = Path(os.environ.get("BAKERY_DATA_DIR", ROOT))

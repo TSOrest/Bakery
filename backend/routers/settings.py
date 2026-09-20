@@ -7,7 +7,7 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ from backend.database import get_db, safe_commit
 from backend.models.auth import User, UserSession
 from backend.models.notifications import create_notification
 from backend.models.settings import Setting
-from backend.routers.auth import require_user, require_admin, require_install_update_perm
+from backend.routers.auth import require_user, require_perm, require_install_update_perm
 from backend.schemas.notifications import RequestUpdateIn
 from backend.services import telegram_bot as tg
 
@@ -81,7 +81,12 @@ def get_settings(user: User = Depends(require_user), db: Session = Depends(get_d
 
 
 @router.put("/{key}")
-def update_setting(key: str, body: SettingUpdate, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def update_setting(key: str, body: SettingUpdate, user: User = Depends(require_perm("admin_org.settings")), db: Session = Depends(get_db)):
+    # role_permissions — жорстко лише буквальний admin, незалежно від
+    # admin_org.settings: інакше роль з делегованим дозволом могла б сама
+    # собі дописати будь-який інший дозвіл через цей самий ендпоінт.
+    if key == "role_permissions" and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Лише адміністратор може редагувати права ролей")
     value = _maybe_encrypt(key, body.value)
     row = db.get(Setting, key)
     if row:
@@ -97,8 +102,10 @@ def update_setting(key: str, body: SettingUpdate, _: User = Depends(require_admi
 
 
 @router.put("/")
-def update_many_settings(body: dict[str, str], _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def update_many_settings(body: dict[str, str], user: User = Depends(require_perm("admin_org.settings")), db: Session = Depends(get_db)):
     """Оновлює кілька налаштувань одночасно."""
+    if "role_permissions" in body and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Лише адміністратор може редагувати права ролей")
     for key, value in body.items():
         stored_value = _maybe_encrypt(key, value)
         row = db.get(Setting, key)
@@ -120,7 +127,7 @@ def telegram_status(_: User = Depends(require_user)):
 
 
 @router.post("/telegram/restart")
-def telegram_restart(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+def telegram_restart(_: User = Depends(require_perm("admin_org.settings")), db: Session = Depends(get_db)):
     """Перезапускає бота з поточним токеном з БД."""
     row = db.get(Setting, "telegram_bot_token")
     token = row.value if row and row.value else ""
@@ -129,7 +136,7 @@ def telegram_restart(_: User = Depends(require_admin), db: Session = Depends(get
 
 
 @router.post("/telegram/stop")
-def telegram_stop(_: User = Depends(require_admin)):
+def telegram_stop(_: User = Depends(require_perm("admin_org.settings"))):
     """Зупиняє бота."""
     tg.stop_bot()
     return {"running": False}
@@ -196,7 +203,7 @@ def request_update(
 # ── Скидання бази даних ───────────────────────────────────────────────────────
 
 @router.post("/reset-db")
-def reset_database(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+def reset_database(_: User = Depends(require_perm("admin_system.reset_db")), db: Session = Depends(get_db)):
     """
     Очищає всі робочі дані.
     Залишає: системних клієнтів (client_kind != 'customer'), користувачів,
@@ -316,7 +323,7 @@ def server_info(_: User = Depends(require_user)):
 
 
 @router.delete("/telegram/authorized/{chat_id}")
-def telegram_revoke(chat_id: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+def telegram_revoke(chat_id: str, _: User = Depends(require_perm("admin_org.settings")), db: Session = Depends(get_db)):
     """Відкликає доступ у конкретного чату."""
     row = db.get(Setting, "telegram_authorized_chats")
     chats: dict[str, str] = {}
