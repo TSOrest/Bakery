@@ -588,6 +588,85 @@ def transfer_invoice_line(
     return out
 
 
+_TRANSFER_CANCEL_STATUSES = {"draft", "sent"}
+
+
+@router.post("/transfers/{transfer_id}/cancel")
+def cancel_transfer(
+    transfer_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_user),
+):
+    """Скасувати помилково внесене переміщення (напр. хибне списання/пайок).
+
+    Повертає кількість назад у рядок джерела; знімає її з рядка цілі
+    (видаляє рядок цілі, якщо кількість впала до нуля). Дозволено лише
+    доки ОБИДВІ накладні (джерело і ціль) ще draft/sent — навмисне вужче
+    за звичайну панель "Корекція / переміщення" (яка працює і для
+    accepted): швидке скасування розраховане на "щойно помилково натиснув",
+    не на розбір давно завершених операцій.
+    """
+    t = db.get(InvoiceTransfer, transfer_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Переміщення не знайдено")
+
+    src = db.get(Invoice, t.source_invoice_id)
+    tgt = db.get(Invoice, t.target_invoice_id)
+    if not src or not tgt:
+        raise HTTPException(status_code=404, detail="Накладну переміщення не знайдено")
+
+    for inv in {src.id: src, tgt.id: tgt}.values():
+        if inv.status not in _TRANSFER_CANCEL_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail="Скасування доступне лише доки обидві накладні — чернетка або відправлено",
+            )
+
+    is_exchange = t.line_kind == "exchange"
+    src_line = next(
+        (l for l in src.lines if l.product_id == t.product_id and (l.line_kind == "exchange") == is_exchange),
+        None,
+    )
+    if not src_line:
+        raise HTTPException(status_code=400, detail="Рядок джерела вже не існує — скасування неможливе")
+
+    tgt_line = next(
+        (l for l in tgt.lines if l.product_id == t.product_id and l.line_kind != "exchange"),
+        None,
+    )
+    if not tgt_line or tgt_line.qty < t.qty - 1e-9:
+        raise HTTPException(
+            status_code=400,
+            detail="Кількість у цільовій накладній вже змінена іншою дією — автоматичне скасування неможливе",
+        )
+
+    # 1. Повернути кількість у джерело
+    src_line.qty = round(src_line.qty + t.qty, 4)
+    src_eff = src_line.price_override if src_line.price_override is not None else src_line.price
+    src_line.sum = round(src_line.qty * src_eff, 2)
+
+    # 2. Зняти з цілі — видалити рядок повністю, якщо кількість впала до нуля
+    tgt_line.qty = round(tgt_line.qty - t.qty, 4)
+    if tgt_line.qty <= 1e-9:
+        tgt.lines.remove(tgt_line)
+        db.delete(tgt_line)
+    else:
+        tgt_eff = tgt_line.price_override if tgt_line.price_override is not None else tgt_line.price
+        tgt_line.sum = round(tgt_line.qty * tgt_eff, 2)
+
+    db.delete(t)
+    db.flush()
+
+    src.total_sum = _recalc_total(src)
+    recompute_invoice_finance(db, src)
+    if tgt.id != src.id:
+        tgt.total_sum = _recalc_total(tgt)
+        recompute_invoice_finance(db, tgt)
+
+    safe_commit(db)
+    return {"ok": True}
+
+
 @router.post("/set-surplus", response_model=InvoiceOut)
 def set_surplus(data: SetSurplusBody, db: Session = Depends(get_db), _=Depends(require_user)):
     """Долити/змінити/видалити надлишок випічки прямо в накладну магазину (рядок line_kind='surplus').

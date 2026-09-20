@@ -786,9 +786,32 @@
 .moveOpenBtn:disabled { opacity: 0.45; cursor: default; }
 
 /* Анотації переміщень у рядках накладної */
-.transferAnnotRow td { padding: 0.1rem 0.5rem 0.1rem 1.5rem !important; border-top: none !important; }
+.transferAnnotRow td {
+  padding: 0.1rem 0.5rem 0.1rem 1.5rem !important;
+  border-top: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
 .transferOutAnnot { font-size: 0.76rem; color: #d97706; }
 .transferInAnnot  { font-size: 0.76rem; color: #16a34a; }
+.transferAnnotText { flex: 1; }
+
+.transferCancelBtn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  opacity: 0.6;
+}
+.transferCancelBtn:hover:not(:disabled) { opacity: 1; background: #fee2e2; }
+.transferCancelBtn:disabled { opacity: 0.4; cursor: default; }
 
 .btnAccept {
   padding: 0.38rem 1rem;

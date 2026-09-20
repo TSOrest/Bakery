@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkDate } from '../context/DateContext'
 import { api } from '../api/client'
 import type {
-  Category, Client, Finance, Invoice, InvoiceLine, Order,
+  Category, Client, Finance, Invoice, InvoiceLine, InvoiceTransfer, Order,
   Product, Route, RouteKpi, ClientState,
 } from '../types'
 import styles from './RoutesPage.module.css'
@@ -117,6 +117,21 @@ function mergeInvoiceLinesForDisplay(lines: InvoiceLine[]): InvoiceLine[] {
     }
   }
   return order.map((k) => merged[k])
+}
+
+// api/client.ts кидає Error(`${status} ${statusText}: ${rawBodyText}`) — тіло
+// відповіді зазвичай {"detail": "..."}. Той самий хелпер, що вже є в
+// IssuesWidget.tsx — дістає реальну причину замість статичного тексту.
+function extractApiErrorDetail(err: unknown): string | null {
+  if (!(err instanceof Error)) return null
+  const idx = err.message.indexOf('{')
+  if (idx === -1) return null
+  try {
+    const body = JSON.parse(err.message.slice(idx))
+    return typeof body?.detail === 'string' ? body.detail : null
+  } catch {
+    return null
+  }
 }
 
 // ─── Форматування дати ─────────────────────────────────────────────────────────
@@ -275,7 +290,38 @@ function InvoiceDetailPanel({
     }
   }
 
+  // ── Скасування помилково внесеного переміщення (списання/пайок/тощо) ────────
+  const [cancellingTransferId, setCancellingTransferId] = useState<number | null>(null)
+
+  const handleCancelTransfer = async (t: InvoiceTransfer) => {
+    const ok = await confirm({
+      title: 'Скасувати переміщення?',
+      message: `${productName(t.product_id)} × ${t.qty} — ${
+        t.direction === 'out' ? `передано → ${t.counterparty_name ?? '—'}` : `отримано від ${t.counterparty_name ?? '—'}`
+      }. Кількість повернеться назад.`,
+      confirmText: 'Скасувати переміщення',
+      danger: true,
+    })
+    if (!ok) return
+    setCancellingTransferId(t.id)
+    try {
+      await api.post(`/invoices/transfers/${t.id}/cancel`, {})
+      await reloadInvoice()
+      onRefresh()
+      toast.success('Переміщення скасовано')
+    } catch (err) {
+      toast.error(extractApiErrorDetail(err) ?? 'Не вдалось скасувати переміщення')
+    } finally {
+      setCancellingTransferId(null)
+    }
+  }
+
   const { status } = invoice
+  // Швидке скасування переміщення доступне лише доки накладна ще чернетка
+  // або відправлена — після accepted виправляти можна лише через звичайну
+  // панель "Корекція / переміщення" (навмисне звуження на прохання
+  // користувача, дзеркалить `_TRANSFER_CANCEL_STATUSES` на бекенді).
+  const canCancelTransfers = status === 'draft' || status === 'sent'
   // Магазин: накладна закривається у Випічці («Закрити накладну магазину»),
   // тому кнопки зміни стану (Відправити/Прийнято) для нього не показуємо.
   const isShop = isShopClient(client)
@@ -576,11 +622,24 @@ function InvoiceDetailPanel({
                       <td colSpan={4} className={
                         t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
                       }>
-                        {t.counterparty_kind === 'underbaked'
-                          ? `└ ↓ Знято недопечене −${t.qty}`
-                          : t.direction === 'out'
-                          ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
-                          : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                        <span className={styles.transferAnnotText}>
+                          {t.counterparty_kind === 'underbaked'
+                            ? `└ ↓ Знято недопечене −${t.qty}`
+                            : t.direction === 'out'
+                            ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
+                            : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                        </span>
+                        {canCancelTransfers && (
+                          <button
+                            type="button"
+                            className={styles.transferCancelBtn}
+                            title="Скасувати переміщення"
+                            disabled={cancellingTransferId === t.id}
+                            onClick={() => handleCancelTransfer(t)}
+                          >
+                            {cancellingTransferId === t.id ? '...' : '✕'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -627,13 +686,26 @@ function InvoiceDetailPanel({
                         <td colSpan={4} className={
                           t.direction === 'out' ? styles.transferOutAnnot : styles.transferInAnnot
                         }>
-                          {t.source_invoice_id === t.target_invoice_id
-                            ? `└ ↺ продано як звичайний +${t.qty}`
-                            : t.counterparty_kind === 'underbaked'
-                            ? `└ ↓ Знято недопечене −${t.qty}`
-                            : t.direction === 'out'
-                            ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
-                            : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                          <span className={styles.transferAnnotText}>
+                            {t.source_invoice_id === t.target_invoice_id
+                              ? `└ ↺ продано як звичайний +${t.qty}`
+                              : t.counterparty_kind === 'underbaked'
+                              ? `└ ↓ Знято недопечене −${t.qty}`
+                              : t.direction === 'out'
+                              ? `└ ↓ передано → ${t.counterparty_name} −${t.qty}`
+                              : `└ ↑ отримано від ${t.counterparty_name} +${t.qty}`}
+                          </span>
+                          {canCancelTransfers && (
+                            <button
+                              type="button"
+                              className={styles.transferCancelBtn}
+                              title="Скасувати переміщення"
+                              disabled={cancellingTransferId === t.id}
+                              onClick={() => handleCancelTransfer(t)}
+                            >
+                              {cancellingTransferId === t.id ? '...' : '✕'}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
