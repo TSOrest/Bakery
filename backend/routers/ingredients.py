@@ -15,7 +15,7 @@ from backend.schemas.ingredients import (
     MarginRow, MarginReport,
 )
 from backend.services.costs import calculate_cost, recalculate_all_costs
-from backend.routers.auth import require_admin, require_user
+from backend.routers.auth import require_perm, require_user
 
 router = APIRouter(tags=["Інгредієнти"])
 
@@ -28,7 +28,7 @@ def list_ingredients(db: Session = Depends(get_db), _=Depends(require_user)):
 
 
 @router.post("/ingredients/", response_model=IngredientOut, status_code=201)
-def create_ingredient(data: IngredientCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_ingredient(data: IngredientCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.create"))):
     if data.unit_id is not None and not db.get(Unit, data.unit_id):
         raise HTTPException(status_code=404, detail="Одиницю виміру не знайдено")
     ing = Ingredient(**data.model_dump())
@@ -43,7 +43,7 @@ def update_ingredient(
     ingredient_id: int,
     data: IngredientUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_prices.edit")),
 ):
     ing = db.get(Ingredient, ingredient_id)
     if not ing:
@@ -75,7 +75,7 @@ def update_ingredient(
 
 
 @router.delete("/ingredients/{ingredient_id}", status_code=204)
-def delete_ingredient(ingredient_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_ingredient(ingredient_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.delete"))):
     ing = db.get(Ingredient, ingredient_id)
     if not ing:
         raise HTTPException(status_code=404, detail="Інгредієнт не знайдено")
@@ -127,7 +127,7 @@ def add_product_ingredient(
     product_id: int,
     data: ProductIngredientCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_prices.create")),
 ):
     if not db.get(Product, product_id):
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
@@ -180,7 +180,7 @@ def update_product_ingredient(
     pi_id: int,
     qty_per_unit: float,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_prices.edit")),
 ):
     pi = db.get(ProductIngredient, pi_id)
     if not pi or pi.product_id != product_id:
@@ -213,7 +213,7 @@ def remove_product_ingredient(
     product_id: int,
     pi_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_prices.delete")),
 ):
     pi = db.get(ProductIngredient, pi_id)
     if not pi or pi.product_id != product_id:
@@ -226,7 +226,7 @@ def remove_product_ingredient(
 # ── Перерахунок всіх собівартостей ───────────────────────────────────────────
 
 @router.post("/ingredients/recalculate-all")
-def recalculate_all(db: Session = Depends(get_db), _=Depends(require_admin)):
+def recalculate_all(db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.edit"))):
     """Примусово перераховує cost_per_unit для всіх активних виробів."""
     count = recalculate_all_costs(db)
     return {"recalculated": count}

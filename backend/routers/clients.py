@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Client
 from backend.schemas.references import ClientCreate, ClientUpdate, ClientOut
-from backend.routers.auth import require_admin, require_user
+from backend.routers.auth import require_perm, require_user
 from backend.models.audit import write_audit
 from backend.models.auth import User
 
@@ -37,7 +37,7 @@ def get_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_
 
 
 @router.post("/", response_model=ClientOut, status_code=201)
-def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_clients.create"))):
     from datetime import datetime
     c = Client(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(c)
@@ -48,7 +48,7 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db), _=Depends(r
 
 @router.put("/{client_id}", response_model=ClientOut)
 def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_db),
-                  current_user: User = Depends(require_admin)):
+                  current_user: User = Depends(require_perm("admin_clients.edit"))):
     from backend.models.references import ClientGroup
     c = db.get(Client, client_id)
     if not c:
@@ -80,7 +80,7 @@ def update_client(client_id: int, data: ClientUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{client_id}")
-def deactivate_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def deactivate_client(client_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_clients.delete"))):
     """М'яке видалення — ставимо is_active=0.
 
     Не блокує дію (на відміну від маршрутів) — лише інформаційне

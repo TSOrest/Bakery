@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Category, Unit
 from backend.schemas.references import CategoryOut, CategoryUpdate, UnitOut, UnitUpdate, NameCreate
-from backend.routers.auth import require_admin, require_user
+from backend.routers.auth import require_perm, require_user
 
 router = APIRouter(tags=["Довідники"])
 
@@ -20,7 +20,7 @@ def list_categories(active_only: bool = False, db: Session = Depends(get_db), _=
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=201)
-def create_category(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_category(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.create"))):
     c = Category(name=data.name)
     db.add(c)
     safe_commit(db, conflict_msg=f"Категорія з назвою «{data.name}» вже існує")
@@ -29,7 +29,7 @@ def create_category(data: NameCreate, db: Session = Depends(get_db), _=Depends(r
 
 
 @router.put("/categories/{category_id}", response_model=CategoryOut)
-def update_category(category_id: int, body: CategoryUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_category(category_id: int, body: CategoryUpdate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.edit"))):
     c = db.get(Category, category_id)
     if not c:
         raise HTTPException(status_code=404, detail="Категорію не знайдено")
@@ -49,7 +49,7 @@ def update_category(category_id: int, body: CategoryUpdate, db: Session = Depend
 
 
 @router.delete("/categories/{category_id}", status_code=204)
-def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_category(category_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.delete"))):
     from backend.models.references import Product
     c = db.get(Category, category_id)
     if not c:
@@ -74,7 +74,7 @@ def list_units(active_only: bool = False, db: Session = Depends(get_db), _=Depen
 
 
 @router.post("/units", response_model=UnitOut, status_code=201)
-def create_unit(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_unit(data: NameCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.create"))):
     u = Unit(name=data.name)
     db.add(u)
     safe_commit(db, conflict_msg=f"Одиниця з назвою «{data.name}» вже існує")
@@ -83,7 +83,7 @@ def create_unit(data: NameCreate, db: Session = Depends(get_db), _=Depends(requi
 
 
 @router.put("/units/{unit_id}", response_model=UnitOut)
-def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.edit"))):
     u = db.get(Unit, unit_id)
     if not u:
         raise HTTPException(status_code=404, detail="Одиницю не знайдено")
@@ -97,7 +97,7 @@ def update_unit(unit_id: int, body: UnitUpdate, db: Session = Depends(get_db), _
 
 
 @router.delete("/units/{unit_id}", status_code=204)
-def delete_unit(unit_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_unit(unit_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.delete"))):
     from backend.models.references import Product, Ingredient
     u = db.get(Unit, unit_id)
     if not u:

@@ -16,7 +16,7 @@ from backend.schemas.pricing import (
     ClientPriceOverrideCreate, ClientPriceOverrideOut,
 )
 from backend.services.prices import get_price, get_price_with_source
-from backend.routers.auth import require_admin, require_user
+from backend.routers.auth import require_perm, require_user
 
 router = APIRouter(prefix="/prices", tags=["Ціни"])
 
@@ -141,7 +141,7 @@ def list_prices(
 
 
 @router.post("/", response_model=PriceOut, status_code=201)
-def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.create"))):
     if not db.get(Product, data.product_id):
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
     # Якщо нова ціна безстрокова — закриваємо попередні відкриті ціни того ж продукту
@@ -198,7 +198,7 @@ def create_price(data: PriceCreate, db: Session = Depends(get_db), _=Depends(req
 # матчить "replace" як значення price_id і повертає 405.
 
 @router.post("/replace", response_model=PriceOut, status_code=201)
-def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db), _=Depends(require_admin)):
+def replace_price(data: PriceReplaceRequest, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.edit"))):
     """
     Закриває стару ціну (old_price_id) і створює нову починаючи з effective_date.
     Стара ціна отримує valid_to = effective_date - 1 день.
@@ -263,7 +263,7 @@ def bulk_preview(
     effective_date: str,
     excluded_ids:   str = Query(default=""),   # product_ids через кому
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_prices.edit")),
 ):
     """Повертає попередній перегляд масової зміни цін (без збереження).
     Повертає valid_from поточної ціни і has_collision (якщо вже є ціна з >= effective_date).
@@ -328,7 +328,7 @@ def bulk_preview(
 
 
 @router.post("/bulk-change")
-def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db), _=Depends(require_admin)):
+def bulk_change(data: BulkChangeRequest, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.edit"))):
     """
     Масова зміна цін:
     - Закриває всі поточні активні ціни (valid_to = effective_date - 1 день)
@@ -412,7 +412,7 @@ def resolve_price(
 # ── Параметризований маршрут — після всіх фіксованих ─────────────────────────
 
 @router.delete("/{price_id}", status_code=204)
-def delete_price(price_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_price(price_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.delete"))):
     """Деактивує ціну (встановлює is_active=0 і valid_to=сьогодні)."""
     p = db.get(Price, price_id)
     if not p:
@@ -441,7 +441,7 @@ def list_overrides(
 
 
 @router.post("/overrides", response_model=ClientPriceOverrideOut, status_code=201)
-def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.create"))):
     if not db.get(Client, data.client_id):
         raise HTTPException(status_code=404, detail="Клієнта не знайдено")
     if not db.get(Product, data.product_id):
@@ -458,7 +458,7 @@ def create_override(data: ClientPriceOverrideCreate, db: Session = Depends(get_d
 
 
 @router.delete("/overrides/{override_id}", status_code=204)
-def delete_override(override_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_override(override_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_prices.delete"))):
     o = db.get(ClientPriceOverride, override_id)
     if not o:
         raise HTTPException(status_code=404, detail="Запис не знайдено")

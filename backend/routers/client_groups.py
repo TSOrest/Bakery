@@ -22,7 +22,7 @@ from backend.models.references import Client, ClientGroup, Route
 from backend.schemas.references import (
     ClientGroupCreate, ClientGroupUpdate, ClientGroupOut,
 )
-from backend.routers.auth import require_user, require_admin
+from backend.routers.auth import require_user, require_perm
 
 
 router = APIRouter(prefix="/client-groups", tags=["Групи клієнтів"])
@@ -65,7 +65,7 @@ def list_client_groups(
 def create_client_group(
     data: ClientGroupCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_clients.create")),
 ):
     if not db.get(Route, data.route_id):
         raise HTTPException(status_code=404, detail="Маршрут не знайдено")
@@ -86,7 +86,7 @@ def update_client_group(
     group_id: int,
     data: ClientGroupUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_clients.edit")),
 ):
     g = db.get(ClientGroup, group_id)
     if not g:
@@ -106,7 +106,7 @@ def update_client_group(
 def delete_client_group(
     group_id: int,
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_clients.delete")),
 ):
     g = db.get(ClientGroup, group_id)
     if not g:
@@ -138,7 +138,7 @@ def set_group_members(
     group_id: int,
     client_ids: List[int],
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_clients.edit")),
 ):
     """Замінити набір клієнтів групи. Валідація:
     - усі client_ids мають належати тому самому маршруту що й група;

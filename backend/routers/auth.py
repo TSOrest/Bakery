@@ -373,11 +373,18 @@ def list_users(admin: User = Depends(require_system_perm), db: Session = Depends
 
 
 @router.post("/users", status_code=201)
-def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == body.username).first():
-        raise HTTPException(status_code=400, detail="Логін вже зайнятий")
+def create_user(body: UserCreate, admin: User = Depends(require_perm("admin_system.create")), db: Session = Depends(get_db)):
     if body.role not in ROLES:
         raise HTTPException(status_code=400, detail=f"Роль має бути одна з: {ROLES}")
+    # Гранульовані права ролей: admin_system.create дозволяє роль з делегованим
+    # доступом СТВОРЮВАТИ користувачів — але не робити когось адміном. Без
+    # цього правила делегований дозвіл був би прихованим шляхом ескалації
+    # (створити собі ще один акаунт з role="admin"). Незалежно від дозволу —
+    # лише буквальний admin.
+    if body.role == "admin" and admin.role != "admin":
+        raise HTTPException(status_code=403, detail="Лише адміністратор може призначити роль admin")
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=400, detail="Логін вже зайнятий")
     salt = _make_salt()
     user = User(
         username=body.username,
@@ -396,12 +403,17 @@ def create_user(body: UserCreate, admin: User = Depends(require_admin), db: Sess
 def update_user(
     user_id: int,
     body: UserUpdate,
-    admin: User = Depends(require_admin),
+    admin: User = Depends(require_perm("admin_system.edit")),
     db: Session = Depends(get_db),
 ):
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Користувача не знайдено")
+    # Гранульовані права ролей: та сама hard-rule, що в create_user — роль з
+    # делегованим admin_system.edit НЕ повинна мати змогу підвищити когось
+    # до admin, ані редагувати вже-адмінський акаунт (пароль/статус/роль).
+    if admin.role != "admin" and (user.role == "admin" or body.role == "admin"):
+        raise HTTPException(status_code=403, detail="Лише адміністратор може керувати обліковими записами admin")
     if body.full_name is not None:
         user.full_name = body.full_name
     if body.role is not None:

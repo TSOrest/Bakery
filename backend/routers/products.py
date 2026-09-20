@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Product
 from backend.schemas.references import ProductCreate, ProductUpdate, ProductOut
-from backend.routers.auth import require_admin, require_user
+from backend.routers.auth import require_perm, require_user
 
 router = APIRouter(prefix="/products", tags=["Вироби"])
 
@@ -59,7 +59,7 @@ def get_product(product_id: int, db: Session = Depends(get_db), _=Depends(requir
 
 
 @router.post("/", response_model=ProductOut, status_code=201)
-def create_product(data: ProductCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_product(data: ProductCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.create"))):
     from datetime import datetime
     p = Product(**data.model_dump(), created_at=datetime.now().isoformat())
     db.add(p)
@@ -69,7 +69,7 @@ def create_product(data: ProductCreate, db: Session = Depends(get_db), _=Depends
 
 
 @router.put("/{product_id}", response_model=ProductOut)
-def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.edit"))):
     p = db.get(Product, product_id)
     if not p:
         raise HTTPException(status_code=404, detail="Виріб не знайдено")
@@ -81,7 +81,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
 
 
 @router.delete("/{product_id}")
-def deactivate_product(product_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def deactivate_product(product_id: int, db: Session = Depends(get_db), _=Depends(require_perm("admin_goods.delete"))):
     """М'яке видалення — ставимо is_active=0.
 
     На відміну від маршрутів (deactivate_route), тут НЕ блокує дію —

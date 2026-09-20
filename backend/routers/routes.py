@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db, safe_commit
 from backend.models.references import Client, Route
 from backend.schemas.references import RouteCreate, RouteUpdate, RouteOut
-from backend.routers.auth import require_user, require_admin
+from backend.routers.auth import require_user, require_perm
 
 router = APIRouter(prefix="/routes", tags=["Маршрути"])
 
@@ -20,7 +20,7 @@ def list_routes(active_only: bool = True, db: Session = Depends(get_db), _=Depen
 
 
 @router.post("/", response_model=RouteOut, status_code=201)
-def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(require_perm("admin_clients.create"))):
     r = Route(**data.model_dump())
     db.add(r)
     safe_commit(db, conflict_msg="Маршрут із такою назвою вже існує")
@@ -29,7 +29,7 @@ def create_route(data: RouteCreate, db: Session = Depends(get_db), _=Depends(req
 
 
 @router.put("/{route_id}", response_model=RouteOut)
-def update_route(route_id: int, data: RouteUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_route(route_id: int, data: RouteUpdate, db: Session = Depends(get_db), _=Depends(require_perm("admin_clients.edit"))):
     r = db.get(Route, route_id)
     if not r:
         raise HTTPException(status_code=404, detail="Маршрут не знайдено")
@@ -61,7 +61,7 @@ def deactivate_route(
                     "Якщо не вказано і клієнти є — 409 Conflict.",
     ),
     db: Session = Depends(get_db),
-    _=Depends(require_admin),
+    _=Depends(require_perm("admin_clients.delete")),
 ):
     """
     Деактивує маршрут.
