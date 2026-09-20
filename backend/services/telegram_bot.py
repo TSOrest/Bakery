@@ -420,6 +420,10 @@ def _report_orders() -> str:
 
 
 def _report_baking() -> str:
+    """За замовчуванням показує ЛИШЕ невведені позиції (baked_qty IS NULL) —
+    пропозиція з QA-аудиту: повний список зі спечених + невведених був
+    занадто довгим, коли завдань багато, і губив головне — що ще треба
+    ввести. Підсумок (Замовлено/Спечено/%) лишається по УСІХ завданнях."""
     today = date.today().isoformat()
     with SessionLocal() as db:
         tasks = db.query(BakingTask).filter(BakingTask.task_date == today).all()
@@ -440,19 +444,22 @@ def _report_baking() -> str:
     bar_filled = int(pct / 10)
     bar = "█" * bar_filled + "░" * (10 - bar_filled)
 
+    pending = [t for t in tasks if t.baked_qty is None]
+
     lines = [
         f"🍞 <b>Випічка {today}</b>",
         f"Замовлено: {ordered:.0f} / Спечено: {baked:.0f}",
         f"[{bar}] {pct}%",
         "",
     ]
-    for t in tasks:
-        if t.baked_qty is None:
-            status, baked_str = "⏳", "?"
-        else:
-            status = "✅" if t.baked_qty >= t.ordered_qty else "⏳"
-            baked_str = f"{t.baked_qty:.0f}"
-        lines.append(f"{status} {products.get(t.product_id, '?')}: {baked_str}/{t.ordered_qty:.0f}")
+    if not pending:
+        lines.append("✅ Усі позиції введено")
+        return "\n".join(lines)
+
+    lines.append(f"⏳ Ще не введено: {len(pending)} з {len(tasks)}")
+    lines.append("")
+    for t in pending:
+        lines.append(f"⏳ {products.get(t.product_id, '?')}: ?/{t.ordered_qty:.0f}")
     return "\n".join(lines)
 
 
@@ -468,24 +475,61 @@ def _daily_report_pdf_bytes() -> bytes:
 def _report_debts() -> str:
     """Список боржників — без клієнтів, чий "борг" складається лише з
     накладної, виставленої сьогодні (ще поточна операція, не борг, що
-    затримався — див. docstring get_all_balances())."""
+    затримався — див. docstring get_all_balances()). Згруповано за
+    маршрутом (пропозиція з QA-аудиту) — на великих списках персоналу
+    зручніше знаходити боржників по рейсу, з яким вони саме зараз працюють,
+    ніж по єдиному алфавітному/сумовому списку."""
     today = date.today().isoformat()
     with SessionLocal() as db:
         balances = get_all_balances(db, exclude_invoice_dates=[today])
 
     # Лише client_kind='customer' — див. коментар у _report_finance().
-    debtors = sorted(
-        [b for b in balances if b.balance < 0 and b.client_kind == "customer"],
-        key=lambda b: b.balance,
-    )
+    debtors = [b for b in balances if b.balance < 0 and b.client_kind == "customer"]
     if not debtors:
         return "✅ Боргів немає!"
 
-    lines = ["📉 <b>Борги клієнтів</b>"]
+    groups: dict[str, list] = {}
     for b in debtors:
-        name = b.short_name or b.client_name
-        lines.append(f"• {name}: <b>{_fmt(b.balance)} грн</b>")
+        groups.setdefault(b.route_name or "Без маршруту", []).append(b)
+
+    lines = ["📉 <b>Борги клієнтів</b>"]
+    for route_name in sorted(groups, key=lambda r: (r == "Без маршруту", r)):
+        lines.append(f"\n🚚 <b>{route_name}</b>")
+        for b in sorted(groups[route_name], key=lambda b: b.balance):
+            name = b.short_name or b.client_name
+            lines.append(f"• {name}: <b>{_fmt(b.balance)} грн</b>")
     lines.append(f"\nВсього: {_fmt(sum(b.balance for b in debtors))} грн")
+    return "\n".join(lines)
+
+
+def _report_price(query: str) -> str:
+    """Пошук базової ціни виробу за назвою (до 5 збігів) — пропозиція з
+    QA-аудиту, дозволяє персоналу швидко відповісти клієнту по телефону
+    без переходу в застосунок. Пошук по Python-стороні (не SQL LIKE) —
+    SQLite LIKE регістронезалежний лише для ASCII, кириличні "Хліб"/"хліб"
+    не збігались би. client_id=0 у get_price() — гарантовано неіснуючий
+    клієнт, тож функція завжди повертає БАЗОВУ ціну без жодної знижки."""
+    query = query.strip()
+    if not query:
+        return "Введіть назву товару: /ціна <назва>"
+
+    today = date.today().isoformat()
+    q_lower = query.lower()
+    with SessionLocal() as db:
+        products = (
+            db.query(Product)
+            .filter(Product.is_active == 1)
+            .order_by(Product.name)
+            .all()
+        )
+        matches = [p for p in products if q_lower in p.name.lower()][:5]
+        if not matches:
+            return f"Товар за запитом «{query}» не знайдено."
+
+        lines = [f"💵 <b>Ціни за запитом «{query}»</b>"]
+        for p in matches:
+            price = get_price(db, p.id, 0, today) or 0
+            lines.append(f"• {p.name}: <b>{_fmt(price)} грн</b>")
     return "\n".join(lines)
 
 
@@ -493,9 +537,10 @@ STAFF_HELP = """\
 📌 <b>Команди бота Пекарня:</b>
 
 /report      (або /звіт)       — 💰 Стан фінансів на сьогодні (каса, борги, виручка)
-/debts       (або /борги)      — 📉 Повний список боржників
+/debts       (або /борги)      — 📉 Повний список боржників (по маршрутах)
 /orders      (або /замовлення) — 📋 Замовлення на сьогодні
-/baking      (або /випічка)    — 🍞 Стан випічки сьогодні
+/baking      (або /випічка)    — 🍞 Стан випічки сьогодні (лише невведене)
+/ціна        (або /price) &lt;назва&gt; — 💵 Базова ціна виробу за назвою
 /dailyreport (або /деньзвіт)   — 📄 Денний звіт пекарні (PDF) на сьогодні
 /help        (або /допомога)   — ❓ Ця підказка
 """
@@ -516,6 +561,7 @@ BOT_COMMANDS = [
     {"command": "debts",       "description": "📉 Борги клієнтів"},
     {"command": "orders",      "description": "📋 Замовлення сьогодні"},
     {"command": "baking",      "description": "🍞 Стан випічки"},
+    {"command": "price",       "description": "💵 Ціна виробу за назвою"},
     {"command": "dailyreport", "description": "📄 Денний звіт пекарні (PDF)"},
     {"command": "help",        "description": "❓ Список команд"},
 ]
@@ -953,6 +999,9 @@ def _handle_update(token: str, update: dict) -> None:
             _send(token, chat_id, _report_orders(), kb)
         elif cmd_base in ("/baking", "/випічка") or text == "🍞 Випічка":
             _send(token, chat_id, _report_baking(), kb)
+        elif cmd_base in ("/ціна", "/price"):
+            query = text.split(maxsplit=1)[1] if len(text.split()) > 1 else ""
+            _send(token, chat_id, _report_price(query), kb)
         elif cmd_base in ("/dailyreport", "/деньзвіт") or text == "📄 Денний звіт":
             today = date.today().isoformat()
             _send(token, chat_id, "⏳ Генерую PDF звіту...")

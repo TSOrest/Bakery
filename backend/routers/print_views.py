@@ -136,6 +136,51 @@ def _obmin_getter(exch_by_product: dict[int, float]):
     return get
 
 
+from functools import lru_cache
+import base64
+from io import BytesIO
+
+
+@lru_cache(maxsize=8)
+def _bot_qr_png_bytes(bot_username: str) -> bytes:
+    """PNG-байти QR-коду на `t.me/<username>` — контент однаковий для будь-
+    якої накладної (посилання на бота, не дані конкретної накладної), тож
+    кешуємо за юзернеймом: пакетний друк (`/print/invoices`, 2 на A4) не
+    перегенеровує один і той самий QR на кожен з десятків рахунків."""
+    import qrcode
+    img = qrcode.make(f"https://t.me/{bot_username}", box_size=4, border=1)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _bot_qr_enabled_username(cfg: dict) -> Optional[str]:
+    """Повертає юзернейм бота якщо QR на накладній увімкнено і налаштований,
+    інакше None. Пропозиція з QA-аудиту — за замовчуванням ВИМКНЕНО
+    (`invoice_bot_qr_enabled`, 0/1), перемикач AdminPage → Налаштування →
+    Параметри пекарні → Додаткові функції."""
+    if cfg.get("invoice_bot_qr_enabled", "0") != "1":
+        return None
+    username = (cfg.get("telegram_bot_username") or "").strip().lstrip("@")
+    return username or None
+
+
+def _bot_qr_html(cfg: dict) -> str:
+    """HTML-варіант QR-блоку (render_invoice_block, друк у браузері)."""
+    username = _bot_qr_enabled_username(cfg)
+    if not username:
+        return ""
+    try:
+        uri = "data:image/png;base64," + base64.b64encode(_bot_qr_png_bytes(username)).decode("ascii")
+    except Exception:
+        return ""
+    return f'''
+  <div class="bot-qr">
+    <img src="{uri}" width="56" height="56" alt="QR">
+    <div>Замовляйте<br>через бот</div>
+  </div>'''
+
+
 def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = False) -> str:
     bakery_name = cfg.get("bakery_name", "Пекарня")
     city        = cfg.get("city", "")
@@ -313,6 +358,7 @@ def render_invoice_block(inv: Invoice, cfg: dict, db: Session, is_copy: bool = F
     <div>Прийняв:&nbsp;________________</div>
     <div>Відпускає:&nbsp;<i>Диспетчер</i></div>
   </div>
+  {_bot_qr_html(cfg)}
 </div>"""
 
 
@@ -391,6 +437,10 @@ body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; background:
   display: grid; grid-template-columns: 1fr 1fr;
   font-size: 9pt; margin-top: 1.5mm;
   border-top: 1px solid #bbb; padding-top: 1mm;
+}
+.bot-qr {
+  display: flex; align-items: center; gap: 2mm;
+  margin-top: 1.5mm; font-size: 7pt; color: #555;
 }
 
 /* ── Бейкінг ── */
@@ -507,7 +557,7 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
 
@@ -767,6 +817,18 @@ def render_invoice_pdf_bytes(inv: Invoice, db: Session) -> bytes:
     ]], colWidths=[W * 0.5, W * 0.5])
     sigs2.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1)]))
     story.append(sigs2)
+
+    bot_username = _bot_qr_enabled_username(cfg)
+    if bot_username:
+        try:
+            qr_img = Image(BytesIO(_bot_qr_png_bytes(bot_username)), width=14*mm, height=14*mm)
+            qr_row = Table([[qr_img, S("Замовляйте<br/>через бот", size=FS, color=colors.HexColor("#555555"))]],
+                            colWidths=[16*mm, W - 16*mm])
+            qr_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+            story.append(Spacer(1, 1*mm))
+            story.append(qr_row)
+        except Exception:
+            pass
 
     doc.build(story)
     return buf.getvalue()

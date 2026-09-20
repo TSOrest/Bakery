@@ -60,6 +60,8 @@ DEFAULT_SETTINGS = {
     "role_permissions":      ("",               "Права ролей (JSON)"),
     "invoice_exchange_inline": ("0",            "Обмін колонкою в накладній замість окремої секції (0/1)"),
     "enable_invoice_cancel":  ("0",             "Кнопка «Скасувати накладну» для чернеток/відправлених (0/1)"),
+    "invoice_bot_qr_enabled": ("0",             "QR-код Telegram-бота на друкованій накладній (0/1)"),
+    "telegram_bot_username":  ("",              "Юзернейм Telegram-бота без @ (для QR-коду на накладній)"),
     "cash_tracking_start_date": ("",            "Дата з якої відстежується залишок у касі (порожньо = завжди)"),
     "github_repo":           ("TSOrest/Bakery", "GitHub репозиторій (owner/repo)"),
     "github_client_id":      ("",               "GitHub OAuth App Client ID"),

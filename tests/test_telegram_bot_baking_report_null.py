@@ -43,6 +43,9 @@ def test_report_baking_does_not_crash_when_all_baked_qty_is_null(db_session):
 
 
 def test_report_baking_mixes_entered_and_not_entered(db_session):
+    """Пропозиція з QA-аудиту: за замовчуванням показуються ЛИШЕ невведені
+    позиції — вже введена (12/10) не дублюється в переліку, підсумок зверху
+    (Замовлено/Спечено) і так рахується по УСІХ завданнях."""
     db = db_session
     p1 = _mk_product(db, "Тест-Хліб-baking-mixed-1")
     p2 = _mk_product(db, "Тест-Хліб-baking-mixed-2")
@@ -54,5 +57,6 @@ def test_report_baking_mixes_entered_and_not_entered(db_session):
 
     text = _report_baking()
 
-    assert "12/10" in text
+    assert "12/10" not in text
     assert "?/5" in text
+    assert "Ще не введено:" in text

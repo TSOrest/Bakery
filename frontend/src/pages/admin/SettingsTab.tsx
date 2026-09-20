@@ -24,6 +24,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   order_past_days:          'Днів назад для редагування замовлень',
   work_date_next_day_time:  'Час переходу дати роботи на завтра',
   cash_tracking_start_date: 'Дата початку обліку каси (РРРР-ММ-ДД, порожньо = завжди)',
+  telegram_bot_username:    'Юзернейм Telegram-бота (без @, для QR на накладній)',
 }
 
 export type SettingsSection = 'settings_bakery' | 'settings_bot' | 'settings_bot_tpl' | 'settings_issues'
@@ -55,6 +56,7 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
       // незалежно від збереженого значення.
       vals['invoice_exchange_inline'] = data['invoice_exchange_inline']?.value ?? '0'
       vals['enable_invoice_cancel'] = data['enable_invoice_cancel']?.value ?? '0'
+      vals['invoice_bot_qr_enabled'] = data['invoice_bot_qr_enabled']?.value ?? '0'
       setForm(vals)
       setTgToken(data['telegram_bot_token']?.value ?? '')
       setTgPhones(data['telegram_allowed_phones']?.value ?? '')
@@ -216,6 +218,26 @@ export default function SettingsTab({ section }: { section: SettingsSection }) {
               <br />
               <span style={{ fontSize: '0.82rem', color: '#666' }}>
                 У Маршрутах з'являється кнопка «❌ Скасувати» для чернеток і відправлених накладних (без фінансових наслідків на цих стадіях). Прийняті накладні скасувати не можна — лише через «Корекцію».
+              </span>
+            </span>
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', maxWidth: 520, marginTop: '0.9rem' }}>
+            <input
+              type="checkbox"
+              checked={form['invoice_bot_qr_enabled'] === '1'}
+              onChange={(e) => {
+                const val = e.target.checked ? '1' : '0'
+                setForm(f => ({ ...f, invoice_bot_qr_enabled: val }))
+                api.put('/settings/', { invoice_bot_qr_enabled: val }).catch(() => {})
+              }}
+              style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+            />
+            <span>
+              <span style={{ fontWeight: 500 }}>QR-код бота на накладній</span>
+              <br />
+              <span style={{ fontSize: '0.82rem', color: '#666' }}>
+                На друкованій накладній (у браузері і PDF, яке бот надсилає клієнту) з'являється QR-код на Telegram-бота — клієнту простіше почати ним користуватись. Потребує заповненого поля «Юзернейм Telegram-бота» вище. Вимкнено за замовчуванням.
               </span>
             </span>
           </label>
