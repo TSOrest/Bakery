@@ -1034,6 +1034,13 @@ def print_baking(task_date: str, category_id: Optional[int] = None, db: Session 
         group = groups.get(cat.id, [])
         if not group:
             continue
+        # Алфавітний порядок за назвою виробу — раніше йшли за product_id
+        # (порядок внесення в довідник), плутаючи пекарів при пошуку
+        # виробу в друкованому завданні.
+        def _product_name(t: BakingTask) -> str:
+            p = db.get(Product, t.product_id)
+            return (p.name if p else "").lower()
+        group = sorted(group, key=_product_name)
         rows_html = ""
         total_ord = total_rec = 0.0
         for task in group:
