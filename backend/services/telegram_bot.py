@@ -27,6 +27,7 @@ import json
 import logging
 import threading
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
 import requests as rq
@@ -533,8 +534,20 @@ def _report_price(query: str) -> str:
     return "\n".join(lines)
 
 
-STAFF_HELP = """\
-📌 <b>Команди бота Пекарня:</b>
+def _read_version() -> str:
+    """Поточна версія застосунку з кореневого файлу VERSION — той самий
+    файл і формат, що вже читає `backend/routers/backup.py::_read_version()`
+    (напр. для /settings/server-info). Дублюється тут, а не імпортується
+    звідти, щоб не тягнути router-модуль у сервіс бота. Читається на
+    кожен виклик /help (не кешується) — версія міняється лише через
+    оновлення, яке й так перезапускає весь процес."""
+    f = Path(__file__).parent.parent.parent / "VERSION"
+    return f.read_text(encoding="utf-8-sig").strip() if f.exists() else "?"
+
+
+def _staff_help_text() -> str:
+    return f"""\
+📌 <b>Команди бота Пекарня</b> (версія {_read_version()}):
 
 /report      (або /звіт)       — 💰 Стан фінансів на сьогодні (каса, борги, виручка)
 /debts       (або /борги)      — 📉 Повний список боржників (по маршрутах)
@@ -1062,9 +1075,9 @@ def _handle_update(token: str, update: dict) -> None:
                 log.warning("Daily report PDF generation failed: %s", exc)
                 _send(token, chat_id, "⚠ Не вдалося згенерувати PDF звіту.", kb)
         elif cmd_base in ("/help", "/допомога") or text == "❓ Допомога":
-            _send(token, chat_id, STAFF_HELP, kb)
+            _send(token, chat_id, _staff_help_text(), kb)
         elif text:
-            _send(token, chat_id, "Невідома команда.\n\n" + STAFF_HELP, kb)
+            _send(token, chat_id, "Невідома команда.\n\n" + _staff_help_text(), kb)
         return
 
     # ── Клієнт ──
