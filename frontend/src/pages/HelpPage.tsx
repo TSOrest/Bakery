@@ -62,15 +62,6 @@ export default function HelpPage() {
         style={{ width: '100%', padding: '0.45rem 0.75rem', border: '1px solid #c0d0e0', borderRadius: 6, fontSize: '0.9rem', marginBottom: '1rem', boxSizing: 'border-box' }}
       />
 
-      {/* Навігація */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1.25rem' }}>
-        {SECTIONS.map(s => (
-          <a key={s.id} href={`#${s.id}`} style={{ textDecoration: 'none', padding: '0.25rem 0.7rem', background: '#e8f0f8', borderRadius: 12, fontSize: '0.8rem', color: '#1a3a5c', fontWeight: 600 }}>
-            {s.label}
-          </a>
-        ))}
-      </div>
-
       {/* ─── ПОЧАТОК РОБОТИ ─────────────────────────────────────── */}
       <Section id="start">
         <h2 style={h2}>Загальні принципи</h2>
