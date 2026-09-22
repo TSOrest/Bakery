@@ -1251,7 +1251,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
   const [cashActual, setCashActual]     = useState('')
   const [confirmNotes, setConfirmNotes] = useState('')
   const [saving, setSaving]             = useState(false)
-  const [products, setProducts]         = useState<{ id: number; name: string }[]>([])
+  const [products, setProducts]         = useState<{ id: number; name: string; category_id: number | null }[]>([])
+  const [categories, setCategories]     = useState<{ id: number; name: string }[]>([])
   const [clients, setClients]           = useState<ClientOption[]>([])
   const [posSales, setPosSales]         = useState<Record<string, { qty: number; amount: number }>>({})
   const posTotalRef                     = useRef(0)
@@ -1283,10 +1284,11 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
     }
   }
 
-  // Завантаження products+clients для модального вибору; initRec — closure-stable
+  // Завантаження products+categories+clients для модального вибору; initRec — closure-stable
   useEffect(() => {
     initRec()
-    api.get<{ id: number; name: string }[]>('/products/?active_only=true').then(setProducts)
+    api.get<{ id: number; name: string; category_id: number | null }[]>('/products/?active_only=true').then(setProducts)
+    api.get<{ id: number; name: string; is_baked: number }[]>('/categories').then(setCategories)
     api.get<{ id: number; full_name: string; short_name: string | null; client_kind: string }[]>(
       '/clients/?active_only=true'
     ).then((raw) =>
@@ -1446,6 +1448,8 @@ function ReconciliationModal({ shopId, shopName, workDate, onClose }: {
               <ReconciliationTable
                 rec={activeRec}
                 clients={clients}
+                products={products}
+                categories={categories}
                 productName={productName}
                 workDate={workDate}
                 posSales={posSales}
@@ -1539,10 +1543,12 @@ function calcAgeDays(batchDate: string | null, workDate: string): number | null 
 }
 
 function ReconciliationTable({
-  rec, clients, productName, workDate, posSales, onUpdate, onAddDisposal, onDeleteDisposal,
+  rec, clients, products, categories, productName, workDate, posSales, onUpdate, onAddDisposal, onDeleteDisposal,
 }: {
   rec: Reconciliation
   clients: ClientOption[]
+  products: { id: number; name: string; category_id: number | null }[]
+  categories: { id: number; name: string }[]
   productName: (id: number) => string
   workDate: string
   posSales: Record<string, { qty: number; amount: number }>
@@ -1616,6 +1622,38 @@ function ReconciliationTable({
   const clientLabel = (id: number | null) =>
     id ? (clients.find((c) => c.id === id)?.label ?? `#${id}`) : ''
 
+  // Групуємо рядки по категорії виробу (Хліб/Булка/Інше — оператори
+  // просили не бачити все впереміш) — той самий принцип, що вже є в
+  // read-only перегляді минулих звірок нижче в цьому файлі (сортування
+  // груп за sort_order довідника, "Без категорії" завжди в кінці).
+  const catIndexOf = new Map<number, number>()
+  categories.forEach((c, i) => catIndexOf.set(c.id, i))
+  const catNameOf = (catId: number | null) =>
+    catId != null ? (categories.find((c) => c.id === catId)?.name ?? `Категорія #${catId}`) : 'Без категорії'
+
+  const groupMap = new Map<number | null, typeof lines>()
+  for (const line of lines) {
+    const catId = products.find((p) => p.id === line.product_id)?.category_id ?? null
+    if (!groupMap.has(catId)) groupMap.set(catId, [])
+    groupMap.get(catId)!.push(line)
+  }
+  const sortedGroups = [...groupMap.entries()]
+    .map(([catId, rows]) =>
+      [catId, [...rows].sort((a, b) => productName(a.product_id).localeCompare(productName(b.product_id), 'uk'))] as const
+    )
+    .sort(([a], [b]) => {
+      if (a === null && b !== null) return 1
+      if (a !== null && b === null) return -1
+      const ia = a != null ? catIndexOf.get(a) ?? 999 : 999
+      const ib = b != null ? catIndexOf.get(b) ?? 999 : 999
+      return ia - ib
+    })
+  // Плаский порядок рядків У ТОМУ САМОМУ порядку, що й рендер — inputRefs
+  // і Tab/Enter-навігація мають рухатись візуально зверху вниз, а не за
+  // порядком rec.lines з бекенду (який групування ігнорує).
+  const idxByLineId = new Map<number, number>()
+  sortedGroups.flatMap(([, rows]) => rows).forEach((l, i) => idxByLineId.set(l.id, i))
+
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={tableStyle}>
@@ -1633,7 +1671,15 @@ function ReconciliationTable({
           </tr>
         </thead>
         <tbody>
-          {lines.map((line, idx) => {
+          {sortedGroups.map(([catId, catRows]) => (
+          <React.Fragment key={`grp-${catId ?? 'null'}`}>
+            <tr style={{ background: '#dbe4f0' }}>
+              <td colSpan={9} style={{ ...tdStyle, fontWeight: 700, color: '#1a3a5c', fontSize: '0.8rem', padding: '4px 0.7rem' }}>
+                {catNameOf(catId)}
+              </td>
+            </tr>
+            {catRows.map((line) => {
+            const idx            = idxByLineId.get(line.id)!
             const available      = line.opening_balance + line.received
             const posKey         = `${line.product_id}-${line.batch_date ?? 'null'}`
             const posInfo        = posSales[posKey]
@@ -1831,7 +1877,9 @@ function ReconciliationTable({
                 )}
               </React.Fragment>
             )
-          })}
+            })}
+          </React.Fragment>
+          ))}
         </tbody>
         <tfoot>
           <tr style={{ background: '#f0f4f8', fontWeight: 700 }}>
