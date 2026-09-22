@@ -410,10 +410,11 @@ function ShopTabContent({
   const totalStockUnits = stock.reduce((s, x) => s + (x.current_balance > 0 ? x.current_balance : 0), 0)
 
   return (
-    <>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Поточні залишки магазину: групи поряд горизонтально (wrap) ── */}
       {stockByCategory.length > 0 && (
         <div style={{
+          flexShrink: 0,
           marginBottom: 10, padding: '8px 12px', background: '#f8fafc',
           border: '1px solid #e2e8f0', borderRadius: 8, fontSize: '0.82rem',
           maxHeight: 220, overflowY: 'auto',
@@ -474,7 +475,7 @@ function ShopTabContent({
       )}
 
       {/* Календар звірок (кнопка + надходження в лівій колонці, деталі у правій) */}
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <ReconciliationCalendar
           shopId={shopId}
           products={products}
@@ -514,7 +515,7 @@ function ShopTabContent({
           onSaved={() => { setHasOpeningRec(true); setShowOpeningModal(false); onRefresh() }}
         />
       )}
-    </>
+    </div>
   )
 }
 
