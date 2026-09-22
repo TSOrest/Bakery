@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { api } from '../api/client'
 
 const SECTIONS = [
   { id: 'start',    label: '🚀 Початок роботи' },
@@ -23,7 +24,7 @@ const badge = (color: string, bg: string, text: string) => (
 )
 
 function Section({ id, children }: { id: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const sec = SECTIONS.find(s => s.id === id)!
   return (
     <div id={id} style={{ marginBottom: '0.5rem', border: '1px solid #e0eaf4', borderRadius: 8, overflow: 'hidden' }}>
@@ -41,6 +42,13 @@ function Section({ id, children }: { id: string; children: React.ReactNode }) {
 
 export default function HelpPage() {
   const [search, setSearch] = useState('')
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.get<{ app_version: string }>('/settings/server-info')
+      .then(info => setVersion(info.app_version || null))
+      .catch(() => {})
+  }, [])
 
   return (
     <div style={{ maxWidth: 820, margin: '0 auto', padding: '1rem 1.5rem', fontFamily: 'system-ui, sans-serif', color: '#2c3e50' }}>
@@ -340,12 +348,12 @@ export default function HelpPage() {
         <p style={p}>Перевірте статус бота у вкладці Замовлення (кнопка зеленого/червоного кольору у правому верхньому куті таблиці). Якщо «Прийом зупинено» — натисніть кнопку відновлення.</p>
 
         <div style={{ ...tip, marginTop: '1.5rem' }}>
-          💬 Якщо щось не працює або потрібна допомога — натисніть кнопку <strong>💬</strong> у правому нижньому куті для відправки повідомлення розробнику.
+          💬 Якщо щось не працює або потрібна допомога — натисніть кнопку <strong>💬</strong> у шапці (поруч із дзвоником сповіщень) для відправки повідомлення розробнику.
         </div>
       </Section>
 
       <div style={{ textAlign: 'center', color: '#999', fontSize: '0.78rem', marginTop: '2rem', paddingTop: '1rem', borderTop: '1px solid #e0eaf4' }}>
-        Пекарня — система управління · Версія {import.meta.env.VITE_APP_VERSION ?? '—'}
+        Пекарня — система управління · Версія {version ?? '…'}
       </div>
     </div>
   )

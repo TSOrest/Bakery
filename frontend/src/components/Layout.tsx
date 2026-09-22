@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import styles from './Layout.module.css'
 import IssuesWidget from './IssuesWidget'
 import NotificationBell from './NotificationBell'
+import HelpPopup from './HelpPopup'
 
 function localDateISO(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -29,6 +30,7 @@ export default function Layout() {
   const [effectiveDate,    setEffectiveDate]    = useState(() => computeEffectiveDate('18:00'))
   const [shopPriceAlert,   setShopPriceAlert]   = useState(false)
   const [demoActive,       setDemoActive]       = useState(false)
+  const [helpOpen,         setHelpOpen]         = useState(false)
 
   // Для періодичної перевірки переходу дати (нижче) без перестворення
   // таймера при кожній зміні стану.
@@ -181,7 +183,13 @@ export default function Layout() {
           <div className={styles.headerRight} ref={rightRef}>
             <NotificationBell />
             <IssuesWidget />
-            <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
+            <button
+              onClick={() => setHelpOpen(v => !v)}
+              className={helpOpen ? `${styles.tab} ${styles.active}` : styles.tab}
+              title="Довідник користувача"
+              style={{ fontSize: '1rem', padding: '0.3rem 0.6rem', border: 'none', background: helpOpen ? undefined : 'none', cursor: 'pointer' }}
+            >❓</button>
+            {helpOpen && <HelpPopup onClose={() => setHelpOpen(false)} />}
             <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
               <span>Дата роботи:</span>
               <input

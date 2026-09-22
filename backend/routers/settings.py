@@ -17,6 +17,7 @@ from backend.models.auth import User, UserSession
 from backend.models.notifications import create_notification
 from backend.models.settings import Setting
 from backend.routers.auth import require_user, require_perm, require_install_update_perm
+from backend.routers.backup import _read_version
 from backend.schemas.notifications import RequestUpdateIn
 from backend.services import telegram_bot as tg
 
@@ -319,7 +320,7 @@ def server_info(_: User = Depends(require_user)):
         except Exception as exc2:
             log.warning("Both IP detection methods failed: %s", exc2)
     port = int(os.environ.get("BAKERY_PORT", 8000))
-    return {"local_ip": ip, "port": port}
+    return {"local_ip": ip, "port": port, "app_version": _read_version()}
 
 
 @router.delete("/telegram/authorized/{chat_id}")
