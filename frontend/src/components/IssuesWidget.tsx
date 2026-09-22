@@ -417,9 +417,12 @@ export default function IssuesWidget() {
   return (
     <>
       <button
-        className={styles.fab}
         onClick={() => { setOpen(true); setSuccess(''); setError('') }}
         title="Звернення та підтримка"
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: '1.15rem', padding: '0.3rem 0.4rem', lineHeight: 1,
+        }}
       >
         💬
       </button>

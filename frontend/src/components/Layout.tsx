@@ -180,6 +180,7 @@ export default function Layout() {
           {!navWraps && <nav className={styles.nav}>{tabsContent}</nav>}
           <div className={styles.headerRight} ref={rightRef}>
             <NotificationBell />
+            <IssuesWidget />
             <NavLink to="/help" className={({ isActive }) => isActive ? `${styles.tab} ${styles.active}` : styles.tab} title="Довідник користувача" style={{ fontSize: '1rem', padding: '0.3rem 0.6rem' }}>❓</NavLink>
             <label className={`${styles.datePicker} ${workDate !== effectiveDate ? styles.datePickerWarn : ''}`}>
               <span>Дата роботи:</span>
@@ -225,7 +226,6 @@ export default function Layout() {
       <main className={styles.main}>
         <Outlet />
       </main>
-      <IssuesWidget />
     </div>
   )
 }
